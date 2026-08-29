@@ -1,0 +1,6 @@
+{
+  "name": "ZeroLeak",
+  "description": "AI Powered Secure Exam Paper Generation and Protection platform for verified educational organizations and examination authorities.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
