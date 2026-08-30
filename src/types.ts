@@ -37,7 +37,40 @@ export type OrgVerificationStatus =
   | 'MANUAL_INDEPENDENT_REVIEW'
   | 'VERIFIED'
   | 'REJECTED'
-  | 'VERIFICATION_REQUIRED';
+  | 'VERIFICATION_REQUIRED'
+  | 'PENDING_VERIFICATION'
+  | 'VERIFICATION_FAILED';
+
+// Result of the Stage-1 rule-based verification engine (mirrors server/verification.ts).
+export interface RegistrationVerificationCheck {
+  id: string;
+  label: string;
+  status: 'PASS' | 'PENDING' | 'FAIL';
+  detail: string;
+}
+
+export interface RegistrationDocumentDetail {
+  doc_type: string;
+  file_name: string;
+  file_size: number;
+  sha256: string | null;
+  extraction_status: 'EXTRACTED' | 'UNAVAILABLE' | 'CORRUPT' | 'MISSING';
+  match_status: 'MATCH' | 'MISMATCH' | 'UNVERIFIED';
+  detail: string;
+}
+
+export interface RegistrationVerificationResult {
+  status: 'VERIFIED' | 'PENDING_VERIFICATION' | 'VERIFICATION_FAILED';
+  verificationMethod: string;
+  verificationSource: string | null;
+  verificationDate: string;
+  documentVerificationStatus: 'VERIFIED' | 'PENDING' | 'FAILED';
+  message: string;
+  evidence: {
+    checks: RegistrationVerificationCheck[];
+    documents: RegistrationDocumentDetail[];
+  };
+}
 
 export interface Organization {
   id: string;
@@ -91,6 +124,7 @@ export interface TrustedDevice {
   status: 'TRUSTED' | 'PENDING_APPROVAL' | 'REVOKED';
   registered_at: string;
   last_seen_at: string;
+  public_key?: string;
 }
 
 export type ExamCategory =

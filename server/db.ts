@@ -512,6 +512,20 @@ function initializeSchema(db: Database) {
   safeAddColumn('question_translations', 'org_id TEXT');
   safeAddColumn('question_translations', 'assignment_id TEXT');
   safeAddColumn('question_translations', 'source_language TEXT DEFAULT "English"');
+
+  // Two-stage registration: Stage-1 verification-engine result columns
+  safeAddColumn('organizations', 'verification_method TEXT');
+  safeAddColumn('organizations', 'verification_source TEXT');
+  safeAddColumn('organizations', 'verification_message TEXT');
+  safeAddColumn('organizations', 'verified_at TEXT');
+  // Stage-1 per-document evidence (SHA-256 hash + extraction/match outcome)
+  safeAddColumn('organization_documents', 'doc_hash TEXT');
+  safeAddColumn('organization_documents', 'extraction_status TEXT');
+  safeAddColumn('organization_documents', 'match_status TEXT');
+  // Stage-2 device binding: WebCrypto public key + challenge-response nonce
+  safeAddColumn('trusted_devices', 'public_key TEXT');
+  safeAddColumn('trusted_devices', 'challenge_nonce TEXT');
+  safeAddColumn('trusted_devices', 'challenge_expires_at TEXT');
 }
 
 // Generic SQL helper functions for clean execution

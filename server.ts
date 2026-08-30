@@ -13,8 +13,12 @@ import {
   calculateThreatAnomalyScore,
   generateCopyId,
   generateTxHash,
+  verifyDeviceSignature,
+  generateDeviceChallenge,
+  deviceFingerprintFromPublicKey,
   EncryptedPaperPayload,
 } from './server/crypto.ts';
+import { runOrganizationVerification, type OrgVerificationInput } from './server/verification.ts';
 import {
   analyzeTheoryPatternWithAI,
   checkQuestionSimilarityWithAI,
@@ -68,6 +72,30 @@ async function startServer() {
     jwt.verify(token, JWT_SECRET, (err: any, decoded: any) => {
       if (err) {
         return res.status(403).json({ error: 'Session token invalid or expired. Please re-authenticate.' });
+      }
+      req.user = decoded as AuthenticatedUser;
+      next();
+    });
+  };
+
+  // Registration-scoped token middleware (Stage 2 device binding only).
+  // Issued exclusively after a Stage-1 VERIFIED result. It carries
+  // purpose === 'DEVICE_BINDING' and must NOT be accepted as a full session token,
+  // nor may a full session token be used to drive device binding.
+  const authenticateRegistrationToken = (req: Request, res: Response, next: NextFunction) => {
+    const authHeader = req.headers['authorization'];
+    const token = authHeader && authHeader.split(' ')[1];
+
+    if (!token) {
+      return res.status(401).json({ error: 'Device-binding session required. No token provided.' });
+    }
+
+    jwt.verify(token, JWT_SECRET, (err: any, decoded: any) => {
+      if (err) {
+        return res.status(403).json({ error: 'Device-binding session invalid or expired. Restart registration.' });
+      }
+      if (!decoded || decoded.purpose !== 'DEVICE_BINDING') {
+        return res.status(403).json({ error: 'This token is not authorized for device binding.' });
       }
       req.user = decoded as AuthenticatedUser;
       next();
@@ -494,6 +522,410 @@ async function startServer() {
       return res.json({ user: users[0] });
     } catch (e: any) {
       return res.status(500).json({ error: e.message });
+    }
+  });
+
+  // ==========================================
+  // 1b. PUBLIC TWO-STAGE REGISTRATION
+  //     STAGE 1: Organization Registration & Verification (rule-based engine)
+  //     STAGE 2: Organization Owner Device Binding (ECDSA challenge-response)
+  // Additive & public — leaves the authenticated /api/organizations/* and
+  // /api/devices/* owner-dashboard endpoints untouched.
+  // ==========================================
+
+  // STAGE 1 — Verify an organization (PUBLIC). Runs the deterministic, rule-based
+  // verification engine. On VERIFIED, and ONLY then, creates the ORG_OWNER account
+  // (no trusted device yet) and returns a device-binding-scoped token that unlocks
+  // Stage 2. PENDING/FAILED create no account and return no token.
+  app.post('/api/registration/verify-organization', async (req: Request, res: Response) => {
+    try {
+      const {
+        name, type, reg_number, auth_id, official_email, website, address, contact,
+        rep_name, rep_designation, rep_contact, rep_email,
+        account, documents,
+      } = req.body || {};
+
+      // Owner login credentials (kept separate from org fields).
+      const acct = account || {};
+      const ownerEmail = (acct.email || rep_email || official_email || '').trim();
+      const ownerUsername = (acct.username || ownerEmail || '').trim();
+      const ownerPassword = acct.password || '';
+      const ownerFullName = (rep_name || acct.full_name || '').trim();
+
+      const orgId = `ORG-${uuidv4().substring(0, 8).toUpperCase()}`;
+      const now = new Date().toISOString();
+
+      await logAuditEvent({
+        event_type: 'ORGANIZATION_REGISTRATION_STARTED',
+        org_id: orgId,
+        ip_address: req.ip,
+        details: { org_name: name, reg_number, official_email },
+      });
+
+      const engineInput: OrgVerificationInput = {
+        name, type, reg_number, auth_id, official_email, website, address, contact,
+        rep_name, rep_email: rep_email || ownerEmail,
+        documents: Array.isArray(documents) ? documents : [],
+      };
+
+      await logAuditEvent({
+        event_type: 'ORGANIZATION_VERIFICATION_STARTED',
+        org_id: orgId,
+        ip_address: req.ip,
+        details: { org_name: name, document_count: engineInput.documents.length },
+      });
+
+      // ---- run the rule-based engine (AI/OCR may extract; rules decide) --------
+      const result = await runOrganizationVerification(engineInput);
+
+      const db = await getDb();
+
+      // Persist the organization with the engine's verdict.
+      executeRun(
+        db,
+        `INSERT INTO organizations (id, name, type, reg_number, auth_id, official_email, website, address, contact, status, domain_verified, verification_method, verification_source, verification_message, verified_at, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        [
+          orgId,
+          name || 'Unnamed Organization',
+          type || 'University / Examination Board',
+          reg_number || '',
+          auth_id || reg_number || '',
+          official_email || '',
+          website || '',
+          address || '',
+          contact || '',
+          result.status,
+          result.evidence.checks.find((c) => c.id === 'email_domain')?.status === 'PASS' ? 1 : 0,
+          result.verificationMethod,
+          result.verificationSource,
+          result.message,
+          result.status === 'VERIFIED' ? now : null,
+          now,
+          now,
+        ]
+      );
+
+      // Persist each submitted document with its SHA-256 hash + extraction/match evidence.
+      const submitted = Array.isArray(documents) ? documents : [];
+      for (let i = 0; i < result.evidence.documents.length; i++) {
+        const ev = result.evidence.documents[i];
+        const src = submitted[i] || {};
+        const docId = uuidv4();
+
+        await logAuditEvent({
+          event_type: 'DOCUMENT_UPLOADED',
+          org_id: orgId,
+          ip_address: req.ip,
+          details: { doc_type: ev.doc_type, file_name: ev.file_name, file_size: ev.file_size },
+        });
+        if (ev.sha256) {
+          await logAuditEvent({
+            event_type: 'DOCUMENT_HASH_GENERATED',
+            org_id: orgId,
+            ip_address: req.ip,
+            details: { doc_type: ev.doc_type, file_name: ev.file_name, sha256: ev.sha256 },
+          });
+        }
+
+        executeRun(
+          db,
+          `INSERT INTO organization_documents (id, org_id, doc_type, file_name, file_size, file_data, status, doc_hash, extraction_status, match_status, uploaded_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          [
+            docId,
+            orgId,
+            ev.doc_type,
+            ev.file_name,
+            ev.file_size,
+            src.file_data || null,
+            ev.match_status === 'MATCH' ? 'VERIFIED' : ev.extraction_status === 'CORRUPT' ? 'INVALID' : 'PENDING_REVIEW',
+            ev.sha256,
+            ev.extraction_status,
+            ev.match_status,
+            now,
+          ]
+        );
+      }
+
+      // Verification history row.
+      executeRun(
+        db,
+        `INSERT INTO organization_verifications (id, org_id, previous_status, new_status, changed_by, reason, verification_ref, created_at)
+         VALUES (?, ?, 'NONE', ?, 'VERIFICATION_ENGINE', ?, ?, ?)`,
+        [uuidv4(), orgId, result.status, result.message, `VER-REF-${uuidv4().substring(0, 8).toUpperCase()}`, now]
+      );
+
+      // Audit the completion outcome.
+      const outcomeEvent =
+        result.status === 'VERIFIED'
+          ? 'ORGANIZATION_VERIFICATION_COMPLETED'
+          : result.status === 'PENDING_VERIFICATION'
+            ? 'ORGANIZATION_VERIFICATION_PENDING'
+            : 'ORGANIZATION_VERIFICATION_FAILED';
+      await logAuditEvent({
+        event_type: outcomeEvent,
+        org_id: orgId,
+        ip_address: req.ip,
+        status: result.status === 'VERIFIED' ? 'SUCCESS' : 'REVIEW',
+        details: { status: result.status, source: result.verificationSource },
+      });
+
+      // Not VERIFIED → no account, no token. Return the evidence so the UI can show
+      // the substeps and the user stays in Stage 1.
+      if (result.status !== 'VERIFIED') {
+        return res.json({ result, orgId, token: null, user: null });
+      }
+
+      // VERIFIED → create the ORG_OWNER account (no trusted device yet — that is Stage 2).
+      if (!ownerEmail || !ownerPassword || !ownerFullName) {
+        return res.status(400).json({
+          error: 'Organization verified, but owner account details (name, email, password) are required to continue.',
+          result,
+          orgId,
+        });
+      }
+
+      const existing = executeQuery(db, 'SELECT id FROM users WHERE email = ? OR username = ?', [ownerEmail, ownerUsername]);
+      if (existing.length > 0) {
+        return res.status(400).json({
+          error: 'An account with this email or username already exists. Please sign in instead.',
+          result,
+          orgId,
+        });
+      }
+
+      const userId = uuidv4();
+      const passwordHash = await bcrypt.hash(ownerPassword, 10);
+      executeRun(
+        db,
+        `INSERT INTO users (id, org_id, email, username, password_hash, full_name, role, status, authorization_status, account_type, environment, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, 'ORG_OWNER', 'ACTIVE', 'AUTHORIZED', 'STANDARD', 'production', ?)`,
+        [userId, orgId, ownerEmail, ownerUsername, passwordHash, ownerFullName, now]
+      );
+
+      // Record the authorized representative.
+      executeRun(
+        db,
+        `INSERT INTO authorized_representatives (id, org_id, user_id, name, designation, email, contact, status, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, 'ACTIVE', ?)`,
+        [uuidv4(), orgId, userId, ownerFullName, rep_designation || 'Registrar / Authorized Signatory', ownerEmail, rep_contact || contact || '', now]
+      );
+
+      await logAuditEvent({
+        event_type: 'ORGANIZATION_OWNER_ACCOUNT_CREATED',
+        user_id: userId,
+        user_email: ownerEmail,
+        role: 'ORG_OWNER',
+        org_id: orgId,
+        ip_address: req.ip,
+        details: { full_name: ownerFullName },
+      });
+
+      // Device-binding-scoped token — NOT a full session token. Short-lived.
+      const bindingToken = jwt.sign(
+        { id: userId, email: ownerEmail, username: ownerUsername, role: 'ORG_OWNER', org_id: orgId, full_name: ownerFullName, purpose: 'DEVICE_BINDING' },
+        JWT_SECRET,
+        { expiresIn: '30m' }
+      );
+
+      return res.json({
+        result,
+        orgId,
+        token: bindingToken,
+        user: { id: userId, email: ownerEmail, username: ownerUsername, full_name: ownerFullName, role: 'ORG_OWNER', org_id: orgId },
+      });
+    } catch (e: any) {
+      console.error('Organization verification error:', e);
+      return res.status(500).json({ error: e.message || 'Internal verification error.' });
+    }
+  });
+
+  // STAGE 2a — Device-binding challenge (requires device-binding-scoped token).
+  // Server re-checks org.status === 'VERIFIED' and role === 'ORG_OWNER' — a user
+  // cannot bind a device for an unverified organization even with a valid token.
+  app.post('/api/registration/device-binding/challenge', authenticateRegistrationToken, async (req: Request, res: Response) => {
+    try {
+      const { public_key, device_name } = req.body || {};
+      if (!public_key) {
+        return res.status(400).json({ error: 'Device public key is required to begin binding.' });
+      }
+      if (req.user!.role !== 'ORG_OWNER') {
+        return res.status(403).json({ error: 'Only the organization owner may bind the initial device.' });
+      }
+
+      const db = await getDb();
+      const orgs = executeQuery(db, 'SELECT status FROM organizations WHERE id = ?', [req.user!.org_id]);
+      if (orgs.length === 0 || orgs[0].status !== 'VERIFIED') {
+        await logSecurityEvent({
+          event_type: 'PRE_UNLOCK_ACCESS_ATTEMPT',
+          severity: 'HIGH',
+          user_id: req.user!.id,
+          org_id: req.user!.org_id,
+          ip_address: req.ip,
+          details: { reason: 'Device binding attempted for non-VERIFIED organization' },
+        });
+        return res.status(403).json({ error: 'Organization is not verified. Device binding is not permitted.' });
+      }
+
+      const deviceId = uuidv4();
+      // Fingerprint derived from the device public key (stable per keypair).
+      const fingerprint = deviceFingerprintFromPublicKey(public_key);
+      const challenge = generateDeviceChallenge(32);
+      const now = new Date().toISOString();
+      const expiresAt = new Date(Date.now() + 5 * 60 * 1000).toISOString(); // 5-minute window
+
+      executeRun(
+        db,
+        `INSERT INTO trusted_devices (id, org_id, user_id, device_fingerprint, device_name, browser_os, ip_address, status, public_key, challenge_nonce, challenge_expires_at, registered_at, last_seen_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, 'PENDING_APPROVAL', ?, ?, ?, ?, ?)`,
+        [deviceId, req.user!.org_id, req.user!.id, fingerprint, device_name || 'Owner Primary Workstation', req.headers['user-agent'] || 'Browser Secure Enclave', req.ip || '127.0.0.1', public_key, challenge, expiresAt, now, now]
+      );
+
+      await logAuditEvent({
+        event_type: 'DEVICE_BINDING_STARTED',
+        user_id: req.user!.id,
+        org_id: req.user!.org_id,
+        device_id: deviceId,
+        ip_address: req.ip,
+        details: { device_name: device_name || 'Owner Primary Workstation' },
+      });
+      await logAuditEvent({
+        event_type: 'DEVICE_CHALLENGE_ISSUED',
+        user_id: req.user!.id,
+        org_id: req.user!.org_id,
+        device_id: deviceId,
+        ip_address: req.ip,
+        details: { fingerprint, expires_at: expiresAt }, // challenge secret is NOT logged
+      });
+
+      // Return the challenge (base64) for the device to sign with its private key.
+      return res.json({ challengeId: deviceId, challenge });
+    } catch (e: any) {
+      console.error('Device challenge error:', e);
+      return res.status(500).json({ error: e.message || 'Internal device-binding error.' });
+    }
+  });
+
+  // STAGE 2b — Verify the signed challenge (requires device-binding-scoped token).
+  // On a valid ECDSA signature the device becomes TRUSTED, registration completes,
+  // and a full session JWT + user is returned.
+  app.post('/api/registration/device-binding/verify', authenticateRegistrationToken, async (req: Request, res: Response) => {
+    try {
+      const { challengeId, signature } = req.body || {};
+      if (!challengeId || !signature) {
+        return res.status(400).json({ error: 'challengeId and signature are required.' });
+      }
+
+      const db = await getDb();
+      const devices = executeQuery(
+        db,
+        'SELECT * FROM trusted_devices WHERE id = ? AND user_id = ? AND org_id = ?',
+        [challengeId, req.user!.id, req.user!.org_id]
+      );
+      if (devices.length === 0) {
+        return res.status(404).json({ error: 'Device-binding challenge not found.' });
+      }
+      const device = devices[0];
+
+      // Re-check the organization is VERIFIED (defense in depth).
+      const orgs = executeQuery(db, 'SELECT status FROM organizations WHERE id = ?', [req.user!.org_id]);
+      if (orgs.length === 0 || orgs[0].status !== 'VERIFIED') {
+        return res.status(403).json({ error: 'Organization is not verified. Device binding is not permitted.' });
+      }
+
+      const failBinding = async (reason: string, code = 400) => {
+        await logAuditEvent({
+          event_type: 'DEVICE_BINDING_FAILED',
+          user_id: req.user!.id,
+          org_id: req.user!.org_id,
+          device_id: device.id,
+          ip_address: req.ip,
+          status: 'FAILED',
+          details: { reason },
+        });
+        return res.status(code).json({ error: reason });
+      };
+
+      if (!device.challenge_nonce || !device.public_key) {
+        return failBinding('No active challenge for this device. Restart device binding.');
+      }
+      if (device.challenge_expires_at && new Date(device.challenge_expires_at).getTime() < Date.now()) {
+        return failBinding('Device-binding challenge expired. Restart device binding.');
+      }
+
+      // Cryptographically verify the signature over the challenge with the device public key.
+      const valid = verifyDeviceSignature(device.public_key, device.challenge_nonce, signature);
+      if (!valid) {
+        await logSecurityEvent({
+          event_type: 'UNKNOWN_DEVICE_LOGIN',
+          severity: 'HIGH',
+          user_id: req.user!.id,
+          org_id: req.user!.org_id,
+          ip_address: req.ip,
+          details: { reason: 'Invalid device-binding signature', device_id: device.id },
+        });
+        return failBinding('Device signature verification failed.');
+      }
+
+      // Success — promote the device to TRUSTED and clear the challenge.
+      const now = new Date().toISOString();
+      executeRun(
+        db,
+        'UPDATE trusted_devices SET status = "TRUSTED", challenge_nonce = NULL, challenge_expires_at = NULL, last_seen_at = ? WHERE id = ?',
+        [now, device.id]
+      );
+      executeRun(db, 'UPDATE users SET last_login_at = ? WHERE id = ?', [now, req.user!.id]);
+
+      const users = executeQuery(db, 'SELECT * FROM users WHERE id = ?', [req.user!.id]);
+      const user = users[0];
+
+      await logAuditEvent({
+        event_type: 'DEVICE_BINDING_COMPLETED',
+        user_id: req.user!.id,
+        user_email: user?.email,
+        role: 'ORG_OWNER',
+        org_id: req.user!.org_id,
+        device_id: device.id,
+        ip_address: req.ip,
+        details: { device_name: device.device_name, fingerprint: device.device_fingerprint },
+      });
+
+      // Issue the full session token (identical shape to the login endpoint).
+      const token = jwt.sign(
+        {
+          id: user.id,
+          email: user.email,
+          username: user.username,
+          role: user.role,
+          org_id: user.org_id,
+          full_name: user.full_name,
+          centre_id: user.centre_id,
+          account_type: user.account_type || 'STANDARD',
+        },
+        JWT_SECRET,
+        { expiresIn: '12h' }
+      );
+
+      return res.json({
+        message: 'Device bound successfully. Registration complete.',
+        token,
+        user: {
+          id: user.id,
+          email: user.email,
+          username: user.username,
+          full_name: user.full_name,
+          role: user.role,
+          org_id: user.org_id,
+          centre_id: user.centre_id,
+          authorization_status: user.authorization_status || 'AUTHORIZED',
+          account_type: user.account_type || 'STANDARD',
+        },
+        device: { id: device.id, fingerprint: device.device_fingerprint, status: 'TRUSTED' },
+      });
+    } catch (e: any) {
+      console.error('Device binding verify error:', e);
+      return res.status(500).json({ error: e.message || 'Internal device-binding error.' });
     }
   });
 

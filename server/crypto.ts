@@ -221,3 +221,56 @@ export function generateCopyId(counter: number): string {
 export function generateTxHash(content: string): string {
   return `0x${crypto.createHash('sha256').update(content + Date.now().toString()).digest('hex')}`;
 }
+
+/**
+ * Verify a WebCrypto ECDSA (P-256 / SHA-256) signature during Stage-2 device binding.
+ *
+ * The browser generates the key pair with `crypto.subtle.generateKey` (private key
+ * non-extractable, kept in IndexedDB — never sent here), exports the PUBLIC key as
+ * SPKI (base64), and signs the server challenge with `crypto.subtle.sign`. WebCrypto
+ * emits ECDSA signatures in IEEE-P1363 (raw r||s) form, so we must tell Node to
+ * expect that encoding rather than the default DER/ASN.1.
+ *
+ * @param publicKeySpkiB64 base64 of the SPKI DER public key from the device
+ * @param challengeB64      base64 of the exact challenge bytes that were signed
+ * @param signatureB64      base64 of the P-1363 signature produced by the device
+ * @returns true only when the signature is cryptographically valid for this key+challenge
+ */
+export function verifyDeviceSignature(
+  publicKeySpkiB64: string,
+  challengeB64: string,
+  signatureB64: string,
+): boolean {
+  try {
+    if (!publicKeySpkiB64 || !challengeB64 || !signatureB64) return false;
+
+    const publicKey = crypto.createPublicKey({
+      key: Buffer.from(publicKeySpkiB64, 'base64'),
+      format: 'der',
+      type: 'spki',
+    });
+
+    const challenge = Buffer.from(challengeB64, 'base64');
+    const signature = Buffer.from(signatureB64, 'base64');
+
+    return crypto.verify(
+      'sha256',
+      challenge,
+      { key: publicKey, dsaEncoding: 'ieee-p1363' },
+      signature,
+    );
+  } catch {
+    // Malformed key/signature → treat as an invalid (failed) verification.
+    return false;
+  }
+}
+
+/** Cryptographically strong random challenge (base64) for device-binding. */
+export function generateDeviceChallenge(byteLength: number = 32): string {
+  return crypto.randomBytes(byteLength).toString('base64');
+}
+
+/** Stable device fingerprint derived from the device's public key. */
+export function deviceFingerprintFromPublicKey(publicKeyB64: string): string {
+  return 'KEY-' + crypto.createHash('sha256').update(publicKeyB64 || '').digest('hex').substring(0, 24);
+}

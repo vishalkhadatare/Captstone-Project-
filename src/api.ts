@@ -14,6 +14,7 @@ import {
   SecurityEvent,
   NotificationItem,
   DynamicWatermarkData,
+  RegistrationVerificationResult,
 } from './types';
 
 function getStoredToken(): string | null {
@@ -50,8 +51,8 @@ export function getDeviceFingerprint(): string {
   return fp;
 }
 
-async function request<T>(endpoint: string, options: RequestInit = {}): Promise<T> {
-  const token = getStoredToken();
+async function request<T>(endpoint: string, options: RequestInit = {}, authTokenOverride?: string): Promise<T> {
+  const token = authTokenOverride || getStoredToken();
   const headers: Record<string, string> = {
     'Content-Type': 'application/json',
     'x-device-fingerprint': getDeviceFingerprint(),
