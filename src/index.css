@@ -1,0 +1,725 @@
+@import "tailwindcss";
+
+:root {
+  color-scheme: light;
+  --strands-green: #00cc5f;
+  --strands-green-hover: #00e069;
+  --strands-green-glow: rgba(0, 204, 95, 0.35);
+  --strands-mint-bg: rgba(0, 204, 95, 0.1);
+  --strands-mint-border: rgba(0, 204, 95, 0.25);
+  --zeroleaf-bg: #FAFCFA;
+  --zeroleaf-panel: rgba(255, 255, 255, 0.82);
+  --zeroleaf-primary: #00cc5f;
+  --zeroleaf-primary-hover: #00e069;
+  --zeroleaf-accent: #00cc5f;
+  --zeroleaf-light: #d4f5e0;
+  --zeroleaf-heading: #0F172A;
+  --zeroleaf-body: #334155;
+  --zeroleaf-muted: #64748B;
+  --zeroleaf-border: rgba(0, 204, 95, 0.18);
+  --zeroleaf-success: #00cc5f;
+  --zeroleaf-warning: #F59E0B;
+  --zeroleaf-error: #EF4444;
+}
+
+html.dark {
+  color-scheme: dark;
+  --strands-green: #00cc5f;
+  --strands-green-hover: #00ff77;
+  --strands-green-glow: rgba(0, 204, 95, 0.45);
+  --strands-mint-bg: rgba(0, 204, 95, 0.15);
+  --strands-mint-border: rgba(0, 204, 95, 0.35);
+  --zeroleaf-bg: #080B11;
+  --zeroleaf-panel: rgba(11, 15, 23, 0.7);
+  --zeroleaf-heading: #FFFFFF;
+  --zeroleaf-body: #CBD5E1;
+  --zeroleaf-muted: #94A3B8;
+  --zeroleaf-border: rgba(255, 255, 255, 0.1);
+  --zeroleaf-primary: #00cc5f;
+  --zeroleaf-primary-hover: #00ff77;
+}
+
+html {
+  scroll-behavior: smooth;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+body {
+  margin: 0;
+  min-width: 320px;
+  background: #FAFCFA;
+  color: #0F172A;
+  font-feature-settings: "cv02", "cv03", "cv04", "cv11";
+}
+
+html.dark body {
+  background: #080B11;
+  color: #F3F4F6;
+}
+
+/* Modern Minimalist Scrollbars */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: #CBD5E1;
+  border-radius: 9999px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #94A3B8;
+}
+
+html.dark ::-webkit-scrollbar-thumb {
+  background: #1E293B;
+}
+html.dark ::-webkit-scrollbar-thumb:hover {
+  background: #334155;
+}
+
+/* High-End Transparent Glassmorphic Design Utilities */
+.modern-card,
+.stat-card-luxury,
+.metric-card,
+.luxury-glass,
+.glass-card,
+.cyber-mesh-bg div[class*="rounded-2xl"][class*="bg-white"],
+.cyber-mesh-bg div[class*="rounded-3xl"][class*="bg-white"],
+.cyber-mesh-bg div[class*="rounded-xl"][class*="bg-white"] {
+  background: rgba(255, 255, 255, 0.82) !important;
+  backdrop-filter: blur(24px) !important;
+  -webkit-backdrop-filter: blur(24px) !important;
+  border: 1px solid rgba(0, 204, 95, 0.18) !important;
+  border-radius: 1.25rem;
+  box-shadow: 0 10px 30px -4px rgba(0, 204, 95, 0.08), 0 2px 8px rgba(15, 23, 42, 0.03) !important;
+  transition: all 250ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.modern-card:hover,
+.stat-card-luxury:hover,
+.metric-card:hover {
+  border-color: rgba(0, 204, 95, 0.45) !important;
+  box-shadow: 0 14px 36px -6px rgba(0, 204, 95, 0.18) !important;
+}
+
+.luxury-glass {
+  background: rgba(255, 255, 255, 0.88) !important;
+  backdrop-filter: blur(24px) !important;
+  -webkit-backdrop-filter: blur(24px) !important;
+  border: 1px solid rgba(0, 204, 95, 0.22) !important;
+  box-shadow: 0 20px 40px -10px rgba(0, 204, 95, 0.1) !important;
+  border-radius: 1.25rem;
+}
+
+.glass-card {
+  background: rgba(255, 255, 255, 0.85) !important;
+  backdrop-filter: blur(24px) !important;
+  -webkit-backdrop-filter: blur(24px) !important;
+  border: 1px solid rgba(0, 204, 95, 0.18) !important;
+  border-radius: 1.25rem;
+  box-shadow: 0 10px 32px -4px rgba(0, 204, 95, 0.08) !important;
+}
+
+.metric-card {
+  padding: 1.25rem;
+  border-radius: 1.25rem;
+  position: relative;
+  overflow: hidden;
+}
+
+.metric-card:hover {
+  transform: translateY(-3px);
+  border-color: #00cc5f !important;
+  box-shadow: 0 16px 36px -6px rgba(0, 204, 95, 0.22) !important;
+}
+
+.stat-card-luxury {
+  position: relative;
+  border-radius: 1.25rem;
+  overflow: hidden;
+}
+
+/* Luminous Green Top Accent Line */
+.stat-card-luxury::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 3px;
+  background: linear-gradient(90deg, #00cc5f 0%, #00ff77 50%, #00cc5f 100%) !important;
+  box-shadow: 0 0 14px rgba(0, 204, 95, 0.6) !important;
+  opacity: 1 !important;
+}
+
+.stat-card-luxury:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 16px 36px -4px rgba(0, 204, 95, 0.2) !important;
+  border-color: #00cc5f !important;
+}
+
+/* Inner Workspace Shell: Fully transparent to show radiant curves backdrop */
+.cyber-mesh-bg {
+  background: transparent !important;
+}
+
+/* Unified Dark Mode Glassmorphism Overrides */
+html.dark .cyber-mesh-bg {
+  background: transparent !important;
+  color: #F3F4F6 !important;
+}
+
+html.dark .modern-card,
+html.dark .stat-card-luxury,
+html.dark .metric-card,
+html.dark .glass-card,
+html.dark .luxury-glass,
+html.dark .cyber-mesh-bg div[class*="rounded-2xl"][class*="bg-white"],
+html.dark .cyber-mesh-bg div[class*="rounded-3xl"][class*="bg-white"],
+html.dark .cyber-mesh-bg div[class*="rounded-xl"][class*="bg-white"] {
+  background: rgba(11, 15, 23, 0.7) !important;
+  backdrop-filter: blur(24px) !important;
+  -webkit-backdrop-filter: blur(24px) !important;
+  border: 1px solid rgba(255, 255, 255, 0.09) !important;
+  border-top: 1px solid rgba(0, 204, 95, 0.35) !important;
+  box-shadow: 0 12px 40px 0 rgba(0, 0, 0, 0.6) !important;
+  color: #F3F4F6 !important;
+}
+
+html.dark .modern-card:hover,
+html.dark .stat-card-luxury:hover,
+html.dark .metric-card:hover {
+  border-color: rgba(0, 204, 95, 0.5) !important;
+  box-shadow: 0 14px 42px 0 rgba(0, 204, 95, 0.22) !important;
+}
+
+html.dark .cyber-mesh-bg div[class*="bg-slate-50"],
+html.dark .cyber-mesh-bg div[class*="bg-slate-100"] {
+  background: rgba(255, 255, 255, 0.04) !important;
+  border-color: rgba(255, 255, 255, 0.08) !important;
+  color: #E2E8F0 !important;
+}
+
+html.dark .cyber-mesh-bg [class*="text-slate-900"],
+html.dark .cyber-mesh-bg [class*="text-slate-950"],
+html.dark .cyber-mesh-bg [class*="text-black"] {
+  color: #F8FAFC !important;
+}
+
+html.dark .cyber-mesh-bg [class*="text-slate-500"],
+html.dark .cyber-mesh-bg [class*="text-slate-600"] {
+  color: #94A3B8 !important;
+}
+
+html.dark .cyber-mesh-bg input,
+html.dark .cyber-mesh-bg select,
+html.dark .cyber-mesh-bg textarea {
+  background: rgba(255, 255, 255, 0.04) !important;
+  border-color: rgba(255, 255, 255, 0.12) !important;
+  color: #FFFFFF !important;
+}
+
+.cyber-mesh-bg input:focus,
+.cyber-mesh-bg select:focus,
+.cyber-mesh-bg textarea:focus,
+.input-luxury:focus {
+  border-color: #00cc5f !important;
+  box-shadow: 0 0 0 3px rgba(0, 204, 95, 0.25) !important;
+  outline: none !important;
+}
+
+html.dark .cyber-mesh-bg input:focus,
+html.dark .cyber-mesh-bg select:focus,
+html.dark .cyber-mesh-bg textarea:focus {
+  background: rgba(255, 255, 255, 0.07) !important;
+  border-color: #00cc5f !important;
+  box-shadow: 0 0 0 3px rgba(0, 204, 95, 0.3) !important;
+}
+
+html.dark .cyber-mesh-bg table {
+  color: #E2E8F0 !important;
+}
+
+html.dark .cyber-mesh-bg th {
+  background: rgba(255, 255, 255, 0.04) !important;
+  color: #94A3B8 !important;
+  border-color: rgba(255, 255, 255, 0.08) !important;
+}
+
+html.dark .cyber-mesh-bg td {
+  border-color: rgba(255, 255, 255, 0.06) !important;
+}
+
+.cyber-mesh-bg tr:hover td {
+  background: rgba(0, 204, 95, 0.04) !important;
+}
+
+html.dark .cyber-mesh-bg tr:hover td {
+  background: rgba(0, 204, 95, 0.08) !important;
+}
+
+/* ========================================================================= */
+/* STRANDS AGENTS RADIANT #00cc5f ("production agents") BUTTONS & CONTROLS  */
+/* ========================================================================= */
+
+.btn-gradient-emerald,
+.cyber-mesh-bg button[class*="bg-emerald-900"],
+.cyber-mesh-bg button[class*="bg-emerald-800"],
+.cyber-mesh-bg button[class*="bg-emerald-700"],
+.cyber-mesh-bg button[class*="bg-emerald-600"],
+.cyber-mesh-bg a[class*="bg-emerald-900"],
+.cyber-mesh-bg a[class*="bg-emerald-800"],
+.cyber-mesh-bg a[class*="bg-emerald-700"],
+.cyber-mesh-bg a[class*="bg-emerald-600"] {
+  background: #00cc5f !important;
+  color: #000000 !important;
+  font-weight: 700 !important;
+  border: 1px solid rgba(0, 204, 95, 0.5) !important;
+  box-shadow: 0 4px 18px rgba(0, 204, 95, 0.35) !important;
+  transition: all 200ms ease !important;
+}
+
+.btn-gradient-emerald:hover,
+.cyber-mesh-bg button[class*="bg-emerald-900"]:hover,
+.cyber-mesh-bg button[class*="bg-emerald-800"]:hover,
+.cyber-mesh-bg button[class*="bg-emerald-700"]:hover,
+.cyber-mesh-bg button[class*="bg-emerald-600"]:hover,
+.cyber-mesh-bg a[class*="bg-emerald-900"]:hover,
+.cyber-mesh-bg a[class*="bg-emerald-800"]:hover,
+.cyber-mesh-bg a[class*="bg-emerald-700"]:hover,
+.cyber-mesh-bg a[class*="bg-emerald-600"]:hover {
+  background: #00e069 !important;
+  box-shadow: 0 6px 26px rgba(0, 204, 95, 0.55) !important;
+  transform: translateY(-1px) !important;
+}
+
+.btn-gradient-emerald:active,
+.cyber-mesh-bg button[class*="bg-emerald-900"]:active,
+.cyber-mesh-bg button[class*="bg-emerald-800"]:active,
+.cyber-mesh-bg button[class*="bg-emerald-700"]:active,
+.cyber-mesh-bg button[class*="bg-emerald-600"]:active {
+  transform: translateY(0) !important;
+}
+
+html.dark .btn-gradient-emerald,
+html.dark .cyber-mesh-bg button[class*="bg-emerald-900"],
+html.dark .cyber-mesh-bg button[class*="bg-emerald-800"],
+html.dark .cyber-mesh-bg button[class*="bg-emerald-700"],
+html.dark .cyber-mesh-bg button[class*="bg-emerald-600"] {
+  background: #00cc5f !important;
+  color: #000000 !important;
+  font-weight: 700 !important;
+  box-shadow: 0 4px 22px rgba(0, 204, 95, 0.45) !important;
+}
+
+html.dark .btn-gradient-emerald:hover,
+html.dark .cyber-mesh-bg button[class*="bg-emerald-900"]:hover,
+html.dark .cyber-mesh-bg button[class*="bg-emerald-800"]:hover,
+html.dark .cyber-mesh-bg button[class*="bg-emerald-700"]:hover,
+html.dark .cyber-mesh-bg button[class*="bg-emerald-600"]:hover {
+  background: #00ff77 !important;
+  box-shadow: 0 6px 30px rgba(0, 204, 95, 0.65) !important;
+}
+
+/* Secondary Buttons & Subtle Action Pills */
+.cyber-mesh-bg button[class*="bg-emerald-50"],
+.cyber-mesh-bg button[class*="bg-emerald-100"] {
+  background: rgba(0, 204, 95, 0.1) !important;
+  color: #00873d !important;
+  border: 1px solid rgba(0, 204, 95, 0.3) !important;
+  font-weight: 600 !important;
+}
+
+.cyber-mesh-bg button[class*="bg-emerald-50"]:hover,
+.cyber-mesh-bg button[class*="bg-emerald-100"]:hover {
+  background: rgba(0, 204, 95, 0.2) !important;
+  color: #005c28 !important;
+  border-color: rgba(0, 204, 95, 0.5) !important;
+}
+
+html.dark .cyber-mesh-bg button[class*="bg-emerald-50"],
+html.dark .cyber-mesh-bg button[class*="bg-emerald-100"] {
+  background: rgba(0, 204, 95, 0.14) !important;
+  color: #00cc5f !important;
+  border: 1px solid rgba(0, 204, 95, 0.4) !important;
+}
+
+html.dark .cyber-mesh-bg button[class*="bg-emerald-50"]:hover,
+html.dark .cyber-mesh-bg button[class*="bg-emerald-100"]:hover {
+  background: rgba(0, 204, 95, 0.25) !important;
+  color: #00ff77 !important;
+  border-color: rgba(0, 204, 95, 0.6) !important;
+  box-shadow: 0 0 18px rgba(0, 204, 95, 0.3) !important;
+}
+
+/* Badges & Chips: Exact translucent mint tint with glowing text */
+.cyber-mesh-bg span[class*="bg-emerald-50"],
+.cyber-mesh-bg span[class*="bg-emerald-100"],
+.cyber-mesh-bg div[class*="bg-emerald-50"]:not(button),
+.cyber-mesh-bg div[class*="bg-emerald-100"]:not(button) {
+  background: rgba(0, 204, 95, 0.1) !important;
+  color: #00873d !important;
+  border: 1px solid rgba(0, 204, 95, 0.25) !important;
+}
+
+html.dark .cyber-mesh-bg span[class*="bg-emerald-50"],
+html.dark .cyber-mesh-bg span[class*="bg-emerald-100"],
+html.dark .cyber-mesh-bg div[class*="bg-emerald-50"]:not(button),
+html.dark .cyber-mesh-bg div[class*="bg-emerald-100"]:not(button) {
+  background: rgba(0, 204, 95, 0.15) !important;
+  color: #00cc5f !important;
+  border: 1px solid rgba(0, 204, 95, 0.35) !important;
+  text-shadow: 0 0 12px rgba(0, 204, 95, 0.4) !important;
+}
+
+/* Text Highlights: Radiant Emerald from "production agents" */
+.cyber-mesh-bg [class*="text-emerald-700"],
+.cyber-mesh-bg [class*="text-emerald-800"],
+.cyber-mesh-bg [class*="text-emerald-900"],
+.cyber-mesh-bg [class*="text-emerald-950"],
+.cyber-mesh-bg [class*="text-teal-700"],
+.cyber-mesh-bg [class*="text-teal-800"],
+.cyber-mesh-bg [class*="text-teal-900"] {
+  color: #00873d !important;
+}
+
+html.dark .cyber-mesh-bg [class*="text-emerald-600"],
+html.dark .cyber-mesh-bg [class*="text-emerald-700"],
+html.dark .cyber-mesh-bg [class*="text-emerald-800"],
+html.dark .cyber-mesh-bg [class*="text-emerald-900"],
+html.dark .cyber-mesh-bg [class*="text-emerald-950"],
+html.dark .cyber-mesh-bg [class*="text-teal-600"],
+html.dark .cyber-mesh-bg [class*="text-teal-700"],
+html.dark .cyber-mesh-bg [class*="text-teal-800"],
+html.dark .cyber-mesh-bg [class*="text-teal-900"] {
+  color: #00cc5f !important;
+  text-shadow: 0 0 16px rgba(0, 204, 95, 0.35) !important;
+}
+
+/* Subtle Emerald Borders */
+.cyber-mesh-bg [class*="border-emerald-200"],
+.cyber-mesh-bg [class*="border-emerald-300"],
+.cyber-mesh-bg [class*="border-emerald-400"],
+.cyber-mesh-bg [class*="border-teal-200"],
+.cyber-mesh-bg [class*="border-teal-300"] {
+  border-color: rgba(0, 204, 95, 0.25) !important;
+}
+
+html.dark .cyber-mesh-bg [class*="border-emerald-200"],
+html.dark .cyber-mesh-bg [class*="border-emerald-300"],
+html.dark .cyber-mesh-bg [class*="border-emerald-400"],
+html.dark .cyber-mesh-bg [class*="border-teal-200"],
+html.dark .cyber-mesh-bg [class*="border-teal-300"] {
+  border-color: rgba(0, 204, 95, 0.35) !important;
+}
+
+/* Active filter tabs when highlighted */
+.cyber-mesh-bg button[class*="bg-emerald-950"],
+.cyber-mesh-bg div[class*="bg-emerald-950"] {
+  background: #00cc5f !important;
+  color: #000000 !important;
+  border-color: #00cc5f !important;
+  box-shadow: 0 4px 18px rgba(0, 204, 95, 0.35) !important;
+}
+.cyber-mesh-bg button[class*="bg-emerald-950"] span,
+.cyber-mesh-bg div[class*="bg-emerald-950"] span {
+  color: #000000 !important;
+}
+
+html.dark .cyber-mesh-bg button[class*="bg-emerald-950"],
+html.dark .cyber-mesh-bg div[class*="bg-emerald-950"] {
+  background: rgba(0, 204, 95, 0.2) !important;
+  color: #00ff77 !important;
+  border: 1px solid #00cc5f !important;
+  box-shadow: 0 0 20px rgba(0, 204, 95, 0.3) !important;
+}
+html.dark .cyber-mesh-bg button[class*="bg-emerald-950"] span,
+html.dark .cyber-mesh-bg div[class*="bg-emerald-950"] span {
+  color: #00ff77 !important;
+}
+
+.cyber-grid {
+  background-image: 
+    linear-gradient(rgba(0, 204, 95, 0.05) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(0, 204, 95, 0.05) 1px, transparent 1px);
+  background-size: 32px 32px;
+}
+
+.glow-emerald {
+  box-shadow: 0 0 24px -4px rgba(0, 204, 95, 0.45);
+}
+
+.glow-teal {
+  box-shadow: 0 0 24px -4px rgba(0, 204, 95, 0.35);
+}
+
+.badge-glow-green {
+  background: rgba(0, 204, 95, 0.12);
+  border: 1px solid rgba(0, 204, 95, 0.35);
+  box-shadow: 0 0 14px rgba(0, 204, 95, 0.25);
+}
+
+.input-luxury {
+  background: rgba(255, 255, 255, 0.85);
+  border: 1px solid rgba(0, 204, 95, 0.22);
+  border-radius: 0.75rem;
+  transition: all 180ms ease;
+}
+
+.input-luxury:focus {
+  background: #FFFFFF;
+  border-color: #059669;
+  box-shadow: 0 0 0 3px rgba(16, 185, 129, 0.15);
+  outline: none;
+}
+
+.btn-gradient-emerald {
+  background: linear-gradient(135deg, #047857 0%, #0F766E 50%, #065F46 100%);
+  color: white;
+  position: relative;
+  overflow: hidden;
+  transition: all 250ms ease;
+  box-shadow: 0 4px 14px -1px rgba(4, 120, 87, 0.3);
+}
+
+.btn-gradient-emerald:hover {
+  background: linear-gradient(135deg, #059669 0%, #0D9488 50%, #047857 100%);
+  box-shadow: 0 6px 20px 0 rgba(4, 120, 87, 0.4);
+  transform: translateY(-1px);
+}
+
+.btn-gradient-emerald:active {
+  transform: translateY(0);
+}
+
+.landing-page-shell {
+  background:
+    linear-gradient(135deg, #FFFFFF 0%, #F8FAFC 55%, #ECFDF5 100%);
+}
+
+.landing-hero {
+  background:
+    linear-gradient(135deg, #FFFFFF 0%, #F8FAFC 55%, #ECFDF5 100%);
+}
+
+.hero-sheen {
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(135deg, rgba(37, 99, 235, 0.08), rgba(34, 211, 238, 0.04), rgba(10, 17, 40, 0.02));
+  pointer-events: none;
+}
+
+.hero-grid {
+  position: absolute;
+  inset: 0;
+  background-image: linear-gradient(rgba(148, 163, 184, 0.08) 1px, transparent 1px), linear-gradient(90deg, rgba(148, 163, 184, 0.08) 1px, transparent 1px);
+  background-size: 36px 36px;
+  mask-image: radial-gradient(circle at center, black 30%, transparent 90%);
+  opacity: 0.85;
+  pointer-events: none;
+}
+
+.hero-orb {
+  position: absolute;
+  border-radius: 9999px;
+  filter: blur(60px);
+  opacity: 0.38;
+  pointer-events: none;
+}
+
+.hero-orb-one {
+  width: 28rem;
+  height: 28rem;
+  background: rgba(37, 99, 235, 0.18);
+  top: -8rem;
+  left: 8%;
+}
+
+.hero-orb-two {
+  width: 26rem;
+  height: 26rem;
+  background: rgba(34, 211, 238, 0.18);
+  right: 6%;
+  bottom: -2rem;
+}
+
+.hero-lock {
+  position: absolute;
+  right: 10%;
+  top: 20%;
+  width: 11rem;
+  height: 11rem;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  background: linear-gradient(145deg, rgba(37, 99, 235, 0.1), rgba(34, 211, 238, 0.12));
+  box-shadow: inset 0 1px 0 rgba(255,255,255,0.7), 0 20px 40px rgba(37, 99, 235, 0.12);
+  border: 1px solid rgba(37, 99, 235, 0.12);
+  opacity: 0.9;
+  transform: rotate(12deg);
+}
+
+.landing-badge,
+.trust-card,
+.footer-chip {
+  transition: transform 180ms ease, box-shadow 180ms ease, border-color 180ms ease;
+}
+
+.landing-badge:hover,
+.trust-card:hover,
+.footer-chip:hover {
+  transform: translateY(-1px);
+}
+
+.landing-heading {
+  font-family: "Segoe UI", "Inter", sans-serif;
+  text-wrap: balance;
+  letter-spacing: -0.08em;
+  text-shadow: 0 1px 0 rgba(255,255,255,0.8);
+}
+
+.landing-ai-badge {
+  color: #22d3ee;
+  filter: drop-shadow(0 0 14px rgba(34, 211, 238, 0.3));
+}
+
+.landing-subhead {
+  font-family: "Segoe UI", "Inter", sans-serif;
+  text-wrap: pretty;
+}
+
+.landing-cta-primary,
+.landing-cta-secondary {
+  position: relative;
+  overflow: hidden;
+}
+
+.zero-leak-logo {
+  display: inline-flex;
+  align-items: center;
+}
+
+.zero-mark {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  filter: drop-shadow(0 10px 18px rgba(37, 99, 235, 0.22));
+}
+
+.zero-wordmark {
+  font-family: "Segoe UI", "Inter", sans-serif;
+  font-weight: 900;
+  letter-spacing: -0.08em;
+  color: #0a1128;
+  line-height: 0.9;
+}
+
+.word-part {
+  display: inline-block;
+  transform: translateY(-0.02em);
+}
+
+.word-o {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  border-radius: 9999px;
+  margin: 0 0.06em;
+}
+
+.zero-subtitle {
+  color: #2563eb;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+}
+
+.landing-cta-primary::before,
+.landing-cta-secondary::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(120deg, transparent 0%, rgba(255,255,255,0.22) 50%, transparent 100%);
+  transform: translateX(-140%);
+  transition: transform 300ms ease;
+}
+
+.landing-cta-primary:hover::before,
+.landing-cta-secondary:hover::before {
+  transform: translateX(140%);
+}
+
+.landing-cta-primary:hover .lucide,
+.landing-cta-secondary:hover .lucide {
+  transform: translateX(2px);
+}
+
+.landing-cta-primary .lucide,
+.landing-cta-secondary .lucide {
+  transition: transform 180ms ease;
+}
+
+.landing-logo-wrap {
+  animation: logoPulse 3s ease-in-out infinite;
+}
+
+.zero-leak-logo .word-o img {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+.trust-strip {
+  animation: fadeUp 700ms ease both;
+}
+
+.trust-card {
+  border: 1px solid rgba(37, 99, 235, 0.12);
+  background: rgba(255,255,255,0.72);
+  box-shadow: 0 10px 24px rgba(15, 23, 42, 0.04);
+}
+
+.footer-chip {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0.4rem 0.7rem;
+  border-radius: 9999px;
+  background: rgba(255,255,255,0.06);
+  border: 1px solid rgba(148, 163, 184, 0.18);
+  color: rgba(248, 250, 252, 0.9);
+  box-shadow: inset 0 1px 0 rgba(255,255,255,0.04);
+}
+
+@keyframes fadeUp {
+  from {
+    opacity: 0;
+    transform: translateY(18px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes logoPulse {
+  0%, 100% {
+    transform: scale(1);
+    filter: drop-shadow(0 0 0 rgba(37, 99, 235, 0));
+  }
+  50% {
+    transform: scale(1.02);
+    filter: drop-shadow(0 8px 18px rgba(37, 99, 235, 0.14));
+  }
+}
+
+@media (max-width: 640px) {
+  .hero-lock {
+    display: none;
+  }
+}
+

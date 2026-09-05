@@ -1,0 +1,30 @@
+node_modules/
+build/
+dist/
+coverage/
+.DS_Store
+*.log
+.env.local
+.env.production
+.env*.local
+!.env
+!.env.example
+__pycache__/
+*.py[cod]
+.vite/
+0leakexam-main/
+
+# Local SQLite database & temp files
+*.sqlite
+*.sqlite*
+*.tmp
+
+# Generated question crops from PDF processing
+public/questions/*
+!public/questions/.gitkeep
+public/papers/*
+!public/papers/.gitkeep
+
+# Scratch and temporary work
+scratch/
+
