@@ -1,0 +1,21 @@
+node_modules/
+build/
+dist/
+coverage/
+.DS_Store
+*.log
+.env
+.env.local
+.env.production
+.env*.local
+!.env.example
+__pycache__/
+*.py[cod]
+.vite/
+0leakexam-main/
+
+# Local SQLite database & temp files
+*.sqlite
+*.sqlite*
+*.tmp
+
