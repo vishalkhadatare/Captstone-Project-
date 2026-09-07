@@ -24,6 +24,7 @@
     "noEmit": true
   },
   "exclude": [
+    "0leakexam",
     "0leakexam-main"
   ]
 }

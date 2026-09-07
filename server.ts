@@ -5191,12 +5191,12 @@ async function startServer() {
             [u.id, u.email, u.username, userPasswordHash, u.full_name, u.role, u.centre_id || null, isoNow, isoNow]
           );
 
-          // Add trusted device
+          // Add trusted device with APPROVED status for dev auto-authentication
           executeRun(
             db,
-            `INSERT INTO trusted_devices (id, org_id, user_id, device_fingerprint, device_name, browser_os, ip_address, status, registered_at, last_seen_at)
-             VALUES (?, 'ORG-ZEROLEAK-NATIONAL', ?, ?, ?, 'Enterprise Certified Secure Workstation', '127.0.0.1', 'TRUSTED', ?, ?)`,
-            [uuidv4(), u.id, `FP-${u.username.toUpperCase()}-STATION`, `${u.full_name}'s Terminal`, isoNow, isoNow]
+            `INSERT INTO trusted_devices (id, org_id, user_id, device_fingerprint, device_name, browser_os, ip_address, status, registered_at, last_seen_at, approved_at, updated_at)
+             VALUES (?, 'ORG-ZEROLEAK-NATIONAL', ?, ?, ?, 'Enterprise Certified Secure Workstation', '127.0.0.1', 'APPROVED', ?, ?, ?, ?)`,
+            [uuidv4(), u.id, `FP-${u.username.toUpperCase()}-STATION`, `${u.full_name}'s Terminal`, isoNow, isoNow, isoNow, isoNow]
           );
         } else {
           // Ensure demo user is active and authorized with valid password hash
@@ -5904,6 +5904,102 @@ async function startServer() {
       console.error('[ZeroLeak Org Sync] Error ensuring organizations exist:', err);
     }
   }
+
+  // ==========================================
+  // 11. DATABASE AUTO-REPAIR & DEMO ACCOUNT RESTORATION
+  // ==========================================
+  app.post('/api/system/repair-database', async (req: Request, res: Response) => {
+    if (process.env.NODE_ENV === 'production') {
+      return res.status(403).json({ error: 'Database repair is not available in production.' });
+    }
+
+    try {
+      console.log('[ZeroLeak Repair] Starting database auto-repair and demo account restoration...');
+
+      // 1. Reset the entire database
+      await resetDatabase();
+      console.log('[ZeroLeak Repair] Database reset completed');
+
+      // 2. Seed development test account
+      await createDevelopmentTestAccount();
+      console.log('[ZeroLeak Repair] Development test account created');
+
+      // 3. Seed all role demo accounts with NBTE organization
+      await seedAcademicDemoDataInternal();
+      console.log('[ZeroLeak Repair] All 5 role demo accounts seeded');
+
+      // 4. Fix device bindings - ensure all demo devices are properly configured for auto-approval
+      const db = await getDb();
+      const demoEmails = [
+        'owner@nbte.edu.in',
+        'manager@nbte.edu.in',
+        'sme@nbte.edu.in',
+        'translator@nbte.edu.in',
+        'operator@centre101.edu.in',
+        'auditor@gov-audit.gov.in',
+        'zeroleak.demo@dev.local',
+      ];
+
+      for (const email of demoEmails) {
+        const users = executeQuery(db, 'SELECT id, full_name FROM users WHERE email = ?', [email]);
+        if (users.length > 0) {
+          const user = users[0];
+
+          // Get existing device for this user
+          const devices = executeQuery(db, 'SELECT id FROM trusted_devices WHERE user_id = ?', [user.id]);
+
+          if (devices.length > 0) {
+            // Update existing device - set to APPROVED status for dev auto-approval
+            executeRun(
+              db,
+              `UPDATE trusted_devices SET status = 'APPROVED', approved_at = ?, updated_at = ?, last_authenticated_at = ? WHERE user_id = ?`,
+              [new Date().toISOString(), new Date().toISOString(), new Date().toISOString(), user.id]
+            );
+            console.log(`[ZeroLeak Repair] Fixed device binding for ${email}`);
+          } else {
+            // Create device if missing
+            executeRun(
+              db,
+              `INSERT INTO trusted_devices (id, org_id, user_id, device_fingerprint, device_name, browser_os, ip_address, status, registered_at, last_seen_at, approved_at, updated_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+              [
+                uuidv4(),
+                users.length > 0 ? (executeQuery(db, 'SELECT org_id FROM users WHERE email = ?', [email])[0]?.org_id || 'ORG-ZEROLEAK-NATIONAL') : 'ORG-ZEROLEAK-NATIONAL',
+                user.id,
+                `FP-DEV-${email.split('@')[0].toUpperCase()}`,
+                `Device for ${user.full_name}`,
+                'Development Browser',
+                '127.0.0.1',
+                'APPROVED',
+                new Date().toISOString(),
+                new Date().toISOString(),
+                new Date().toISOString(),
+                new Date().toISOString(),
+              ]
+            );
+            console.log(`[ZeroLeak Repair] Created device binding for ${email}`);
+          }
+        }
+      }
+
+      return res.json({
+        success: true,
+        message: 'Database auto-repaired and all demo accounts restored with fixed device bindings',
+        details: {
+          databaseReset: true,
+          demoAccountsRestored: demoEmails.length,
+          deviceBindingsFixed: demoEmails.length,
+          environment: process.env.NODE_ENV,
+        },
+      });
+    } catch (err: any) {
+      console.error('[ZeroLeak Repair] Repair failed:', err);
+      return res.status(500).json({
+        error: 'Database repair failed',
+        details: err.message,
+      });
+    }
+  });
 
   // Auto-seed development test account and all 5 role demo accounts
   await ensureAllOrganizationsExist();
