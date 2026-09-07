@@ -320,6 +320,7 @@ export const CentreOperatorWorkspace: React.FC<CentreOperatorWorkspaceProps> = (
         <SecureViewerModal
           paper={viewerPaper}
           watermark={viewerWatermark}
+          currentUser={currentUser}
           onClose={() => setViewerOpen(false)}
           onPrintCopy={() => handlePrintAuthorizedCopies(selectedExamId, selectedPaperVersionId)}
         />

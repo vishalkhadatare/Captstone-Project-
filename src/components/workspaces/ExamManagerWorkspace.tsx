@@ -31,16 +31,32 @@ import {
   Activity,
   Send,
   Users,
+  Award,
+  Calendar,
+  Play,
+  GraduationCap,
 } from 'lucide-react';
 import { User, Examination, Question, Organization, ExamType, ExtractedQuestion, QuestionAssignment } from '../../types';
 import { api } from '../../api';
 import { NavSubTab } from '../Sidebar';
 import { ExamManagerQuestionExtractor } from './ExamManagerQuestionExtractor';
+import { AuthoritySurveillanceDashboard } from '../proctor/AuthoritySurveillanceDashboard';
 
 interface ExamManagerWorkspaceProps {
   currentUser: User | null;
   activeSubTab: NavSubTab;
   onRefresh: () => void;
+  onLaunchCandidateSimulator?: (examId?: string) => void;
+}
+
+interface UploadedQuestionFile {
+  id: string;
+  name: string;
+  size: number;
+  fileData?: string;
+  text?: string;
+  status: 'READY' | 'PROCESSING' | 'COMPLETED' | 'ERROR';
+  error?: string;
 }
 
 const SUPPORTED_TRANSLATION_LANGUAGES = [
@@ -54,10 +70,143 @@ const SUPPORTED_TRANSLATION_LANGUAGES = [
   { code: 'Urdu', label: 'Urdu (اردو)' },
 ];
 
+export interface ExamPreset {
+  id: string;
+  name: string;
+  shortTag: string;
+  subject: string;
+  category: string;
+  examType: ExamType;
+  totalMarks: number;
+  totalQuestions: number;
+  durationMinutes: number;
+  defaultDate: string;
+  examTime: string;
+  unlockTime: string;
+  description: string;
+  badgeClass: string;
+}
+
+export const REAL_EXAM_PRESETS: ExamPreset[] = [
+  {
+    id: 'gate-cs',
+    name: 'GATE 2026: Computer Science & Information Technology',
+    shortTag: 'GATE CS 2026',
+    subject: 'Computer Science & Information Technology',
+    category: 'Competitive Exam',
+    examType: 'MCQ',
+    totalMarks: 100,
+    totalQuestions: 65,
+    durationMinutes: 180,
+    defaultDate: '2026-02-07',
+    examTime: '09:30',
+    unlockTime: '09:00',
+    description: 'National Engineering Entrance: 65 Qs (General Aptitude + Technical Core), 100 Marks',
+    badgeClass: 'bg-indigo-100 text-indigo-950 border-indigo-200',
+  },
+  {
+    id: 'jee-adv',
+    name: 'JEE Advanced 2026: Paper 1 (PCM)',
+    shortTag: 'JEE Advanced 2026',
+    subject: 'Physics, Chemistry & Mathematics Paper 1',
+    category: 'JEE',
+    examType: 'MIXED',
+    totalMarks: 180,
+    totalQuestions: 54,
+    durationMinutes: 180,
+    defaultDate: '2026-05-24',
+    examTime: '09:00',
+    unlockTime: '08:30',
+    description: 'IIT Entrance Exam: Single Correct, Multiple Correct & Numerical Value Questions',
+    badgeClass: 'bg-blue-100 text-blue-950 border-blue-200',
+  },
+  {
+    id: 'neet-ug',
+    name: 'NEET-UG 2026: National Eligibility Entrance Test',
+    shortTag: 'NEET-UG 2026',
+    subject: 'Physics, Chemistry, Botany & Zoology (PCB)',
+    category: 'NEET',
+    examType: 'MCQ',
+    totalMarks: 720,
+    totalQuestions: 180,
+    durationMinutes: 200,
+    defaultDate: '2026-05-03',
+    examTime: '14:00',
+    unlockTime: '13:30',
+    description: 'National Medical Entrance: 200 Qs (180 to attempt), +4/-1 OMR Mark Scheme',
+    badgeClass: 'bg-emerald-100 text-emerald-950 border-emerald-200',
+  },
+  {
+    id: 'cat-iim',
+    name: 'CAT 2026: Common Admission Test (IIMs)',
+    shortTag: 'CAT 2026',
+    subject: 'VARC, DILR & Quantitative Aptitude',
+    category: 'Competitive Exam',
+    examType: 'MCQ',
+    totalMarks: 198,
+    totalQuestions: 66,
+    durationMinutes: 120,
+    defaultDate: '2026-11-29',
+    examTime: '08:30',
+    unlockTime: '08:00',
+    description: 'IIMs Management Aptitude Test: 3 Sections x 40 minutes strict section timer',
+    badgeClass: 'bg-purple-100 text-purple-950 border-purple-200',
+  },
+  {
+    id: 'upsc-prelims',
+    name: 'UPSC Civil Services 2026: Preliminary GS-I',
+    shortTag: 'UPSC GS-I',
+    subject: 'General Studies Paper-I: Polity, History & Economy',
+    category: 'Competitive Exam',
+    examType: 'MCQ',
+    totalMarks: 200,
+    totalQuestions: 100,
+    durationMinutes: 120,
+    defaultDate: '2026-05-31',
+    examTime: '09:30',
+    unlockTime: '09:00',
+    description: 'Union Public Service Commission Civil Services Stage 1: 100 Objective Questions',
+    badgeClass: 'bg-amber-100 text-amber-950 border-amber-200',
+  },
+  {
+    id: 'mht-cet',
+    name: 'MHT-CET 2026: State Common Entrance Test (PCM)',
+    shortTag: 'MHT-CET 2026',
+    subject: 'Physics, Chemistry & Mathematics Engineering Entrance',
+    category: 'TCET / CET-type Exam',
+    examType: 'MCQ',
+    totalMarks: 200,
+    totalQuestions: 150,
+    durationMinutes: 180,
+    defaultDate: '2026-04-18',
+    examTime: '09:00',
+    unlockTime: '08:30',
+    description: 'State Engineering & Pharmacy Admission Test: 150 Questions, No Negative Marking',
+    badgeClass: 'bg-rose-100 text-rose-950 border-rose-200',
+  },
+  {
+    id: 'univ-theory',
+    name: 'B.Tech Semester VI: Design & Analysis of Algorithms',
+    shortTag: 'B.Tech Theory',
+    subject: 'Design & Analysis of Algorithms (Theory & Proofs)',
+    category: 'University Exam',
+    examType: 'THEORY',
+    totalMarks: 100,
+    totalQuestions: 15,
+    durationMinutes: 180,
+    defaultDate: '2026-06-15',
+    examTime: '10:00',
+    unlockTime: '09:30',
+    description: 'AICTE University End-Semester Theory Paper: 3 Sectional Descriptive Blueprints',
+    badgeClass: 'bg-teal-100 text-teal-950 border-teal-200',
+  },
+];
+
 export const ExamManagerWorkspace: React.FC<ExamManagerWorkspaceProps> = ({
   currentUser,
   activeSubTab,
   onRefresh,
+  onLaunchCandidateSimulator,
 }) => {
   const [org, setOrg] = useState<Organization | null>(null);
   const [examinations, setExaminations] = useState<Examination[]>([]);
@@ -76,6 +225,7 @@ export const ExamManagerWorkspace: React.FC<ExamManagerWorkspaceProps> = ({
   // PDF / Paper Extraction State
   const [pdfFileName, setPdfFileName] = useState('');
   const [pdfFileData, setPdfFileData] = useState('');
+  const [uploadedFiles, setUploadedFiles] = useState<UploadedQuestionFile[]>([]);
   const [pdfText, setPdfText] = useState('');
   const [paperSubject, setPaperSubject] = useState('');
   const [paperCategory, setPaperCategory] = useState('Competitive Exam');
@@ -86,6 +236,8 @@ export const ExamManagerWorkspace: React.FC<ExamManagerWorkspaceProps> = ({
   const [aiEngineUsed, setAiEngineUsed] = useState(false);
   const [selectedExtractedIds, setSelectedExtractedIds] = useState<Set<string>>(new Set());
   const [importingBatch, setImportingBatch] = useState(false);
+  const [ollamaHealth, setOllamaHealth] = useState<{ connected: boolean; model: string; error?: string } | null>(null);
+  const [isFileDragOver, setIsFileDragOver] = useState(false);
 
   // Extraction Assignment Form State
   const [extractAssignSmeId, setExtractAssignSmeId] = useState('');
@@ -103,6 +255,9 @@ export const ExamManagerWorkspace: React.FC<ExamManagerWorkspaceProps> = ({
   const [poolAssigning, setPoolAssigning] = useState(false);
 
   // Create Exam Form
+  const [selectedPresetId, setSelectedPresetId] = useState<string | null>(null);
+  const [examSearchQuery, setExamSearchQuery] = useState('');
+  const [examCategoryFilter, setExamCategoryFilter] = useState('ALL');
   const [examName, setExamName] = useState('');
   const [subject, setSubject] = useState('');
   const [category, setCategory] = useState('Competitive Exam');
@@ -151,6 +306,12 @@ export const ExamManagerWorkspace: React.FC<ExamManagerWorkspaceProps> = ({
     loadData();
   }, []);
 
+  useEffect(() => {
+    if (activeSubTab === 'question_workflow') {
+      api.getOllamaHealth().then(setOllamaHealth).catch(() => setOllamaHealth(null));
+    }
+  }, [activeSubTab]);
+
   const loadData = async () => {
     setLoading(true);
     try {
@@ -180,70 +341,96 @@ export const ExamManagerWorkspace: React.FC<ExamManagerWorkspaceProps> = ({
     }
   };
 
-  // Handle PDF / Text File Upload
+  const readUploadedFile = (file: File): Promise<UploadedQuestionFile> =>
+    new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      const isTextFile = file.type.includes('text') || /\.(txt|csv|json)$/i.test(file.name);
+      reader.onerror = () => reject(new Error(`Unable to read ${file.name}.`));
+      reader.onload = event => {
+        const result = (event.target?.result as string) || '';
+        resolve({ id: `${file.name}-${file.lastModified}-${file.size}`, name: file.name, size: file.size, status: 'READY', ...(isTextFile ? { text: result } : { fileData: result }) });
+      };
+      if (isTextFile) reader.readAsText(file);
+      else reader.readAsDataURL(file);
+    });
+
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
+    const files = Array.from(e.target.files || []) as File[];
+    if (files.length === 0) return;
+    void Promise.all(files.map(readUploadedFile)).then(nextFiles => {
+      const mergedFiles = [...uploadedFiles.filter(existing => !nextFiles.some(file => file.id === existing.id)), ...nextFiles];
+      setUploadedFiles(mergedFiles);
+      setPdfFileName(mergedFiles.map(file => file.name).join(', '));
+      setPdfFileData(mergedFiles.find(file => file.fileData)?.fileData || '');
+      setPdfText(mergedFiles.filter(file => file.text).map(file => file.text).join('\n\n'));
+    });
+  };
 
-    setPdfFileName(file.name);
-    const reader = new FileReader();
+  const removeUploadedFile = (id: string) => {
+    const remaining = uploadedFiles.filter(file => file.id !== id);
+    setUploadedFiles(remaining);
+    setPdfFileName(remaining.map(file => file.name).join(', '));
+    setPdfFileData(remaining.find(file => file.fileData)?.fileData || '');
+    setPdfText(remaining.filter(file => file.text).map(file => file.text).join('\n\n'));
+  };
 
-    if (file.type.includes('text') || file.name.endsWith('.txt') || file.name.endsWith('.csv') || file.name.endsWith('.json')) {
-      reader.onload = (event) => {
-        const content = event.target?.result as string;
-        setPdfText(content);
-        setPdfFileData('');
-      };
-      reader.readAsText(file);
-    } else {
-      // PDF / binary files: read as base64 data URL
-      reader.onload = (event) => {
-        const dataUrl = event.target?.result as string;
-        setPdfFileData(dataUrl);
-        // Try extracting preview text if readable
-        try {
-          const raw = atob(dataUrl.split(',')[1] || '');
-          const printable = raw.replace(/[^\x20-\x7E\t\r\n]/g, ' ').trim();
-          if (printable.length > 50) {
-            setPdfText(printable);
-          }
-        } catch {
-          // Keep raw
-        }
-      };
-      reader.readAsDataURL(file);
+  const handleFileDrop = (event: React.DragEvent<HTMLDivElement>) => {
+    event.preventDefault();
+    setIsFileDragOver(false);
+    const files = Array.from(event.dataTransfer.files || []) as File[];
+    if (files.length > 0) {
+      const input = document.createElement('input');
+      const dataTransfer = new DataTransfer();
+      files.forEach(file => dataTransfer.items.add(file));
+      input.files = dataTransfer.files;
+      handleFileUpload({ target: input } as React.ChangeEvent<HTMLInputElement>);
     }
   };
 
   // Trigger AI Question Extraction
   const handleExtractQuestions = async () => {
     const textToExtract = pdfText.trim();
-    if (!textToExtract && !pdfFileData) {
+    if (!textToExtract && !pdfFileData && uploadedFiles.length === 0) {
       setStatusMessage({ type: 'error', text: 'Please upload a PDF / document or paste question paper text.' });
       return;
     }
 
     setExtracting(true);
     setStatusMessage(null);
+    setUploadedFiles(files => files.map(file => ({ ...file, status: 'PROCESSING', error: undefined })));
 
     try {
-      const res = await api.extractQuestionsFromPaper({
-        paper_text: textToExtract,
-        file_data: pdfFileData,
-        file_name: pdfFileName,
+      const extractionInputs = uploadedFiles.length > 0
+        ? uploadedFiles.map(file => ({ paper_text: file.text, file_data: file.fileData, file_name: file.name }))
+        : [{ paper_text: textToExtract, file_data: pdfFileData, file_name: pdfFileName }];
+      const settledResponses = await Promise.allSettled(extractionInputs.map(input => api.extractQuestionsFromPaper({
+        ...input,
         subject: paperSubject || 'Academic Examination',
         category: paperCategory || 'Competitive Exam',
-      });
-
-      const extracted = (res.extractedQuestions || []).map((q, idx) => ({
+      })));
+      const successfulResponses = settledResponses.flatMap((result, fileIndex) => result.status === 'fulfilled' ? [{ response: result.value, fileIndex }] : []);
+      const failedFiles = settledResponses.flatMap((result, fileIndex) => result.status === 'rejected' ? [{ fileIndex, error: result.reason?.message || 'Extraction failed.' }] : []);
+      if (successfulResponses.length === 0) {
+        throw new Error(failedFiles[0]?.error || 'No files could be extracted.');
+      }
+      const responses = successfulResponses.map(item => item.response);
+      const extracted = successfulResponses.flatMap(({ response: res, fileIndex }) => (res.extractedQuestions || []).map((q, questionIndex) => ({
         ...q,
-        tempId: q.tempId || `EXT-${Date.now()}-${idx + 1}`,
-      }));
+        source_paper_id: res.sourcePaperId,
+        source_file: res.sourceFile || uploadedFiles[fileIndex]?.name,
+        tempId: q.tempId || `EXT-${Date.now()}-${fileIndex + 1}-${questionIndex + 1}`,
+      })));
+      const batchAiUsed = responses.some(res => res.aiEngineUsed);
 
       setExtractedQuestions(extracted);
-      setExtractionSummary(res.extractionSummary || '');
-      setDetectedSubject(res.detectedSubject || paperSubject);
-      setAiEngineUsed(res.aiEngineUsed || false);
+      setExtractionSummary(responses.map(res => res.extractionSummary).filter(Boolean).join(' '));
+      setDetectedSubject(responses[0]?.detectedSubject || paperSubject);
+      setAiEngineUsed(batchAiUsed);
+      setUploadedFiles(files => files.map((file, index) => ({
+        ...file,
+        status: failedFiles.some(failed => failed.fileIndex === index) ? 'ERROR' : 'COMPLETED',
+        error: failedFiles.find(failed => failed.fileIndex === index)?.error,
+      })));
 
       // Select all extracted questions by default
       const allIds = new Set(extracted.map(q => q.tempId));
@@ -251,7 +438,7 @@ export const ExamManagerWorkspace: React.FC<ExamManagerWorkspaceProps> = ({
 
       setStatusMessage({
         type: 'success',
-        text: `Extracted ${extracted.length} questions from question paper (${res.aiEngineUsed ? 'Gemini AI Engine' : 'Heuristic Parser'}).`,
+        text: `Extracted ${extracted.length} questions from ${responses.length} of ${extractionInputs.length} file${extractionInputs.length === 1 ? '' : 's'} using Ollama${failedFiles.length ? `; ${failedFiles.length} failed` : ''}.`,
       });
     } catch (err: any) {
       setStatusMessage({ type: 'error', text: err.message || 'Failed to extract questions from document.' });
@@ -335,6 +522,7 @@ export const ExamManagerWorkspace: React.FC<ExamManagerWorkspaceProps> = ({
       setPdfText('');
       setPdfFileData('');
       setPdfFileName('');
+      setUploadedFiles([]);
       loadData();
     } catch (err: any) {
       setStatusMessage({ type: 'error', text: err.message || 'Failed to import questions.' });
@@ -374,6 +562,24 @@ export const ExamManagerWorkspace: React.FC<ExamManagerWorkspaceProps> = ({
     }
   };
 
+  const handleApplyPreset = (preset: ExamPreset) => {
+    setSelectedPresetId(preset.id);
+    setExamName(preset.name);
+    setSubject(preset.subject);
+    setCategory(preset.category);
+    setExamType(preset.examType);
+    setTotalMarks(preset.totalMarks);
+    setTotalQuestions(preset.totalQuestions);
+    setDurationMins(preset.durationMinutes);
+    setExamDate(preset.defaultDate);
+    setExamTime(preset.examTime);
+    setUnlockTime(preset.unlockTime);
+    setStatusMessage({
+      type: 'success',
+      text: `Applied "${preset.shortTag}" real examination preset (${preset.totalMarks} marks, ${preset.totalQuestions} Qs, ${preset.durationMinutes} mins).`,
+    });
+  };
+
   const handleCreateExam = async (e: React.FormEvent) => {
     e.preventDefault();
     setStatusMessage(null);
@@ -403,6 +609,7 @@ export const ExamManagerWorkspace: React.FC<ExamManagerWorkspaceProps> = ({
       setStatusMessage({ type: 'success', text: res.message });
       setExamName('');
       setSubject('');
+      setSelectedPresetId(null);
       loadData();
     } catch (err: any) {
       setStatusMessage({ type: 'error', text: err.message });
@@ -569,13 +776,14 @@ export const ExamManagerWorkspace: React.FC<ExamManagerWorkspaceProps> = ({
       {/* DASHBOARD */}
       {activeSubTab === 'dashboard' && (
         <div className="space-y-6">
-          <div className="p-6 rounded-xl bg-white border border-slate-200 shadow-xs space-y-4">
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b pb-3">
+          <div className="modern-card p-6 rounded-2xl bg-white border border-slate-200 shadow-sm space-y-5">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-100 pb-4">
               <div>
-                <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400">
+                <span className="text-[10px] font-bold uppercase tracking-wider text-emerald-700 bg-emerald-50 px-2.5 py-0.5 rounded-full border border-emerald-200">
                   Examination Authority Portal
                 </span>
-                <h2 className="text-xl font-bold text-slate-900">Examination Operations Dashboard</h2>
+                <h2 className="text-2xl font-bold text-slate-900 mt-2">Examination Operations Dashboard</h2>
+                <p className="text-xs text-slate-500 mt-1">Real-time status of question pools, verified banks, and time-locked enclaves.</p>
               </div>
             </div>
 
@@ -584,17 +792,17 @@ export const ExamManagerWorkspace: React.FC<ExamManagerWorkspaceProps> = ({
               <button
                 type="button"
                 onClick={() => setDashboardCardFilter('ALL')}
-                className={`p-4 rounded-xl border text-left transition-all cursor-pointer ${
+                className={`p-4 rounded-xl border text-left transition-all cursor-pointer shadow-xs hover:-translate-y-0.5 ${
                   dashboardCardFilter === 'ALL'
-                    ? 'bg-slate-900 text-white border-slate-900 ring-2 ring-slate-900/20 shadow-xs'
-                    : 'bg-slate-50 border-slate-200 text-slate-900 hover:bg-slate-100 hover:border-slate-300'
+                    ? 'bg-slate-900 text-white border-slate-900 ring-2 ring-slate-900/20 shadow-sm'
+                    : 'bg-slate-50/70 border-slate-200/80 text-slate-900 hover:bg-slate-50 hover:border-slate-300'
                 }`}
               >
                 <span className={`text-[11px] block font-medium ${dashboardCardFilter === 'ALL' ? 'text-slate-300' : 'text-slate-500'}`}>
                   Total Examinations
                 </span>
-                <span className="text-2xl font-bold block mt-0.5">{examinations.length}</span>
-                <span className={`text-[10px] block mt-1 ${dashboardCardFilter === 'ALL' ? 'text-emerald-300' : 'text-slate-400'}`}>
+                <span className="text-2xl font-black block mt-0.5">{examinations.length}</span>
+                <span className={`text-[10px] font-semibold block mt-1 ${dashboardCardFilter === 'ALL' ? 'text-emerald-300' : 'text-emerald-700'}`}>
                   Active Enclaves
                 </span>
               </button>
@@ -602,17 +810,17 @@ export const ExamManagerWorkspace: React.FC<ExamManagerWorkspaceProps> = ({
               <button
                 type="button"
                 onClick={() => setDashboardCardFilter('READY')}
-                className={`p-4 rounded-xl border text-left transition-all cursor-pointer ${
+                className={`p-4 rounded-xl border text-left transition-all cursor-pointer shadow-xs hover:-translate-y-0.5 ${
                   dashboardCardFilter === 'READY'
-                    ? 'bg-slate-900 text-white border-slate-900 ring-2 ring-slate-900/20 shadow-xs'
-                    : 'bg-slate-50 border-slate-200 text-slate-900 hover:bg-slate-100 hover:border-slate-300'
+                    ? 'bg-slate-900 text-white border-slate-900 ring-2 ring-slate-900/20 shadow-sm'
+                    : 'bg-slate-50/70 border-slate-200/80 text-slate-900 hover:bg-slate-50 hover:border-slate-300'
                 }`}
               >
                 <span className={`text-[11px] block font-medium ${dashboardCardFilter === 'READY' ? 'text-slate-300' : 'text-slate-500'}`}>
                   Pool Questions
                 </span>
-                <span className="text-2xl font-bold block mt-0.5">{questions.length}</span>
-                <span className={`text-[10px] block mt-1 ${dashboardCardFilter === 'READY' ? 'text-emerald-300' : 'text-slate-400'}`}>
+                <span className="text-2xl font-black block mt-0.5">{questions.length}</span>
+                <span className={`text-[10px] font-semibold block mt-1 ${dashboardCardFilter === 'READY' ? 'text-emerald-300' : 'text-slate-500'}`}>
                   Total In Repository
                 </span>
               </button>
@@ -620,19 +828,19 @@ export const ExamManagerWorkspace: React.FC<ExamManagerWorkspaceProps> = ({
               <button
                 type="button"
                 onClick={() => setDashboardCardFilter('VERIFIED')}
-                className={`p-4 rounded-xl border text-left transition-all cursor-pointer ${
+                className={`p-4 rounded-xl border text-left transition-all cursor-pointer shadow-xs hover:-translate-y-0.5 ${
                   dashboardCardFilter === 'VERIFIED'
-                    ? 'bg-emerald-950 text-white border-emerald-900 ring-2 ring-emerald-600/30 shadow-xs'
+                    ? 'bg-emerald-950 text-white border-emerald-900 ring-2 ring-emerald-600/30 shadow-sm'
                     : 'bg-emerald-50/60 border-emerald-200 text-emerald-950 hover:bg-emerald-50 hover:border-emerald-300'
                 }`}
               >
                 <span className={`text-[11px] block font-medium ${dashboardCardFilter === 'VERIFIED' ? 'text-emerald-300' : 'text-emerald-700'}`}>
                   Verified & Eligible
                 </span>
-                <span className={`text-2xl font-bold block mt-0.5 ${dashboardCardFilter === 'VERIFIED' ? 'text-emerald-300' : 'text-emerald-800'}`}>
+                <span className={`text-2xl font-black block mt-0.5 ${dashboardCardFilter === 'VERIFIED' ? 'text-emerald-300' : 'text-emerald-800'}`}>
                   {verifiedCount}
                 </span>
-                <span className={`text-[10px] block mt-1 ${dashboardCardFilter === 'VERIFIED' ? 'text-emerald-300' : 'text-emerald-600 font-bold'}`}>
+                <span className={`text-[10px] block mt-1 ${dashboardCardFilter === 'VERIFIED' ? 'text-emerald-300' : 'text-emerald-700 font-bold'}`}>
                   Ready for Generation
                 </span>
               </button>
@@ -640,16 +848,16 @@ export const ExamManagerWorkspace: React.FC<ExamManagerWorkspaceProps> = ({
               <button
                 type="button"
                 onClick={() => setDashboardCardFilter('QUARANTINED')}
-                className={`p-4 rounded-xl border text-left transition-all cursor-pointer ${
+                className={`p-4 rounded-xl border text-left transition-all cursor-pointer shadow-xs hover:-translate-y-0.5 ${
                   dashboardCardFilter === 'QUARANTINED'
-                    ? 'bg-rose-950 text-white border-rose-900 ring-2 ring-rose-600/30 shadow-xs'
+                    ? 'bg-rose-950 text-white border-rose-900 ring-2 ring-rose-600/30 shadow-sm'
                     : 'bg-rose-50/60 border-rose-200 text-rose-950 hover:bg-rose-50 hover:border-rose-300'
                 }`}
               >
                 <span className={`text-[11px] block font-medium ${dashboardCardFilter === 'QUARANTINED' ? 'text-rose-300' : 'text-rose-700'}`}>
                   Quarantined / Suspects
                 </span>
-                <span className={`text-2xl font-bold block mt-0.5 ${dashboardCardFilter === 'QUARANTINED' ? 'text-rose-300' : 'text-rose-800'}`}>
+                <span className={`text-2xl font-black block mt-0.5 ${dashboardCardFilter === 'QUARANTINED' ? 'text-rose-300' : 'text-rose-800'}`}>
                   {quarantinedCount}
                 </span>
                 <span className={`text-[10px] block mt-1 ${dashboardCardFilter === 'QUARANTINED' ? 'text-rose-300' : 'text-rose-600 font-bold'}`}>
@@ -660,10 +868,12 @@ export const ExamManagerWorkspace: React.FC<ExamManagerWorkspaceProps> = ({
           </div>
 
           {/* Active List based on Selected Interactive Metric Card */}
-          <div className="p-6 rounded-xl bg-white border border-slate-200 shadow-xs space-y-4">
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b pb-3">
+          <div className="modern-card p-6 rounded-2xl bg-white border border-slate-200 shadow-sm space-y-4">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-slate-100 pb-3">
               <h3 className="text-sm font-bold text-slate-900 flex items-center gap-2">
-                <FolderLock className="w-4 h-4 text-emerald-900" />
+                <div className="p-1 rounded-md bg-emerald-50 text-emerald-800">
+                  <FolderLock className="w-3.5 h-3.5" />
+                </div>
                 <span>
                   {dashboardCardFilter === 'VERIFIED'
                     ? 'Verified & Paper-Eligible Question Pool'
@@ -762,60 +972,295 @@ export const ExamManagerWorkspace: React.FC<ExamManagerWorkspaceProps> = ({
 
       {/* ALL EXAMINATIONS */}
       {activeSubTab === 'all_examinations' && (
-        <div className="p-6 rounded-xl bg-white border border-slate-200 shadow-xs space-y-4">
-          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b pb-3">
-            <h3 className="text-base font-bold text-slate-900">All Scheduled Examinations</h3>
-            <span className="text-xs text-slate-500 font-mono">{examinations.length} Active Enclaves</span>
+        <div className="space-y-5">
+          {/* Header & Control Bar */}
+          <div className="p-6 rounded-2xl bg-white border border-slate-200/90 shadow-sm space-y-4">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-100 pb-4">
+              <div>
+                <div className="flex items-center gap-2">
+                  <span className="text-[10px] font-black uppercase tracking-wider text-emerald-800 bg-emerald-50 px-2.5 py-0.5 rounded-full border border-emerald-200">
+                    Active Vault Catalog
+                  </span>
+                  <span className="text-[10px] font-bold text-slate-500 font-mono">
+                    {examinations.length} Sealed Enclaves
+                  </span>
+                </div>
+                <h3 className="text-xl font-black text-slate-900 tracking-tight mt-1">
+                  All Scheduled Examinations
+                </h3>
+                <p className="text-xs text-slate-500">
+                  Cryptographically secured test papers, Shamir threshold unlock schedules, and centre delivery vaults.
+                </p>
+              </div>
+
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={onRefresh}
+                  className="px-3 py-1.5 rounded-xl border border-slate-200 hover:bg-slate-50 text-slate-700 text-xs font-bold flex items-center gap-1.5 cursor-pointer"
+                >
+                  <RotateCcw className="w-3.5 h-3.5 text-slate-500" />
+                  <span>Refresh Vaults</span>
+                </button>
+              </div>
+            </div>
+
+            {/* Search & Filter Bar */}
+            <div className="flex flex-col sm:flex-row items-center justify-between gap-3">
+              <div className="relative w-full sm:w-80">
+                <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
+                <input
+                  type="text"
+                  value={examSearchQuery}
+                  onChange={e => setExamSearchQuery(e.target.value)}
+                  placeholder="Search examination or subject..."
+                  className="w-full pl-9 pr-3 py-2 text-xs rounded-xl input-luxury text-slate-900 font-medium"
+                />
+              </div>
+
+              <div className="flex flex-wrap items-center gap-1.5 w-full sm:w-auto">
+                {['ALL', 'Competitive Exam', 'NEET', 'JEE', 'TCET / CET-type Exam', 'University Exam'].map(cat => (
+                  <button
+                    key={cat}
+                    type="button"
+                    onClick={() => setExamCategoryFilter(cat)}
+                    className={`px-3 py-1 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                      examCategoryFilter === cat
+                        ? 'bg-slate-900 text-white shadow-xs'
+                        : 'bg-slate-100 hover:bg-slate-200 text-slate-700'
+                    }`}
+                  >
+                    {cat === 'ALL' ? 'All Categories' : cat.replace(' / CET-type Exam', '')}
+                  </button>
+                ))}
+              </div>
+            </div>
           </div>
 
-          <div className="space-y-3">
-            {examinations.map(ex => {
-              const type = (ex as any).exam_type || 'MCQ';
-              const typeBadgeClass =
-                type === 'MCQ'
-                  ? 'bg-blue-100 text-blue-900 border-blue-200'
-                  : type === 'THEORY'
-                  ? 'bg-amber-100 text-amber-900 border-amber-200'
-                  : type === 'MIXED'
-                  ? 'bg-teal-100 text-teal-900 border-teal-200'
-                  : 'bg-indigo-100 text-indigo-900 border-indigo-200';
+          {/* Examinations Grid / Cards */}
+          <div className="grid grid-cols-1 gap-4">
+            {examinations
+              .filter(ex => {
+                const matchesSearch =
+                  !examSearchQuery ||
+                  ex.name.toLowerCase().includes(examSearchQuery.toLowerCase()) ||
+                  ex.subject.toLowerCase().includes(examSearchQuery.toLowerCase());
+                const matchesCat = examCategoryFilter === 'ALL' || ex.category === examCategoryFilter;
+                return matchesSearch && matchesCat;
+              })
+              .map(ex => {
+                const type = (ex as any).exam_type || 'MCQ';
+                const typeBadgeClass =
+                  type === 'MCQ'
+                    ? 'bg-blue-100 text-blue-950 border-blue-200'
+                    : type === 'THEORY'
+                    ? 'bg-amber-100 text-amber-950 border-amber-200'
+                    : type === 'MIXED'
+                    ? 'bg-teal-100 text-teal-950 border-teal-200'
+                    : 'bg-indigo-100 text-indigo-950 border-indigo-200';
 
-              return (
-                <div key={ex.id} className="p-4 rounded-lg bg-slate-50 border border-slate-200 space-y-3 text-xs">
-                  <div className="flex flex-wrap items-center justify-between gap-2">
-                    <div className="flex items-center gap-2">
-                      <span className="font-bold text-sm text-slate-900">{ex.name}</span>
-                      <span className={`px-2 py-0.5 rounded text-[10px] font-bold border ${typeBadgeClass}`}>
-                        {type === 'MCQ' ? '⚡ MCQ (OMR/CBT)' : type === 'THEORY' ? '📝 THEORY (Subjective)' : type === 'MIXED' ? '🔀 MIXED (Hybrid)' : '💻 PRACTICAL'}
-                      </span>
+                return (
+                  <div
+                    key={ex.id}
+                    className="p-5 rounded-2xl bg-white border border-slate-200/90 shadow-sm hover:shadow-md hover:border-slate-300 transition-all space-y-4 relative overflow-hidden"
+                  >
+                    <div className="flex flex-wrap items-start justify-between gap-3">
+                      <div className="space-y-1">
+                        <div className="flex flex-wrap items-center gap-2">
+                          <span className="font-mono font-black text-[11px] text-slate-500 bg-slate-100 px-2.5 py-0.5 rounded-md">
+                            {ex.id}
+                          </span>
+                          <span className={`px-2 py-0.5 rounded text-[10px] font-black border ${typeBadgeClass}`}>
+                            {type === 'MCQ' ? '⚡ MCQ (OMR/CBT)' : type === 'THEORY' ? '📝 THEORY (Descriptive)' : type === 'MIXED' ? '🔀 MIXED (Hybrid)' : '💻 PRACTICAL'}
+                          </span>
+                          <span className="text-[10px] font-bold text-slate-600 bg-slate-100 px-2 py-0.5 rounded-md">
+                            {ex.category}
+                          </span>
+                        </div>
+                        <h4 className="text-base font-black text-slate-900 leading-snug">
+                          {ex.name}
+                        </h4>
+                        <div className="flex items-center gap-1.5 text-xs text-slate-600 font-medium">
+                          <GraduationCap className="w-4 h-4 text-emerald-700 shrink-0" />
+                          <span>{ex.subject}</span>
+                        </div>
+                      </div>
+
+                      <div className="flex items-center gap-2">
+                        <span
+                          className={`px-3 py-1 rounded-full text-[10px] font-black tracking-wider uppercase border flex items-center gap-1.5 ${
+                            ex.status === 'GENERATED' || ex.status === 'READY'
+                              ? 'bg-emerald-50 text-emerald-950 border-emerald-300'
+                              : ex.status === 'UNLOCKED'
+                              ? 'bg-purple-50 text-purple-950 border-purple-300'
+                              : 'bg-amber-50 text-amber-950 border-amber-300'
+                          }`}
+                        >
+                          <span className={`w-2 h-2 rounded-full ${
+                            ex.status === 'GENERATED' || ex.status === 'READY' ? 'bg-emerald-600 animate-pulse' : 'bg-amber-600'
+                          }`} />
+                          {ex.status}
+                        </span>
+                      </div>
                     </div>
-                    <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-emerald-100 text-emerald-900">
-                      {ex.status}
-                    </span>
+
+                    {/* Metadata Grid */}
+                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-xs bg-slate-50/80 p-3.5 rounded-xl border border-slate-100">
+                      <div className="space-y-0.5">
+                        <span className="text-[10px] font-bold text-slate-400 block uppercase">Structure</span>
+                        <div className="font-black text-slate-900 flex items-center gap-1.5">
+                          <Award className="w-3.5 h-3.5 text-amber-700 shrink-0" />
+                          <span>{ex.total_marks} Marks</span>
+                          <span className="text-slate-400 font-normal">({ex.total_questions} Qs)</span>
+                        </div>
+                      </div>
+
+                      <div className="space-y-0.5">
+                        <span className="text-[10px] font-bold text-slate-400 block uppercase">Duration</span>
+                        <div className="font-black text-slate-900 flex items-center gap-1.5">
+                          <Clock className="w-3.5 h-3.5 text-blue-700 shrink-0" />
+                          <span>{ex.duration_minutes} Minutes</span>
+                        </div>
+                      </div>
+
+                      <div className="space-y-0.5">
+                        <span className="text-[10px] font-bold text-slate-400 block uppercase">Scheduled Test</span>
+                        <div className="font-mono text-slate-900 font-bold flex items-center gap-1.5">
+                          <Calendar className="w-3.5 h-3.5 text-teal-700 shrink-0" />
+                          <span>{ex.exam_date} @ {ex.exam_time}</span>
+                        </div>
+                      </div>
+
+                      <div className="space-y-0.5">
+                        <span className="text-[10px] font-bold text-slate-400 block uppercase">Time-Lock Unlock</span>
+                        <div className="font-mono text-emerald-950 font-black flex items-center gap-1.5">
+                          <Lock className="w-3.5 h-3.5 text-emerald-700 shrink-0" />
+                          <span>{ex.unlock_time}</span>
+                          <span className="text-[9px] text-emerald-800 font-sans font-bold">(Shamir 3-Key)</span>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Action Bar */}
+                    <div className="flex flex-wrap items-center justify-between gap-2 pt-1 border-t border-slate-100">
+                      <div className="flex items-center gap-2">
+                        <button
+                          type="button"
+                          onClick={() => handleGeneratePaper(ex.id)}
+                          disabled={generating || org?.status !== 'VERIFIED'}
+                          className="px-3.5 py-1.5 rounded-xl bg-slate-900 hover:bg-slate-800 text-white font-bold text-xs flex items-center gap-1.5 shadow-xs disabled:opacity-50 cursor-pointer"
+                        >
+                          <Sparkles className="w-3.5 h-3.5 text-amber-400" />
+                          <span>{ex.status === 'GENERATED' ? 'Re-Generate & Encrypt' : 'Generate Encrypted Paper'}</span>
+                        </button>
+
+                        {onLaunchCandidateSimulator && (
+                          <button
+                            type="button"
+                            onClick={() => onLaunchCandidateSimulator(ex.id)}
+                            className="px-3.5 py-1.5 rounded-xl bg-emerald-50 hover:bg-emerald-100 text-emerald-900 border border-emerald-200 font-bold text-xs flex items-center gap-1.5 cursor-pointer"
+                          >
+                            <Play className="w-3.5 h-3.5 text-emerald-700 fill-current" />
+                            <span>Simulate Exam &rarr;</span>
+                          </button>
+                        )}
+                      </div>
+
+                      <div className="flex items-center gap-2">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setSelectedExamId(ex.id);
+                            setStatusMessage({ type: 'success', text: `Selected exam "${ex.name}" for delivery centres.` });
+                          }}
+                          className="text-slate-600 hover:text-slate-900 text-xs font-semibold px-2 py-1 rounded hover:bg-slate-100 cursor-pointer"
+                        >
+                          Add Centre
+                        </button>
+
+                        <button
+                          type="button"
+                          onClick={() => handleEmergencyRegenerate(ex.id)}
+                          className="text-rose-600 hover:text-rose-800 text-xs font-semibold px-2 py-1 rounded hover:bg-rose-50 cursor-pointer"
+                        >
+                          Emergency Re-Gen
+                        </button>
+                      </div>
+                    </div>
                   </div>
-                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-slate-600">
-                    <div>Subject: <span className="font-bold text-slate-900">{ex.subject}</span></div>
-                    <div>Category: <span className="font-bold text-slate-900">{ex.category}</span></div>
-                    <div>Marks: <span className="font-bold text-slate-900">{ex.total_marks}</span></div>
-                    <div>Duration: <span className="font-bold text-slate-900">{ex.duration_minutes} mins</span></div>
-                    <div>Schedule Date: <span className="font-mono text-slate-900">{ex.exam_date}</span></div>
-                    <div>Exam Time: <span className="font-mono text-slate-900">{ex.exam_time}</span></div>
-                    <div>Unlock Time: <span className="font-mono font-bold text-emerald-900">{ex.unlock_time}</span></div>
-                    <div>Total Qs: <span className="font-bold text-slate-900">{ex.total_questions}</span></div>
-                  </div>
-                </div>
-              );
-            })}
+                );
+              })}
           </div>
         </div>
       )}
 
       {/* CREATE EXAMINATION */}
       {activeSubTab === 'create_examination' && (
-        <div className="p-6 rounded-xl bg-white border border-slate-200 shadow-xs space-y-4">
-          <h3 className="text-base font-bold text-slate-900 border-b pb-2">
-            Create New Examination Enclave
-          </h3>
+        <div className="p-6 rounded-2xl bg-white border border-slate-200/90 shadow-sm space-y-6">
+          <div className="border-b border-slate-100 pb-4">
+            <span className="text-[10px] font-black uppercase tracking-wider text-emerald-800 bg-emerald-50 px-2.5 py-0.5 rounded-full border border-emerald-200">
+              Cryptographic Enclave Setup
+            </span>
+            <h3 className="text-xl font-black text-slate-900 mt-1">
+              Create New Examination Enclave
+            </h3>
+            <p className="text-xs text-slate-500">
+              Establish a tamper-proof examination vault with automated question bank pooling, Shamir key-sharing, and verifiable time-locks.
+            </p>
+          </div>
+
+          {/* Quick Real Exam Presets */}
+          <div className="p-5 rounded-2xl bg-gradient-to-r from-slate-950 via-slate-900 to-indigo-950 text-white shadow-md space-y-3 relative overflow-hidden">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+              <div className="flex items-center gap-2">
+                <Sparkles className="w-4 h-4 text-amber-400" />
+                <span className="font-bold text-xs uppercase tracking-wider text-amber-300">
+                  Quick Real Exam Presets (1-Click Real Blueprint Auto Fill)
+                </span>
+              </div>
+              <span className="text-[11px] text-slate-300 font-medium">
+                Authentic AICTE, NTA & University configurations
+              </span>
+            </div>
+
+            <div className="flex flex-wrap gap-2">
+              {REAL_EXAM_PRESETS.map(preset => {
+                const isSelected = selectedPresetId === preset.id;
+                return (
+                  <button
+                    key={preset.id}
+                    type="button"
+                    onClick={() => handleApplyPreset(preset)}
+                    className={`px-3 py-2 rounded-xl text-xs font-bold transition-all flex items-center gap-2 cursor-pointer ${
+                      isSelected
+                        ? 'bg-amber-400 text-slate-950 ring-2 ring-white shadow-md scale-105'
+                        : 'bg-white/10 hover:bg-white/20 text-white border border-white/10'
+                    }`}
+                  >
+                    <span>{preset.shortTag}</span>
+                    <span className="text-[10px] opacity-80 font-normal">
+                      ({preset.totalMarks}M • {preset.totalQuestions}Q)
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
+
+            {selectedPresetId && (
+              <div className="text-[11px] text-amber-200 bg-white/10 p-2.5 rounded-xl border border-white/15 flex items-center justify-between">
+                <span>
+                  Preset Applied: <strong className="text-white">{REAL_EXAM_PRESETS.find(p => p.id === selectedPresetId)?.name}</strong> — {REAL_EXAM_PRESETS.find(p => p.id === selectedPresetId)?.description}
+                </span>
+                <button
+                  type="button"
+                  onClick={() => setSelectedPresetId(null)}
+                  className="text-[10px] text-slate-300 hover:text-white underline cursor-pointer"
+                >
+                  Clear Preset
+                </button>
+              </div>
+            )}
+          </div>
 
           <form onSubmit={handleCreateExam} className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-xs">
             <div className="sm:col-span-2">
@@ -826,7 +1271,7 @@ export const ExamManagerWorkspace: React.FC<ExamManagerWorkspaceProps> = ({
                 onChange={e => setExamName(e.target.value)}
                 placeholder="e.g. National Computer Science & Security Entrance Exam 2026"
                 required
-                className="w-full px-3 py-2 rounded-lg bg-slate-50 border border-slate-300 text-slate-900 focus:bg-white focus:border-emerald-800 focus:outline-hidden"
+                className="w-full px-3.5 py-2.5 rounded-xl input-luxury text-slate-900 font-medium"
               />
             </div>
 
@@ -838,7 +1283,7 @@ export const ExamManagerWorkspace: React.FC<ExamManagerWorkspaceProps> = ({
                 onChange={e => setSubject(e.target.value)}
                 placeholder="e.g. Computer Science & Applied Cryptography"
                 required
-                className="w-full px-3 py-2 rounded-lg bg-slate-50 border border-slate-300 text-slate-900 focus:bg-white focus:border-emerald-800 focus:outline-hidden"
+                className="w-full px-3.5 py-2.5 rounded-xl input-luxury text-slate-900 font-medium"
               />
             </div>
 
@@ -847,14 +1292,14 @@ export const ExamManagerWorkspace: React.FC<ExamManagerWorkspaceProps> = ({
               <select
                 value={category}
                 onChange={e => setCategory(e.target.value)}
-                className="w-full px-3 py-2 rounded-lg bg-slate-50 border border-slate-300 text-slate-900 focus:bg-white focus:border-emerald-800 focus:outline-hidden"
+                className="w-full px-3.5 py-2.5 rounded-xl input-luxury text-slate-900 font-semibold"
               >
-                <option value="NEET">NEET (National Eligibility Entrance Test)</option>
-                <option value="JEE">JEE (Joint Entrance Examination)</option>
-                <option value="Competitive Exam">Competitive Exam</option>
-                <option value="TCET / CET-type Exam">TCET / CET-type Exam</option>
-                <option value="University Exam">University Exam</option>
-                <option value="Custom Exam">Custom Institutional Exam</option>
+                <option value="Competitive Exam">Competitive Exam (GATE / CAT / UPSC)</option>
+                <option value="JEE">JEE (Joint Entrance Examination - Main & Advanced)</option>
+                <option value="NEET">NEET (National Eligibility Entrance Test - UG & PG)</option>
+                <option value="TCET / CET-type Exam">TCET / CET-type Exam (State Entrance)</option>
+                <option value="University Exam">University Exam (AICTE Semester Theory & Lab)</option>
+                <option value="Custom Exam">Custom Institutional Enclave</option>
               </select>
             </div>
 
@@ -863,7 +1308,7 @@ export const ExamManagerWorkspace: React.FC<ExamManagerWorkspaceProps> = ({
               <select
                 value={examType}
                 onChange={e => setExamType(e.target.value as any)}
-                className="w-full px-3 py-2 rounded-lg bg-slate-50 border border-slate-300 text-slate-900 focus:bg-white focus:border-emerald-800 focus:outline-hidden font-medium"
+                className="w-full px-3.5 py-2.5 rounded-xl input-luxury text-slate-900 font-semibold"
               >
                 <option value="MCQ">MCQ (Multiple Choice Questions - OMR / CBT)</option>
                 <option value="THEORY">THEORY (Subjective / Descriptive Pattern)</option>
@@ -885,7 +1330,7 @@ export const ExamManagerWorkspace: React.FC<ExamManagerWorkspaceProps> = ({
                 value={examDate}
                 onChange={e => setExamDate(e.target.value)}
                 required
-                className="w-full px-3 py-2 rounded-lg bg-slate-50 border border-slate-300 text-slate-900 focus:bg-white focus:border-emerald-800 focus:outline-hidden"
+                className="w-full px-3.5 py-2.5 rounded-xl input-luxury text-slate-900 font-medium"
               />
             </div>
 
@@ -896,51 +1341,72 @@ export const ExamManagerWorkspace: React.FC<ExamManagerWorkspaceProps> = ({
                 value={examTime}
                 onChange={e => setExamTime(e.target.value)}
                 required
-                className="w-full px-3 py-2 rounded-lg bg-slate-50 border border-slate-300 text-slate-900 focus:bg-white focus:border-emerald-800 focus:outline-hidden"
+                className="w-full px-3.5 py-2.5 rounded-xl input-luxury text-slate-900 font-medium"
               />
             </div>
 
             <div>
-              <label className="block text-slate-700 font-bold mb-1">Authorized Time-Lock Unlock *</label>
+              <label className="block text-slate-700 font-bold mb-1">
+                Authorized Shamir Unlock Time *
+              </label>
               <input
                 type="time"
                 value={unlockTime}
                 onChange={e => setUnlockTime(e.target.value)}
                 required
-                className="w-full px-3 py-2 rounded-lg bg-slate-50 border border-slate-300 text-slate-900 focus:bg-white focus:border-emerald-800 focus:outline-hidden"
+                className="w-full px-3.5 py-2.5 rounded-xl input-luxury text-slate-900 font-medium font-mono"
               />
+              <span className="text-[10px] text-slate-500 block mt-1">
+                Paper decrypts strictly at this minute via 3-party threshold keys.
+              </span>
             </div>
 
             <div>
-              <label className="block text-slate-700 font-bold mb-1">Total Marks</label>
+              <label className="block text-slate-700 font-bold mb-1">Total Marks *</label>
               <input
                 type="number"
                 value={totalMarks}
                 onChange={e => setTotalMarks(Number(e.target.value))}
                 required
-                className="w-full px-3 py-2 rounded-lg bg-slate-50 border border-slate-300 text-slate-900 focus:bg-white focus:border-emerald-800 focus:outline-hidden"
+                className="w-full px-3.5 py-2.5 rounded-xl input-luxury text-slate-900 font-medium"
               />
             </div>
 
             <div>
-              <label className="block text-slate-700 font-bold mb-1">Target Question Count</label>
+              <label className="block text-slate-700 font-bold mb-1">Target Question Count *</label>
               <input
                 type="number"
                 value={totalQuestions}
                 onChange={e => setTotalQuestions(Number(e.target.value))}
                 required
-                className="w-full px-3 py-2 rounded-lg bg-slate-50 border border-slate-300 text-slate-900 focus:bg-white focus:border-emerald-800 focus:outline-hidden"
+                className="w-full px-3.5 py-2.5 rounded-xl input-luxury text-slate-900 font-medium"
               />
             </div>
 
-            <div className="sm:col-span-2 pt-2">
+            <div>
+              <label className="block text-slate-700 font-bold mb-1">Examination Duration (Minutes) *</label>
+              <input
+                type="number"
+                value={durationMins}
+                onChange={e => setDurationMins(Number(e.target.value))}
+                required
+                className="w-full px-3.5 py-2.5 rounded-xl input-luxury text-slate-900 font-medium"
+              />
+            </div>
+
+            <div className="sm:col-span-2 pt-3 border-t border-slate-100 flex items-center justify-between">
               <button
                 type="submit"
                 disabled={org?.status !== 'VERIFIED'}
-                className="px-6 py-2.5 bg-emerald-900 hover:bg-emerald-800 disabled:opacity-40 text-white rounded-lg font-bold text-xs shadow-xs"
+                className="px-8 py-3 bg-emerald-900 hover:bg-emerald-800 disabled:opacity-40 text-white rounded-xl font-bold text-xs shadow-md cursor-pointer transition-all flex items-center gap-2"
               >
-                Create Examination Record
+                <Sparkles className="w-4 h-4 text-amber-300" />
+                <span>Create Examination Record</span>
               </button>
+
+              <span className="text-[11px] text-slate-500">
+                {org?.status === 'VERIFIED' ? '✅ Organization Verified' : '⚠️ Accreditation required'}
+              </span>
             </div>
           </form>
         </div>
@@ -1015,13 +1481,14 @@ export const ExamManagerWorkspace: React.FC<ExamManagerWorkspaceProps> = ({
                       <span>Upload Question Paper PDF / Transcript</span>
                     </h3>
                     <p className="text-xs text-slate-500 mt-0.5">
-                      Upload master examination papers or paste OCR transcript. Gemini AI parses questions, options, marks, and answer keys automatically.
+                      Upload one or more question papers or paste OCR transcript. Ollama extracts only the questions present in the source.
                     </p>
                   </div>
 
-                  <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[11px] font-bold bg-emerald-50 text-emerald-800 border border-emerald-200 self-start sm:self-auto">
-                    <Sparkles className="w-3.5 h-3.5 text-emerald-600" />
-                    <span>Gemini Extraction Engine</span>
+                  <span className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[11px] font-bold border self-start sm:self-auto ${ollamaHealth?.connected ? 'bg-emerald-50 text-emerald-800 border-emerald-200' : 'bg-amber-50 text-amber-800 border-amber-200'}`}>
+                    <Sparkles className="w-3.5 h-3.5" />
+                    <span>Ollama {ollamaHealth?.connected ? 'Connected' : 'Offline'}</span>
+                    {ollamaHealth && <span className="font-normal">({ollamaHealth.model})</span>}
                   </span>
                 </div>
 
@@ -1050,23 +1517,58 @@ export const ExamManagerWorkspace: React.FC<ExamManagerWorkspaceProps> = ({
                 </div>
 
                 {/* Upload Box */}
-                <div className="border-2 border-dashed border-slate-300 rounded-xl p-6 bg-slate-50 hover:bg-slate-100/60 transition-colors text-center">
+                <div
+                  onDragOver={event => { event.preventDefault(); setIsFileDragOver(true); }}
+                  onDragLeave={() => setIsFileDragOver(false)}
+                  onDrop={handleFileDrop}
+                  className={`border-2 border-dashed rounded-xl p-6 bg-slate-50 hover:bg-slate-100/60 transition-colors text-center ${isFileDragOver ? 'border-emerald-600 bg-emerald-50' : 'border-slate-300'}`}
+                >
                   <Upload className="w-8 h-8 text-slate-400 mx-auto mb-2" />
                   <p className="text-xs font-bold text-slate-800">
-                    {pdfFileName ? `Selected: ${pdfFileName}` : 'Choose Question Paper PDF, Word Doc, or Text File'}
+                    {uploadedFiles.length > 1 ? `${uploadedFiles.length} files selected` : pdfFileName ? `Selected: ${pdfFileName}` : 'Choose Question Paper PDF, Word Doc, or Text File'}
                   </p>
+                  {uploadedFiles.length > 0 && (
+                    <div className="mx-auto mt-2 max-w-xl space-y-1 text-left">
+                      {uploadedFiles.map(file => (
+                        <div key={file.id} className="flex items-center gap-2 rounded-md bg-white/80 px-2 py-1 text-[11px] text-slate-700">
+                          <FileText className="h-3.5 w-3.5 shrink-0 text-emerald-700" />
+                          <span className="truncate flex-1">{file.name}</span>
+                          <span className="shrink-0 text-slate-500">{(file.size / 1024 / 1024).toFixed(2)} MB</span>
+                          <span className="shrink-0 font-bold text-emerald-700">{file.status === 'READY' ? 'Ready' : file.status}</span>
+                          <button type="button" onClick={() => removeUploadedFile(file.id)} className="shrink-0 text-slate-400 hover:text-rose-600" aria-label={`Remove ${file.name}`}>
+                            <X className="h-3.5 w-3.5" />
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  )}
                   <p className="text-[11px] text-slate-500 mt-1">
                     Supports .pdf, .txt, .docx, .json files. Extraction pipeline isolates individual questions securely.
                   </p>
                   <label className="mt-3 inline-block px-4 py-2 bg-slate-800 hover:bg-slate-700 text-white rounded-lg font-bold text-xs cursor-pointer shadow-xs">
-                    Browse File
+                    {uploadedFiles.length > 0 ? 'Add More Files' : 'Browse Files'}
                     <input
                       type="file"
                       accept=".pdf,.txt,.docx,.json,.csv"
                       onChange={handleFileUpload}
+                      multiple
                       className="hidden"
                     />
                   </label>
+                  {uploadedFiles.length > 0 && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setUploadedFiles([]);
+                        setPdfFileName('');
+                        setPdfFileData('');
+                        setPdfText('');
+                      }}
+                      className="ml-2 text-xs font-bold text-slate-500 hover:text-rose-600 underline"
+                    >
+                      Clear All Files
+                    </button>
+                  )}
                 </div>
 
                 {/* Text Transcript Box */}
@@ -1134,7 +1636,7 @@ Marks: 10`}
                           {extractedQuestions.length} Questions Extracted Successfully
                         </span>
                         <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-emerald-200/70 text-emerald-900">
-                          {aiEngineUsed ? 'Gemini 2.5 AI' : 'Heuristic Engine'}
+                          {aiEngineUsed ? 'Ollama AI' : 'Unavailable'}
                         </span>
                       </div>
                       {extractionSummary && (
@@ -1308,7 +1810,7 @@ Marks: 10`}
                                 )}
                               </button>
                               <span className="font-bold text-slate-900 text-xs">
-                                Question #{idx + 1}
+                                Question #{q.question_number || idx + 1}
                               </span>
                               <span
                                 className={`px-2 py-0.5 rounded text-[10px] font-bold ${
@@ -1335,6 +1837,14 @@ Marks: 10`}
                               </button>
                             </div>
                           </div>
+
+                          {q.source_file && (
+                            <div className="flex items-center gap-1.5 text-[11px] text-slate-500 border-b border-slate-100 pb-2">
+                              <FileText className="h-3.5 w-3.5 text-emerald-700" />
+                              <span>Source: {q.source_file}</span>
+                              {q.page_number && <span>• Page {q.page_number}</span>}
+                            </div>
+                          )}
 
                           {/* Editable Question Text */}
                           <div>
@@ -2271,6 +2781,11 @@ Marks: 10`}
             </form>
           </div>
         </div>
+      )}
+
+      {/* AUTHORITY SURVEILLANCE & LEAK PREVENTION DASHBOARD */}
+      {activeSubTab === 'proctor_dashboard' && (
+        <AuthoritySurveillanceDashboard currentUser={currentUser} />
       )}
     </div>
   );

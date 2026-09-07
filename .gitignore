@@ -4,11 +4,18 @@ dist/
 coverage/
 .DS_Store
 *.log
-.env*
+.env
+.env.local
+.env.production
+.env*.local
 !.env.example
 __pycache__/
 *.py[cod]
-0leakexam-main/.vite/
+.vite/
+0leakexam-main/
 
-# Local SQLite database
-zeroleak_data.sqlite
+# Local SQLite database & temp files
+*.sqlite
+*.sqlite*
+*.tmp
+

@@ -14,6 +14,7 @@ import {
 import { User, Question } from '../../types';
 import { api } from '../../api';
 import { NavSubTab } from '../Sidebar';
+import { AuthorityProctorEnclave } from '../proctor/AuthorityProctorEnclave';
 
 interface SmeWorkspaceProps {
   currentUser: User | null;
@@ -178,7 +179,12 @@ export const SmeWorkspace: React.FC<SmeWorkspaceProps> = ({
 
       {/* SME UNIFIED DASHBOARD & REVIEW WORKSPACE */}
       {(activeSubTab === 'dashboard' || activeSubTab === 'assigned_questions' || activeSubTab === 'question_verification') && (
-        <div className="space-y-6">
+        <AuthorityProctorEnclave
+          currentUser={currentUser}
+          workspaceType="SME_QUESTION_VETTING"
+          title="SME Question Vetting Enclave"
+        >
+          <div className="space-y-6">
           {/* Top Metrics Banner */}
           <div className="p-6 rounded-xl bg-white border border-slate-200 shadow-xs space-y-4">
             <div className="border-b pb-3 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2">
@@ -557,7 +563,8 @@ export const SmeWorkspace: React.FC<SmeWorkspaceProps> = ({
             </div>
           </div>
         </div>
-      )}
+      </AuthorityProctorEnclave>
+    )}
 
       {/* VERIFICATION HISTORY */}
       {activeSubTab === 'verification_history' && (

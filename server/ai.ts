@@ -389,8 +389,118 @@ export interface PaperExtractionResult {
   aiEngineUsed: boolean;
 }
 
+export interface OllamaExtractionResult extends PaperExtractionResult {
+  pages: number;
+}
+
+const OLLAMA_BASE_URL = (process.env.OLLAMA_BASE_URL || 'http://localhost:11434').replace(/\/$/, '');
+const OLLAMA_MODEL = process.env.OLLAMA_MODEL || 'llama3.2:latest';
+
+export async function checkOllamaHealth(): Promise<{ connected: boolean; model: string; error?: string }> {
+  try {
+    const response = await fetch(`${OLLAMA_BASE_URL}/api/tags`, { signal: AbortSignal.timeout(3000) });
+    if (!response.ok) return { connected: false, model: OLLAMA_MODEL, error: `Ollama returned HTTP ${response.status}.` };
+    const payload = await response.json() as { models?: Array<{ name?: string }> };
+    const modelAvailable = (payload.models || []).some(model => model.name === OLLAMA_MODEL || model.name?.startsWith(`${OLLAMA_MODEL}:`));
+    return modelAvailable
+      ? { connected: true, model: OLLAMA_MODEL }
+      : { connected: false, model: OLLAMA_MODEL, error: `Ollama model "${OLLAMA_MODEL}" is not installed.` };
+  } catch {
+    return { connected: false, model: OLLAMA_MODEL, error: 'Ollama is not running. Start Ollama and try again.' };
+  }
+}
+
+export async function extractQuestionsFromPaperWithOllama(
+  paperText: string,
+  subjectHint: string,
+  categoryHint: string,
+  pages: number
+): Promise<OllamaExtractionResult> {
+  if (!paperText.trim()) throw new Error('No readable text was extracted from this PDF. OCR is required for scanned PDFs.');
+
+  const prompt = `You are a question-paper extraction engine.
+Your task is ONLY to extract questions that already exist in the provided source text.
+Never generate new questions. Never paraphrase questions. Never summarize questions.
+Never modify mathematical expressions unnecessarily. Never modify programming code.
+Never invent missing answer options, answer keys, marks, topics, or syllabus values.
+Preserve original question numbering, option labels, option text, punctuation, equations, code, and OCR text as closely as possible.
+If an answer is explicitly present, extract it; otherwise return null. If marks are explicitly present, extract them; otherwise return null.
+Handle OCR imperfections intelligently, but use [unclear] for genuinely unreadable text.
+Return ONLY valid JSON matching this shape: {"questions":[{"question_number":"1","question_text":"...","options":[{"label":"A","text":"..."}],"answer":null,"marks":null,"source_page":1}]}
+Subject: ${subjectHint}
+Examination category: ${categoryHint}
+Source text:
+<<<
+${paperText.slice(0, 60000)}
+>>>`;
+
+  let response: Response;
+  try {
+    response = await fetch(`${OLLAMA_BASE_URL}/api/chat`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        model: OLLAMA_MODEL,
+        stream: false,
+        keep_alive: '10m',
+        format: 'json',
+        options: { temperature: 0 },
+        messages: [{ role: 'system', content: 'Extract only source questions and return strict JSON.' }, { role: 'user', content: prompt }],
+      }),
+      signal: AbortSignal.timeout(120000),
+    });
+  } catch (error: any) {
+    if (error?.name === 'TimeoutError' || error?.name === 'AbortError') {
+      throw new Error('Ollama extraction timed out. Use a smaller PDF or a faster local model.');
+    }
+    throw new Error(`Ollama is not reachable at ${OLLAMA_BASE_URL}. Start Ollama with "ollama serve" and try again.`);
+  }
+  if (!response.ok) throw new Error(`Ollama extraction failed with HTTP ${response.status}.`);
+  const payload = await response.json() as { message?: { content?: string } };
+  let parsed: { questions?: Array<Record<string, unknown>> };
+  try {
+    parsed = JSON.parse(payload.message?.content || '{}');
+  } catch {
+    throw new Error('Ollama returned invalid JSON.');
+  }
+  if (!Array.isArray(parsed.questions)) throw new Error('Ollama returned an invalid question list.');
+
+  const extractedQuestions = parsed.questions.map((question, index) => {
+    const options = Array.isArray(question.options)
+      ? question.options.map(option => typeof option === 'string' ? option : `${(option as any).label || ''}) ${(option as any).text || ''}`.trim())
+      : null;
+    const questionText = String(question.question_text || '').trim();
+    if (!questionText) throw new Error(`Ollama returned an empty question at position ${index + 1}.`);
+    return {
+      tempId: `OLLAMA-${index + 1}`,
+      question_number: String(question.question_number || index + 1),
+      page_number: Number(question.source_page) || undefined,
+      extraction_confidence: questionText.includes('[unclear]') ? 0.5 : 0.95,
+      needs_review: questionText.includes('[unclear]'),
+      subject: subjectHint,
+      topic: 'Unclassified',
+      question_type: options && options.length > 0 ? 'MCQ' as const : 'THEORY' as const,
+      difficulty: 'MEDIUM' as const,
+      marks: Number(question.marks) || 0,
+      negative_marks: 0,
+      correct_answer: question.answer == null ? '' : String(question.answer),
+      language: 'English',
+      syllabus: 'Not specified',
+      content_text: questionText,
+      options,
+      selected: true,
+    };
+  });
+  return {
+    extractedQuestions,
+    totalExtracted: extractedQuestions.length,
+    detectedSubject: subjectHint,
+    extractionSummary: `Ollama extracted ${extractedQuestions.length} questions from ${pages} page(s).`,
+    aiEngineUsed: true,
+    pages,
+  };
+}
 /**
- * Extracts academic examination questions from raw paper text / OCR transcript / PDF documents.
  * Employs Gemini 3.7 Flash with high-precision structured parsing and a deterministic fallback engine.
  */
 export async function extractQuestionsFromPaperWithAI(

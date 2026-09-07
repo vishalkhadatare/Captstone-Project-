@@ -109,7 +109,14 @@ export function saveDb() {
     const buffer = Buffer.from(data);
     const tempPath = `${DB_FILE_PATH}.${Date.now()}.${Math.random().toString(36).substring(2, 8)}.tmp`;
     fs.writeFileSync(tempPath, buffer);
-    fs.renameSync(tempPath, DB_FILE_PATH);
+    try {
+      fs.renameSync(tempPath, DB_FILE_PATH);
+    } catch {
+      fs.copyFileSync(tempPath, DB_FILE_PATH);
+      try {
+        fs.unlinkSync(tempPath);
+      } catch {}
+    }
   } catch (err) {
     console.error('Failed to persist database to disk atomically:', err);
   }
@@ -138,6 +145,24 @@ function initializeSchema(db: Database) {
       domain_verified INTEGER DEFAULT 0,
       created_at TEXT NOT NULL,
       updated_at TEXT NOT NULL
+    );
+
+    -- AICTE Recognized Premier Universities & Institutions
+    CREATE TABLE IF NOT EXISTS aicte_universities (
+      id TEXT PRIMARY KEY,
+      aicte_id TEXT NOT NULL UNIQUE,
+      name TEXT NOT NULL,
+      short_code TEXT NOT NULL,
+      nirf_rank INTEGER,
+      type TEXT NOT NULL,
+      state TEXT NOT NULL,
+      city TEXT NOT NULL,
+      official_email TEXT NOT NULL,
+      website TEXT NOT NULL,
+      contact_number TEXT NOT NULL,
+      headquarters_address TEXT NOT NULL,
+      auth_id TEXT NOT NULL,
+      created_at TEXT NOT NULL
     );
 
     -- Organization Verification History
@@ -343,6 +368,10 @@ function initializeSchema(db: Database) {
     CREATE TABLE IF NOT EXISTS questions (
       id TEXT PRIMARY KEY,
       org_id TEXT NOT NULL,
+      question_paper_id TEXT,
+      source_file TEXT,
+      source_page INTEGER,
+      question_number TEXT,
       subject TEXT NOT NULL,
       topic TEXT NOT NULL,
       difficulty TEXT NOT NULL, -- 'EASY', 'MEDIUM', 'HARD'
@@ -358,6 +387,21 @@ function initializeSchema(db: Database) {
       created_by TEXT NOT NULL,
       created_at TEXT NOT NULL,
       updated_at TEXT NOT NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS question_papers (
+      id TEXT PRIMARY KEY,
+      org_id TEXT NOT NULL,
+      original_filename TEXT NOT NULL,
+      subject TEXT NOT NULL,
+      examination_category TEXT NOT NULL,
+      processing_status TEXT NOT NULL,
+      page_count INTEGER NOT NULL DEFAULT 0,
+      question_count INTEGER NOT NULL DEFAULT 0,
+      extraction_error TEXT,
+      cloudinary_url TEXT,
+      cloudinary_public_id TEXT,
+      uploaded_at TEXT NOT NULL
     );
 
     -- Question Verifications
@@ -554,6 +598,110 @@ function initializeSchema(db: Database) {
       is_read INTEGER DEFAULT 0,
       created_at TEXT NOT NULL
     );
+
+    -- Exam Attempts (Candidate proctored attempts)
+    CREATE TABLE IF NOT EXISTS exam_attempts (
+      id TEXT PRIMARY KEY,
+      exam_id TEXT NOT NULL,
+      student_id TEXT NOT NULL,
+      student_name TEXT NOT NULL,
+      student_email TEXT NOT NULL,
+      status TEXT NOT NULL DEFAULT 'IN_PROGRESS', -- 'IN_PROGRESS', 'SUBMITTED', 'FLAGGED_FOR_REVIEW', 'VERIFIED_VALID'
+      started_at TEXT NOT NULL,
+      submitted_at TEXT,
+      total_questions INTEGER DEFAULT 0,
+      answered_questions INTEGER DEFAULT 0,
+      score REAL DEFAULT 0,
+      risk_score INTEGER DEFAULT 0,
+      risk_level TEXT DEFAULT 'NORMAL', -- 'NORMAL', 'LOW', 'MEDIUM', 'HIGH', 'CRITICAL'
+      warning_count INTEGER DEFAULT 0,
+      verification_snapshot TEXT,
+      proctor_decision TEXT DEFAULT 'PENDING', -- 'PENDING', 'VERIFIED_VALID', 'VIOLATION_CONFIRMED'
+      proctor_remarks TEXT,
+      answers_json TEXT,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    );
+
+    -- Proctor Sessions (Live telemetry & hardware status)
+    CREATE TABLE IF NOT EXISTS proctor_sessions (
+      id TEXT PRIMARY KEY,
+      attempt_id TEXT NOT NULL UNIQUE,
+      exam_id TEXT NOT NULL,
+      student_id TEXT NOT NULL,
+      camera_status TEXT DEFAULT 'ACTIVE', -- 'ACTIVE', 'DISABLED', 'ERROR'
+      microphone_status TEXT DEFAULT 'ACTIVE', -- 'ACTIVE', 'DISABLED', 'ERROR'
+      fullscreen_status TEXT DEFAULT 'ACTIVE', -- 'ACTIVE', 'EXITED'
+      face_status TEXT DEFAULT 'DETECTED', -- 'DETECTED', 'NOT_DETECTED', 'MULTIPLE'
+      faces_detected_count INTEGER DEFAULT 1,
+      last_heartbeat_at TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    );
+
+    -- Authority Proctor Sessions (Work on Camera for leak prevention)
+    CREATE TABLE IF NOT EXISTS authority_proctor_sessions (
+      id TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL,
+      user_name TEXT NOT NULL,
+      user_email TEXT NOT NULL,
+      user_role TEXT NOT NULL,
+      org_id TEXT NOT NULL,
+      workspace_type TEXT NOT NULL, -- 'SME_QUESTION_VETTING', 'TRANSLATOR_PORTAL', 'EXAM_PAPER_COMPILATION', 'DECRYPTED_PAPER_VIEWER', 'MASTER_KEY_RELEASE'
+      exam_id TEXT,
+      status TEXT NOT NULL DEFAULT 'ACTIVE', -- 'ACTIVE', 'LOCKED', 'TERMINATED', 'COMPLETED'
+      camera_status TEXT DEFAULT 'ACTIVE', -- 'ACTIVE', 'DISABLED', 'ERROR'
+      microphone_status TEXT DEFAULT 'ACTIVE', -- 'ACTIVE', 'DISABLED', 'MUTED'
+      fullscreen_status TEXT DEFAULT 'ACTIVE', -- 'ACTIVE', 'EXITED'
+      face_status TEXT DEFAULT 'VERIFIED', -- 'VERIFIED', 'ABSENT', 'SHOULDER_SURFING_DETECTED'
+      faces_detected_count INTEGER DEFAULT 1,
+      audio_level_db REAL DEFAULT -40.0,
+      leak_risk_score INTEGER DEFAULT 0,
+      leak_risk_level TEXT DEFAULT 'NORMAL', -- 'NORMAL', 'LOW', 'MEDIUM', 'HIGH', 'CRITICAL'
+      verification_snapshot TEXT,
+      emergency_locked INTEGER DEFAULT 0,
+      emergency_lock_reason TEXT,
+      locked_by TEXT,
+      last_heartbeat_at TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    );
+
+    -- Proctor Events (Chronological audit ledger of suspicious activity / leak signals)
+    CREATE TABLE IF NOT EXISTS proctor_events (
+      id TEXT PRIMARY KEY,
+      session_id TEXT,
+      attempt_id TEXT,
+      user_id TEXT,
+      user_role TEXT,
+      exam_id TEXT,
+      student_id TEXT,
+      event_type TEXT NOT NULL,
+      severity TEXT NOT NULL, -- 'LOW', 'MEDIUM', 'HIGH', 'CRITICAL'
+      risk_points INTEGER DEFAULT 0,
+      timestamp TEXT NOT NULL,
+      metadata_json TEXT,
+      snapshot_thumbnail TEXT,
+      created_at TEXT NOT NULL
+    );
+
+    -- Proctor Settings (Configurable risk weights)
+    CREATE TABLE IF NOT EXISTS proctor_settings (
+      id TEXT PRIMARY KEY,
+      org_id TEXT,
+      tab_switch_points INTEGER DEFAULT 10,
+      fullscreen_exit_points INTEGER DEFAULT 10,
+      face_not_detected_points INTEGER DEFAULT 15,
+      multiple_faces_points INTEGER DEFAULT 30,
+      camera_disabled_points INTEGER DEFAULT 30,
+      mic_disabled_points INTEGER DEFAULT 15,
+      audio_activity_points INTEGER DEFAULT 5,
+      copy_paste_points INTEGER DEFAULT 5,
+      key_shortcut_points INTEGER DEFAULT 5,
+      repeated_activity_points INTEGER DEFAULT 10,
+      max_warnings INTEGER DEFAULT 3,
+      updated_at TEXT NOT NULL
+    );
   `);
 
   // Safe incremental column additions for backwards compatibility
@@ -580,6 +728,14 @@ function initializeSchema(db: Database) {
   safeAddColumn('question_translations', 'org_id TEXT');
   safeAddColumn('question_translations', 'assignment_id TEXT');
   safeAddColumn('question_translations', 'source_language TEXT DEFAULT "English"');
+  safeAddColumn('questions', 'question_paper_id TEXT');
+  safeAddColumn('questions', 'source_file TEXT');
+  safeAddColumn('questions', 'source_page INTEGER');
+  safeAddColumn('questions', 'question_number TEXT');
+  safeAddColumn('question_papers', 'cloudinary_url TEXT');
+  safeAddColumn('question_papers', 'cloudinary_public_id TEXT');
+  safeAddColumn('organization_documents', 'cloudinary_url TEXT');
+  safeAddColumn('organization_documents', 'cloudinary_public_id TEXT');
   safeAddColumn('trusted_devices', 'device_uuid TEXT');
   safeAddColumn('trusted_devices', 'public_key TEXT');
   safeAddColumn('trusted_devices', 'device_model TEXT');
@@ -598,12 +754,216 @@ function initializeSchema(db: Database) {
   safeAddColumn('trusted_devices', 'disabled_at TEXT');
   safeAddColumn('trusted_devices', 'replacement_of_device_id TEXT');
 
+  safeAddColumn('examinations', 'proctor_enabled INTEGER DEFAULT 1');
+
+  safeAddColumn('proctor_events', 'session_id TEXT');
+  safeAddColumn('proctor_events', 'user_id TEXT');
+  safeAddColumn('proctor_events', 'user_role TEXT');
+  safeAddColumn('proctor_events', 'snapshot_thumbnail TEXT');
+
+  try {
+    const proctorCols = executeQuery(db, 'PRAGMA table_info(proctor_events)', []);
+    const attemptCol = proctorCols.find((c: any) => c.name === 'attempt_id');
+    if (attemptCol && attemptCol.notnull === 1) {
+      db.run(`
+        CREATE TABLE IF NOT EXISTS proctor_events_temp (
+          id TEXT PRIMARY KEY,
+          session_id TEXT,
+          attempt_id TEXT,
+          user_id TEXT,
+          user_role TEXT,
+          exam_id TEXT,
+          student_id TEXT,
+          event_type TEXT NOT NULL,
+          severity TEXT NOT NULL,
+          risk_points INTEGER DEFAULT 0,
+          timestamp TEXT NOT NULL,
+          metadata_json TEXT,
+          snapshot_thumbnail TEXT,
+          created_at TEXT NOT NULL
+        )
+      `);
+      db.run(`
+        INSERT OR IGNORE INTO proctor_events_temp (
+          id, session_id, attempt_id, user_id, user_role, exam_id, student_id, event_type, severity, risk_points, timestamp, metadata_json, snapshot_thumbnail, created_at
+        ) SELECT 
+          id, session_id, attempt_id, user_id, user_role, exam_id, student_id, event_type, severity, risk_points, timestamp, metadata_json, snapshot_thumbnail, created_at 
+        FROM proctor_events
+      `);
+      db.run('DROP TABLE proctor_events');
+      db.run('ALTER TABLE proctor_events_temp RENAME TO proctor_events');
+    }
+  } catch (migErr) {
+    console.warn('proctor_events nullable migration notice:', migErr);
+  }
+
   try {
     db.run(`UPDATE trusted_devices SET status = 'APPROVED' WHERE status = 'TRUSTED'`);
     db.run(`UPDATE trusted_devices SET status = 'PENDING' WHERE status = 'PENDING_APPROVAL'`);
     db.run(`INSERT OR IGNORE INTO system_settings (setting_key, setting_value) VALUES ('CENTRE_OPERATOR_MAX_ACTIVE_DEVICES', '1')`);
-  } catch {
-    // Ignore migration no-ops on empty databases
+
+    // Seed Top 10 AICTE / NIRF Premier Universities
+    const existingAicte = executeQuery(db, 'SELECT count(*) as count FROM aicte_universities', []);
+    if (!existingAicte[0] || existingAicte[0].count === 0) {
+      const aicteData = [
+        ['AICTE-UNI-01', 'AICTE-1-0001-IITB', 'Indian Institute of Technology Bombay (IIT Bombay)', 'IIT Bombay', 3, 'University', 'Maharashtra', 'Mumbai', 'registrar@iitb.ac.in', 'https://www.iitb.ac.in', '+91 22 2572 2545', 'Main Gate Road, Powai, Mumbai, Maharashtra 400076', 'AUTH-IITB-2026'],
+        ['AICTE-UNI-02', 'AICTE-1-0002-IITD', 'Indian Institute of Technology Delhi (IIT Delhi)', 'IIT Delhi', 2, 'University', 'Delhi', 'New Delhi', 'registrar@iitd.ac.in', 'https://www.iitd.ac.in', '+91 11 2659 7135', 'Hauz Khas, New Delhi, Delhi 110016', 'AUTH-IITD-2026'],
+        ['AICTE-UNI-03', 'AICTE-1-0003-IITM', 'Indian Institute of Technology Madras (IIT Madras)', 'IIT Madras', 1, 'University', 'Tamil Nadu', 'Chennai', 'registrar@iitm.ac.in', 'https://www.iitm.ac.in', '+91 44 2257 8100', 'Sardar Patel Road, Chennai, Tamil Nadu 600036', 'AUTH-IITM-2026'],
+        ['AICTE-UNI-04', 'AICTE-1-0004-IISC', 'Indian Institute of Science Bangalore (IISc)', 'IISc Bangalore', 1, 'University', 'Karnataka', 'Bengaluru', 'registrar@iisc.ac.in', 'https://www.iisc.ac.in', '+91 80 2293 2004', 'CV Raman Road, Bengaluru, Karnataka 560012', 'AUTH-IISC-2026'],
+        ['AICTE-UNI-05', 'AICTE-1-0005-DU', 'University of Delhi (DU)', 'Delhi University', 6, 'University', 'Delhi', 'New Delhi', 'registrar@du.ac.in', 'https://www.du.ac.in', '+91 11 2766 7011', 'Benito Juarez Marg, South Campus / North Campus, Delhi 110007', 'AUTH-DU-2026'],
+        ['AICTE-UNI-06', 'AICTE-1-0006-BHU', 'Banaras Hindu University (BHU)', 'BHU Varanasi', 5, 'University', 'Uttar Pradesh', 'Varanasi', 'registrar@bhu.ac.in', 'https://www.bhu.ac.in', '+91 542 236 8558', 'Ajagara, Varanasi, Uttar Pradesh 221005', 'AUTH-BHU-2026'],
+        ['AICTE-UNI-07', 'AICTE-1-0007-JNU', 'Jawaharlal Nehru University (JNU)', 'JNU New Delhi', 2, 'University', 'Delhi', 'New Delhi', 'registrar@jnu.ac.in', 'https://www.jnu.ac.in', '+91 11 2670 4015', 'New Mehrauli Road, JNU Ring Rd, New Delhi 110067', 'AUTH-JNU-2026'],
+        ['AICTE-UNI-08', 'AICTE-1-0008-ANNA', 'Anna University', 'Anna University', 13, 'University', 'Tamil Nadu', 'Chennai', 'registrar@annauniv.edu', 'https://www.annauniv.edu', '+91 44 2235 7004', '12, Sardar Patel Road, Guindy, Chennai, Tamil Nadu 600025', 'AUTH-ANNA-2026'],
+        ['AICTE-UNI-09', 'AICTE-1-0009-JU', 'Jadavpur University', 'Jadavpur University', 9, 'University', 'West Bengal', 'Kolkata', 'registrar@jadavpuruniversity.in', 'https://www.jaduniv.edu.in', '+91 33 2414 6666', '188, Raja S.C. Mallick Road, Kolkata, West Bengal 700032', 'AUTH-JU-2026'],
+        ['AICTE-UNI-10', 'AICTE-1-0010-SPPU', 'Savitribai Phule Pune University (SPPU)', 'SPPU Pune', 19, 'University', 'Maharashtra', 'Pune', 'registrar@unipune.ac.in', 'http://www.unipune.ac.in', '+91 20 2562 1000', 'Ganeshkhind, Pune, Maharashtra 411007', 'AUTH-SPPU-2026'],
+      ];
+      const nowIso = new Date().toISOString();
+      for (const row of aicteData) {
+        db.run(
+          `INSERT INTO aicte_universities (id, aicte_id, name, short_code, nirf_rank, type, state, city, official_email, website, contact_number, headquarters_address, auth_id, created_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          [...row, nowIso]
+        );
+      }
+    }
+
+    // Seed default proctor settings if not existing
+    const existingSettings = executeQuery(db, 'SELECT id FROM proctor_settings WHERE id = "default_settings"', []);
+    if (existingSettings.length === 0) {
+      db.run(`
+        INSERT INTO proctor_settings (
+          id, org_id, tab_switch_points, fullscreen_exit_points, face_not_detected_points,
+          multiple_faces_points, camera_disabled_points, mic_disabled_points, audio_activity_points,
+          copy_paste_points, key_shortcut_points, repeated_activity_points, max_warnings, updated_at
+        ) VALUES (
+          'default_settings', 'GLOBAL', 10, 10, 15,
+          30, 30, 15, 5,
+          5, 5, 10, 3, datetime('now')
+        )
+      `);
+    }
+
+    // Seed initial demo Authority Proctor Enclave sessions for live surveillance monitoring
+    const existingAuthSessions = executeQuery(db, 'SELECT id FROM authority_proctor_sessions WHERE id = "AUTH-SESS-SME-01"', []);
+    if (existingAuthSessions.length === 0) {
+      const nowIso = new Date().toISOString();
+      const tenMinsAgo = new Date(Date.now() - 10 * 60 * 1000).toISOString();
+      const fiveMinsAgo = new Date(Date.now() - 5 * 60 * 1000).toISOString();
+      const twoMinsAgo = new Date(Date.now() - 2 * 60 * 1000).toISOString();
+
+      // 1. SME Question Vetting Enclave
+      db.run(`
+        INSERT INTO authority_proctor_sessions (
+          id, user_id, user_name, user_email, user_role, org_id, workspace_type,
+          exam_id, status, camera_status, microphone_status, fullscreen_status,
+          face_status, faces_detected_count, audio_level_db, leak_risk_score,
+          leak_risk_level, last_heartbeat_at, created_at, updated_at
+        ) VALUES (
+          'AUTH-SESS-SME-01', 'usr-sme-01', 'Dr. Anjali Rao', 'sme@nbte.edu.in', 'SME',
+          'ORG-ZEROLEAK-NATIONAL', 'SME_QUESTION_VETTING', 'EXAM-2026-CS-NATIONAL',
+          'ACTIVE', 'ACTIVE', 'ACTIVE', 'ACTIVE', 'VERIFIED', 1, -42.0, 0,
+          'NORMAL', ?, ?, ?
+        )
+      `, [nowIso, tenMinsAgo, nowIso]);
+
+      db.run(`
+        INSERT INTO proctor_events (
+          id, session_id, user_id, user_role, exam_id, event_type, severity, risk_points, timestamp, metadata_json, created_at
+        ) VALUES (
+          'AUTH-EV-01', 'AUTH-SESS-SME-01', 'usr-sme-01', 'SME', 'EXAM-2026-CS-NATIONAL',
+          'ENCLAVE_STARTED', 'LOW', 0, ?, '{"action":"Camera & Mic initialized; verified single official"}', ?
+        )
+      `, [tenMinsAgo, tenMinsAgo]);
+
+      // 2. Translator Portal with a shoulder surfing alert
+      db.run(`
+        INSERT INTO authority_proctor_sessions (
+          id, user_id, user_name, user_email, user_role, org_id, workspace_type,
+          exam_id, status, camera_status, microphone_status, fullscreen_status,
+          face_status, faces_detected_count, audio_level_db, leak_risk_score,
+          leak_risk_level, last_heartbeat_at, created_at, updated_at
+        ) VALUES (
+          'AUTH-SESS-TRANS-01', 'usr-trans-01', 'Vikram Joshi', 'translator@nbte.edu.in', 'TRANSLATOR',
+          'ORG-ZEROLEAK-NATIONAL', 'TRANSLATOR_PORTAL', 'EXAM-2026-CS-NATIONAL',
+          'ACTIVE', 'ACTIVE', 'ACTIVE', 'ACTIVE', 'SHOULDER_SURFING_DETECTED', 2, -34.0, 65,
+          'HIGH', ?, ?, ?
+        )
+      `, [nowIso, tenMinsAgo, nowIso]);
+
+      db.run(`
+        INSERT INTO proctor_events (
+          id, session_id, user_id, user_role, exam_id, event_type, severity, risk_points, timestamp, metadata_json, created_at
+        ) VALUES (
+          'AUTH-EV-02', 'AUTH-SESS-TRANS-01', 'usr-trans-01', 'TRANSLATOR', 'EXAM-2026-CS-NATIONAL',
+          'ENCLAVE_STARTED', 'LOW', 0, ?, '{"action":"Translator Enclave Verified"}', ?
+        ),
+        (
+          'AUTH-EV-03', 'AUTH-SESS-TRANS-01', 'usr-trans-01', 'TRANSLATOR', 'EXAM-2026-CS-NATIONAL',
+          'SHOULDER_SURFING_DETECTED', 'HIGH', 35, ?, '{"faces_detected":2,"action":"Confidential paper instantly blurred & watermarked to avoid leak"}', ?
+        ),
+        (
+          'AUTH-EV-04', 'AUTH-SESS-TRANS-01', 'usr-trans-01', 'TRANSLATOR', 'EXAM-2026-CS-NATIONAL',
+          'UNAUTHORIZED_WINDOW_SWITCH', 'MEDIUM', 15, ?, '{"window_focus":false,"duration_seconds":3}', ?
+        )
+      `, [tenMinsAgo, tenMinsAgo, fiveMinsAgo, fiveMinsAgo, twoMinsAgo, twoMinsAgo]);
+
+      // 3. Exam Manager Compilation Session
+      db.run(`
+        INSERT INTO authority_proctor_sessions (
+          id, user_id, user_name, user_email, user_role, org_id, workspace_type,
+          exam_id, status, camera_status, microphone_status, fullscreen_status,
+          face_status, faces_detected_count, audio_level_db, leak_risk_score,
+          leak_risk_level, last_heartbeat_at, created_at, updated_at
+        ) VALUES (
+          'AUTH-SESS-MGR-01', 'usr-manager-01', 'Prof. Rajesh Sharma', 'manager@nbte.edu.in', 'EXAM_MANAGER',
+          'ORG-ZEROLEAK-NATIONAL', 'EXAM_PAPER_COMPILATION', 'EXAM-2026-CS-NATIONAL',
+          'ACTIVE', 'ACTIVE', 'ACTIVE', 'ACTIVE', 'VERIFIED', 1, -45.0, 10,
+          'NORMAL', ?, ?, ?
+        )
+      `, [nowIso, tenMinsAgo, nowIso]);
+    }
+
+    // Seed an initial demo proctored candidate attempt for instant demonstration
+    const existingAttempts = executeQuery(db, 'SELECT id FROM exam_attempts WHERE id = "DEMO-ATTEMPT-01"', []);
+    if (existingAttempts.length === 0) {
+      const demoIso = new Date(Date.now() - 15 * 60 * 1000).toISOString();
+      db.run(`
+        INSERT INTO exam_attempts (
+          id, exam_id, student_id, student_name, student_email, status,
+          started_at, total_questions, answered_questions, score, risk_score,
+          risk_level, warning_count, proctor_decision, created_at, updated_at
+        ) VALUES (
+          'DEMO-ATTEMPT-01', 'EXAM-2026-CS-NATIONAL', 'STU-2026-8821', 'Rahul Sharma', 'rahul.sharma@candidate.edu.in', 'FLAGGED_FOR_REVIEW',
+          ?, 5, 4, 12, 65,
+          'HIGH', 2, 'PENDING', ?, ?
+        )
+      `, [demoIso, demoIso, demoIso]);
+
+      db.run(`
+        INSERT INTO proctor_sessions (
+          id, attempt_id, exam_id, student_id, camera_status, microphone_status,
+          fullscreen_status, face_status, faces_detected_count, last_heartbeat_at, created_at, updated_at
+        ) VALUES (
+          'SESSION-DEMO-01', 'DEMO-ATTEMPT-01', 'EXAM-2026-CS-NATIONAL', 'STU-2026-8821', 'ACTIVE', 'ACTIVE',
+          'ACTIVE', 'DETECTED', 1, ?, ?, ?
+        )
+      `, [demoIso, demoIso, demoIso]);
+
+      // Seed sample events on timeline
+      const t1 = new Date(Date.now() - 14 * 60 * 1000).toISOString();
+      const t2 = new Date(Date.now() - 11 * 60 * 1000).toISOString();
+      const t3 = new Date(Date.now() - 8 * 60 * 1000).toISOString();
+      const t4 = new Date(Date.now() - 4 * 60 * 1000).toISOString();
+
+      db.run(`INSERT INTO proctor_events (id, attempt_id, exam_id, student_id, event_type, severity, risk_points, timestamp, metadata_json, created_at) VALUES
+        ('EV-01', 'DEMO-ATTEMPT-01', 'EXAM-2026-CS-NATIONAL', 'STU-2026-8821', 'EXAM_STARTED', 'LOW', 0, ?, '{"client":"Chrome 128 / Windows 11"}', ?),
+        ('EV-02', 'DEMO-ATTEMPT-01', 'EXAM-2026-CS-NATIONAL', 'STU-2026-8821', 'TAB_SWITCH', 'MEDIUM', 10, ?, '{"duration_seconds":6,"warning_count":1}', ?),
+        ('EV-03', 'DEMO-ATTEMPT-01', 'EXAM-2026-CS-NATIONAL', 'STU-2026-8821', 'FULLSCREEN_EXIT', 'MEDIUM', 10, ?, '{"action":"exited_fullscreen","warning_count":2}', ?),
+        ('EV-04', 'DEMO-ATTEMPT-01', 'EXAM-2026-CS-NATIONAL', 'STU-2026-8821', 'MULTIPLE_FACES', 'HIGH', 30, ?, '{"detected_faces":2,"confidence":0.92}', ?)
+      `, [t1, t1, t2, t2, t3, t3, t4, t4]);
+    }
+  } catch (migErr) {
+    console.error('Proctor migration notice:', migErr);
   }
 }
 

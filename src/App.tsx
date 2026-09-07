@@ -4,6 +4,7 @@ import { Sidebar, NavSubTab } from './components/Sidebar';
 import { PublicLanding } from './components/PublicLanding';
 import { LoginPage } from './components/LoginPage';
 import { OrgRegistrationPage } from './components/OrgRegistrationPage';
+import { PersonnelRegistrationPage } from './components/PersonnelRegistrationPage';
 import { OrgOwnerWorkspace } from './components/workspaces/OrgOwnerWorkspace';
 import { ExamManagerWorkspace } from './components/workspaces/ExamManagerWorkspace';
 import { SmeWorkspace } from './components/workspaces/SmeWorkspace';
@@ -12,17 +13,21 @@ import { CentreOperatorWorkspace } from './components/workspaces/CentreOperatorW
 import { AuditorWorkspace } from './components/workspaces/AuditorWorkspace';
 import { UserProfileSettings } from './components/workspaces/UserProfileSettings';
 import { DeviceApprovalModal } from './components/DeviceApprovalModal';
+import { CandidateExamPortal } from './components/proctor/CandidateExamPortal';
 import { User } from './types';
 import { api, getStoredUser, clearStoredAuth, setStoredAuth, DEVICE_APPROVAL_EVENT } from './api';
 
-type PublicView = 'landing' | 'login' | 'register';
+type PublicView = 'landing' | 'login' | 'register' | 'personnel_register' | 'candidate_exam';
 
 export function App() {
   const [currentUser, setCurrentUser] = useState<User | null>(getStoredUser());
   const [publicView, setPublicView] = useState<PublicView>('landing');
+  const [personnelRole, setPersonnelRole] = useState<'SME' | 'TRANSLATOR' | 'CENTRE_OPERATOR' | undefined>(undefined);
   const [activeSubTab, setActiveSubTab] = useState<NavSubTab>('dashboard');
   const [refreshTrigger, setRefreshTrigger] = useState(0);
   const [sessionLoading, setSessionLoading] = useState(true);
+  const [candidateSimulatorExamId, setCandidateSimulatorExamId] = useState<string | undefined>(undefined);
+  const [activeCandidateSimulator, setActiveCandidateSimulator] = useState(false);
   const [pendingDeviceApprovalModal, setPendingDeviceApprovalModal] = useState<{
     isOpen: boolean;
     deviceId?: string;
@@ -61,6 +66,7 @@ export function App() {
     paper_events: 'paper-events',
     printing_events: 'printing-events',
     regeneration_events: 'regeneration-events',
+    proctor_dashboard: 'proctor-dashboard',
   };
 
   const routeToTab = (tab: NavSubTab): void => {
@@ -152,8 +158,33 @@ export function App() {
     });
   };
 
-  // If user is not logged in, show Public views (Landing, Login, or Register)
+  // If candidate simulator is active for logged-in staff
+  if (activeCandidateSimulator) {
+    return (
+      <CandidateExamPortal
+        onBackToLanding={() => {
+          setActiveCandidateSimulator(false);
+          setCandidateSimulatorExamId(undefined);
+        }}
+        preSelectedExamId={candidateSimulatorExamId}
+      />
+    );
+  }
+
+  // If user is not logged in, show Public views (Landing, Login, Register, or Candidate Exam Portal)
   if (!currentUser) {
+    if (publicView === 'candidate_exam') {
+      return (
+        <CandidateExamPortal
+          onBackToLanding={() => {
+            setPublicView('landing');
+            setCandidateSimulatorExamId(undefined);
+          }}
+          preSelectedExamId={candidateSimulatorExamId}
+        />
+      );
+    }
+
     if (publicView === 'register') {
       return (
         <OrgRegistrationPage
@@ -164,11 +195,27 @@ export function App() {
       );
     }
 
+    if (publicView === 'personnel_register') {
+      return (
+        <PersonnelRegistrationPage
+          preSelectedRole={personnelRole}
+          onBackToLanding={() => setPublicView('landing')}
+          onLoginRedirect={() => setPublicView('login')}
+          onNavigateLogin={() => setPublicView('login')}
+          onRegistrationSuccess={handleLoginSuccess}
+        />
+      );
+    }
+
     if (publicView === 'login') {
       return (
         <LoginPage
           onBackToLanding={() => setPublicView('landing')}
           onRegisterRedirect={() => setPublicView('register')}
+          onOpenPersonnelRegister={(role) => {
+            setPersonnelRole(role);
+            setPublicView('personnel_register');
+          }}
           onLoginSuccess={handleLoginSuccess}
         />
       );
@@ -178,13 +225,17 @@ export function App() {
       <PublicLanding
         onOpenLogin={() => setPublicView('login')}
         onOpenRegister={() => setPublicView('register')}
+        onOpenPersonnelRegister={(role) => {
+          setPersonnelRole(role);
+          setPublicView('personnel_register');
+        }}
       />
     );
   }
 
   // Logged-in User Dashboard Workspace
   return (
-    <div className="min-h-screen bg-[#F8FAFC] text-[#0F172A] flex flex-col font-sans selection:bg-[#047857] selection:text-white">
+    <div className="min-h-screen cyber-mesh-bg text-slate-900 flex flex-col font-sans selection:bg-emerald-800 selection:text-white">
       {/* Device Approval Modal */}
       <DeviceApprovalModal
         isOpen={pendingDeviceApprovalModal.isOpen}
@@ -208,10 +259,11 @@ export function App() {
           activeSubTab={activeSubTab}
           onSelectSubTab={(tab) => routeToTab(tab)}
           userRole={currentUser.role}
+          onLogout={handleLogout}
         />
 
         {/* Dynamic Operational Content View */}
-        <main className="flex-1 p-6 lg:p-8 overflow-y-auto bg-[#F8FAFC]">
+        <main className="flex-1 p-6 lg:p-8 overflow-y-auto">
           <div className="max-w-6xl mx-auto space-y-6">
             {/* User Profile & Security Settings */}
             {(activeSubTab === 'profile' || activeSubTab === 'security_settings') ? (
@@ -227,6 +279,7 @@ export function App() {
                 currentUser={currentUser}
                 activeSubTab={activeSubTab}
                 onRefresh={handleRefreshData}
+                onSwitchUser={handleLoginSuccess}
               />
             ) : currentUser.role === 'EXAM_MANAGER' ? (
               <ExamManagerWorkspace
@@ -234,6 +287,10 @@ export function App() {
                 currentUser={currentUser}
                 activeSubTab={activeSubTab}
                 onRefresh={handleRefreshData}
+                onLaunchCandidateSimulator={(examId) => {
+                  setCandidateSimulatorExamId(examId);
+                  setActiveCandidateSimulator(true);
+                }}
               />
             ) : currentUser.role === 'SME' ? (
               <SmeWorkspace

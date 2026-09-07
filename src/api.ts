@@ -14,6 +14,10 @@ import {
   SecurityEvent,
   NotificationItem,
   DynamicWatermarkData,
+  AuthorityProctorSession,
+  AuthorityProctorEvent,
+  AuthoritySurveillanceMetrics,
+  AicteUniversity,
 } from './types';
 
 export const DEVICE_APPROVAL_EVENT = 'zeroleak:device-approval-needed';
@@ -214,7 +218,7 @@ async function request<T>(endpoint: string, options: RequestInit = {}): Promise<
       headers,
     });
   } catch (err: any) {
-    throw new Error(`Network connection error: ${err.message || 'Unable to connect to server.'}`);
+    throw new Error(`Unable to reach the server for ${endpoint}: ${err.message || 'check that localhost:3000 is running.'}`);
   }
 
   let data: any;
@@ -256,6 +260,28 @@ async function request<T>(endpoint: string, options: RequestInit = {}): Promise<
 export const api = {
   // Auth
   register: (payload: any) => request<{ message: string; token: string; user: User }>('/api/auth/register', { method: 'POST', body: JSON.stringify(payload) }),
+  registerPersonnel: (payload: any) => request<{ message: string; token?: string; user?: User; requiresDeviceBinding?: boolean; nextStep?: string; challengeId?: string; challenge?: string; expiresAt?: string }>('/api/auth/register-personnel', { method: 'POST', body: JSON.stringify(payload) }),
+  getPublicOrganizations: () => request<{ organizations: { id: string; name: string; type: string; reg_number: string }[] }>('/api/public/organizations'),
+  getAicteUniversities: () => request<{ universities: AicteUniversity[] }>('/api/public/aicte-universities'),
+  verifyWebsite: (url: string, emailDomain?: string) =>
+    request<{
+      verified: boolean;
+      url: string;
+      hostname: string;
+      resolved_ip?: string;
+      all_resolved_ips?: string[];
+      is_https?: boolean;
+      http_status?: number;
+      domain_alignment?: 'MATCH' | 'MISMATCH' | 'PUBLIC_EMAIL' | 'NOT_CHECKED';
+      domain_mismatch_warning?: string;
+      security_score?: number;
+      sha256_domain_hash?: string;
+      message: string;
+      error_code?: string;
+    }>('/api/public/verify-website', {
+      method: 'POST',
+      body: JSON.stringify({ url, emailDomain }),
+    }),
   login: (payload: any) => request<{ message: string; token?: string; user: User; device?: any; deviceWarning?: string; requiresDeviceBinding?: boolean; nextStep?: 'DEVICE_REGISTRATION' | 'DEVICE_CHALLENGE' | 'PENDING_APPROVAL'; challengeId?: string; challenge?: string; deviceUuid?: string; deviceStatus?: string }>('/api/auth/login', { method: 'POST', body: JSON.stringify({ ...payload, device_fingerprint: getDeviceFingerprint() }) }),
   registerDeviceChallenge: (payload: any) => request<{ message: string; token?: string; user?: User; deviceUuid: string; status: string; requiresApproval: boolean; device?: any }>('/api/auth/device/register', { method: 'POST', body: JSON.stringify(payload) }),
   verifyDeviceChallenge: (payload: { challengeId: string; signature: string; deviceUuid: string }) => request<{ message: string; token: string; user: User; device: any }>('/api/auth/device/verify', { method: 'POST', body: JSON.stringify(payload) }),
@@ -299,6 +325,7 @@ export const api = {
   createQuestion: (payload: any) => request<{ message: string; questionId: string }>('/api/questions', { method: 'POST', body: JSON.stringify(payload) }),
   extractQuestionsFromPaper: (payload: { paper_text?: string; file_name?: string; file_data?: string; subject?: string; category?: string }) =>
     request<PaperExtractionResponse>('/api/question-papers/extract', { method: 'POST', body: JSON.stringify(payload) }),
+  getOllamaHealth: () => request<{ connected: boolean; model: string; error?: string }>('/api/question-papers/ollama-health'),
   bulkCreateQuestions: (payload: { questions: any[]; auto_assign_sme_id?: string; auto_assign_translator_id?: string; target_language?: string; assignment_notes?: string }) =>
     request<{ message: string; createdCount: number; questionIds: string[] }>('/api/questions/bulk-create', { method: 'POST', body: JSON.stringify(payload) }),
   bulkAssignQuestions: (payload: { question_ids: string[]; assignment_type: 'SME_REVIEW' | 'LINGUISTIC_TRANSLATION'; assignee_user_id: string; target_language?: string; notes?: string }) =>
@@ -371,7 +398,213 @@ export const api = {
   // Demo Seed & System Recovery
   seedAcademicDemo: () => request<{ message: string; accounts: any[]; examId?: string }>('/api/system/seed-academic-demo', { method: 'POST' }),
   resetDb: () => request<{ success: boolean; message: string }>('/api/system/reset-db', { method: 'POST' }),
+
+  // Proctor Mode & Anti-Cheat APIs
+  proctor: {
+    getExams: () => request<{ exams: any[] }>('/api/proctor/exams'),
+    startAttempt: (payload: {
+      exam_id: string;
+      student_id: string;
+      student_name: string;
+      student_email?: string;
+      verification_snapshot?: string;
+    }) =>
+      request<{
+        success: boolean;
+        attempt_id: string;
+        session_id: string;
+        exam: any;
+        student: any;
+        questions: any[];
+      }>('/api/proctor/attempts/start', {
+        method: 'POST',
+        body: JSON.stringify(payload),
+      }),
+    recordEvent: (payload: {
+      attempt_id: string;
+      exam_id?: string;
+      student_id?: string;
+      event_type: string;
+      severity?: string;
+      metadata?: any;
+      hardware_status?: any;
+    }) =>
+      request<{
+        success: boolean;
+        eventId: string;
+        risk_score: number;
+        risk_level: string;
+        warning_count: number;
+        max_warnings: number;
+        warnings_left: number;
+      }>('/api/proctor/events', {
+        method: 'POST',
+        body: JSON.stringify(payload),
+      }),
+    sendHeartbeat: (payload: {
+      attempt_id: string;
+      camera_status?: string;
+      microphone_status?: string;
+      fullscreen_status?: string;
+      face_status?: string;
+      faces_detected_count?: number;
+    }) =>
+      request<{ success: boolean }>('/api/proctor/sessions/heartbeat', {
+        method: 'POST',
+        body: JSON.stringify(payload),
+      }),
+    submitAttempt: (attemptId: string, payload: { answers: Record<string, string> }) =>
+      request<{
+        success: boolean;
+        message: string;
+        attempt_id: string;
+        score: number;
+        answered_questions: number;
+        total_questions: number;
+        status: string;
+        risk_score: number;
+        risk_level: string;
+      }>(`/api/proctor/attempts/${attemptId}/submit`, {
+        method: 'POST',
+        body: JSON.stringify(payload),
+      }),
+    getDashboard: (params?: { exam_id?: string; status?: string; risk_level?: string }) => {
+      const q = new URLSearchParams();
+      if (params?.exam_id) q.set('exam_id', params.exam_id);
+      if (params?.status) q.set('status', params.status);
+      if (params?.risk_level) q.set('risk_level', params.risk_level);
+      return request<{
+        success: boolean;
+        metrics: {
+          total_attempts: number;
+          active_sessions: number;
+          flagged_sessions: number;
+          critical_sessions: number;
+          avg_risk_score: number;
+        };
+        attempts: any[];
+        exams: any[];
+      }>(`/api/proctor/dashboard?${q.toString()}`);
+    },
+    getAttemptReview: (attemptId: string) =>
+      request<{
+        success: boolean;
+        attempt: any;
+        events: any[];
+      }>(`/api/proctor/attempts/${attemptId}/review`),
+    recordDecision: (attemptId: string, payload: { decision: string; remarks?: string }) =>
+      request<{ success: boolean; message: string }>(`/api/proctor/attempts/${attemptId}/decision`, {
+        method: 'POST',
+        body: JSON.stringify(payload),
+      }),
+    getSettings: () => request<{ success: boolean; settings: any }>('/api/proctor/settings'),
+    updateSettings: (payload: any) =>
+      request<{ success: boolean; settings: any }>('/api/proctor/settings', {
+        method: 'POST',
+        body: JSON.stringify(payload),
+      }),
+  },
+
+  // Authority Proctor Enclave & Leak Avoidance
+  authorityProctor: {
+    startSession: (payload: { workspace_type: string; exam_id?: string; verification_snapshot?: string }) =>
+      request<{ success: boolean; session: AuthorityProctorSession }>('/api/authority-proctor/sessions/start', {
+        method: 'POST',
+        body: JSON.stringify(payload),
+      }),
+    recordEvent: (payload: {
+      session_id: string;
+      event_type: string;
+      severity?: string;
+      metadata?: any;
+      snapshot_thumbnail?: string;
+    }) =>
+      request<{ success: boolean; eventId: string; leak_risk_score: number; leak_risk_level: string }>('/api/authority-proctor/events', {
+        method: 'POST',
+        body: JSON.stringify(payload),
+      }),
+    sendHeartbeat: (payload: {
+      session_id: string;
+      camera_status?: string;
+      microphone_status?: string;
+      fullscreen_status?: string;
+      face_status?: string;
+      faces_detected_count?: number;
+      audio_level_db?: number;
+    }) =>
+      request<{ success: boolean; status: string; emergency_locked: boolean; emergency_lock_reason?: string | null }>('/api/authority-proctor/heartbeat', {
+        method: 'POST',
+        body: JSON.stringify(payload),
+      }),
+    endSession: (sessionId: string) =>
+      request<{ success: boolean }>('/api/authority-proctor/sessions/end', {
+        method: 'POST',
+        body: JSON.stringify({ session_id: sessionId }),
+      }),
+    getSurveillanceDashboard: () =>
+      request<{ success: boolean; metrics: AuthoritySurveillanceMetrics; sessions: AuthorityProctorSession[] }>('/api/authority-proctor/dashboard'),
+    getSessionReview: (sessionId: string) =>
+      request<{ success: boolean; session: AuthorityProctorSession; events: AuthorityProctorEvent[] }>(`/api/authority-proctor/sessions/${sessionId}/review`),
+    emergencyLockSession: (sessionId: string, reason: string) =>
+      request<{ success: boolean; message: string }>(`/api/authority-proctor/sessions/${sessionId}/emergency-lock`, {
+        method: 'POST',
+        body: JSON.stringify({ reason }),
+      }),
+  },
 };
+
+/**
+ * Executes a full sign-in sequence including ECDSA device challenge signature / enrollment.
+ */
+export async function performFullLogin(identifier: string, password: string): Promise<{ user: User; token: string }> {
+  const identity = await getOrCreateBrowserDeviceIdentity();
+  const res = await api.login({
+    identifier: identifier.trim(),
+    password,
+    device_name: 'Authorized Institution Terminal',
+    device_uuid: identity.deviceUuid,
+  });
+
+  if (res.token && res.user) {
+    setStoredAuth(res.token, res.user);
+    return { user: res.user, token: res.token };
+  }
+
+  if (res.requiresDeviceBinding && res.nextStep === 'DEVICE_CHALLENGE' && res.challenge && res.challengeId) {
+    const signature = await signDeviceChallenge(res.challenge, identity.privateKey);
+    const verified = await api.verifyDeviceChallenge({
+      challengeId: res.challengeId,
+      signature,
+      deviceUuid: identity.deviceUuid,
+    });
+    setStoredAuth(verified.token, verified.user);
+    return { user: verified.user, token: verified.token };
+  }
+
+  if (res.requiresDeviceBinding && res.nextStep === 'DEVICE_REGISTRATION' && res.challenge && res.challengeId) {
+    const signature = await signDeviceChallenge(res.challenge, identity.privateKey);
+    const profile = detectDeviceProfile();
+    const deviceResponse = await api.registerDeviceChallenge({
+      challengeId: res.challengeId,
+      signature,
+      publicKey: identity.publicKeyPem,
+      deviceUuid: identity.deviceUuid,
+      device_name: 'Authorized Institution Terminal',
+      device_model: profile.device_model,
+      operating_system: profile.operating_system,
+      os_version: profile.os_version,
+      app_version: profile.app_version,
+      attestation_status: 'UNAVAILABLE',
+    });
+
+    if (deviceResponse.token && deviceResponse.user) {
+      setStoredAuth(deviceResponse.token, deviceResponse.user);
+      return { user: deviceResponse.user, token: deviceResponse.token };
+    }
+  }
+
+  throw new Error(res.message || 'Authentication failed. Please verify credentials.');
+}
 
 /**
  * Utility function to detect if an error is a PENDING_DEVICE_APPROVAL error

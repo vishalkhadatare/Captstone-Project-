@@ -184,7 +184,7 @@ RSA_KEY_CONFIGURATION="RSA-2048-PKCS1"
 ### 4. Run the app
 
 ```bash
-# Development (Vite + Express)
+# Development (Vite + Express on http://localhost:3000)
 npm run dev
 
 # Production build
@@ -192,7 +192,24 @@ npm run build
 npm run start
 ```
 
-The app will be available at **http://localhost:5173** (dev).
+The app will be available at **http://localhost:3000**.
+
+---
+
+## 🔐 Default Demo Accounts & Credentials
+
+ZeroLeak comes pre-seeded with all 6 operational role accounts for instant testing:
+
+| Role | Username | Password | Purpose & Capabilities |
+|---|---|---|---|
+| 👑 **Organization Owner** | `owner` | `owner123` | **Root Authority**: Institutional verification, manager authorization, enclave vault creation |
+| 🛡️ **Exam Manager** | `manager` | `manager123` | Exam creation, theory blueprint confirmation, question pool assignments |
+| 📝 **Subject Matter Expert (SME)** | `sme` | `sme123` | Technical question review, difficulty assessment, approval workflow |
+| 🌐 **Linguistic Translator** | `translator` | `translator123` | Multi-language translation validation and contextual review |
+| 🖨️ **Centre Superintendent / Operator** | `operator` | `operator123` | Biometric/device bound exam unlocking, watermarked paper printing |
+| 🔍 **Auditor** | `auditor` | `auditor123` | Read-only access to immutable cryptographic audit trails and threat alerts |
+
+> **Note**: For custom or production deployment, credentials and hardware ECDSA P-256 device keys can be registered through the portal onboarding workflow.
 
 ---
 

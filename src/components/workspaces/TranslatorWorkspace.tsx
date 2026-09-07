@@ -24,6 +24,7 @@ import {
 import { User, Question, QuestionTranslation } from '../../types';
 import { api } from '../../api';
 import { NavSubTab } from '../Sidebar';
+import { AuthorityProctorEnclave } from '../proctor/AuthorityProctorEnclave';
 
 interface TranslatorWorkspaceProps {
   currentUser: User | null;
@@ -424,7 +425,12 @@ export const TranslatorWorkspace: React.FC<TranslatorWorkspaceProps> = ({
 
       {/* DASHBOARD & WORKBENCH TAB (Streamlined, No redundant Language Coverage grid) */}
       {activeSubTab !== 'verification_history' && (
-        <div className="space-y-6">
+        <AuthorityProctorEnclave
+          currentUser={currentUser}
+          workspaceType="TRANSLATOR_PORTAL"
+          title="Translator Confidential Translation Enclave"
+        >
+          <div className="space-y-6">
           {/* Top Summary Banner */}
           <div className="p-5 rounded-xl bg-white border border-slate-200 shadow-xs space-y-4">
             <div className="flex flex-wrap justify-between items-center gap-3 border-b border-slate-100 pb-3">
@@ -945,7 +951,8 @@ export const TranslatorWorkspace: React.FC<TranslatorWorkspaceProps> = ({
             </div>
           </div>
         </div>
-      )}
+      </AuthorityProctorEnclave>
+    )}
 
       {/* COMPLETED TRANSLATIONS & AUDIT LEDGER TAB */}
       {activeSubTab === 'verification_history' && (

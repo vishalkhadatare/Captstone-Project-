@@ -18,10 +18,10 @@ interface LogoProps {
   showWordmark?: boolean;
   /**
    * Which brand treatment to render.
-   * 'lockup' = the single combined logo image; 'split' = icon + wordmark side by side.
+   * 'lockup' = the single combined logo image; 'split' = icon + wordmark side by side; 'icon' = emblem icon only.
    * Defaults to 'split' so untouched call sites (e.g. the sign-in page) keep their current look.
    */
-  variant?: 'lockup' | 'split';
+  variant?: 'lockup' | 'split' | 'icon';
 }
 
 // Default lockup height per size when the caller doesn't pass imgHeightClass.
@@ -39,6 +39,18 @@ export const ZeroLeakLogo: React.FC<LogoProps> = ({
   variant = 'split',
 }) => {
   const heightClass = imgHeightClass || sizeHeights[size] || sizeHeights.md;
+
+  if (variant === 'icon') {
+    return (
+      <div className={`zero-leak-logo flex items-center select-none ${className}`}>
+        <img
+          src={logoIcon}
+          alt="ZeroLeak"
+          className={`w-auto object-contain shrink-0 ${heightClass}`}
+        />
+      </div>
+    );
+  }
 
   if (variant === 'lockup') {
     return (

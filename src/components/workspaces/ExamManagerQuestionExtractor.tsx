@@ -38,6 +38,12 @@ interface ExamManagerQuestionExtractorProps {
   onAssignmentsUpdated: () => void;
 }
 
+interface UploadedQuestionFile {
+  name: string;
+  fileData?: string;
+  text?: string;
+}
+
 const SUPPORTED_TRANSLATION_LANGUAGES = [
   { code: 'Hindi', label: 'Hindi (हिंदी)' },
   { code: 'Marathi', label: 'Marathi (मराठी)' },
@@ -154,6 +160,7 @@ export const ExamManagerQuestionExtractor: React.FC<ExamManagerQuestionExtractor
   // Upload & Extraction Input State
   const [pdfFileName, setPdfFileName] = useState('');
   const [pdfFileData, setPdfFileData] = useState('');
+  const [uploadedFiles, setUploadedFiles] = useState<UploadedQuestionFile[]>([]);
   const [pdfText, setPdfText] = useState('');
   const [paperSubject, setPaperSubject] = useState('Computer Science & Cryptography');
   const [paperCategory, setPaperCategory] = useState('Competitive Exam');
@@ -199,39 +206,36 @@ export const ExamManagerQuestionExtractor: React.FC<ExamManagerQuestionExtractor
   }, [smes, translators]);
 
   // Handle File Change
-  const processUploadedFile = (file: File) => {
-    setPdfFileName(file.name);
-    const reader = new FileReader();
+  const readUploadedFile = (file: File): Promise<UploadedQuestionFile> =>
+    new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      const isTextFile = file.type.includes('text') || /\.(txt|csv|json)$/i.test(file.name);
 
-    if (file.type.includes('text') || file.name.endsWith('.txt') || file.name.endsWith('.csv') || file.name.endsWith('.json')) {
-      reader.onload = (event) => {
-        const content = (event.target?.result as string) || '';
-        setPdfText(content);
-        setPdfFileData('');
+      reader.onerror = () => reject(new Error(`Unable to read ${file.name}.`));
+      reader.onload = event => {
+        const result = (event.target?.result as string) || '';
+        resolve(isTextFile ? { name: file.name, text: result } : { name: file.name, fileData: result });
       };
-      reader.readAsText(file);
-    } else {
-      reader.onload = (event) => {
-        const dataUrl = (event.target?.result as string) || '';
-        setPdfFileData(dataUrl);
-        try {
-          const raw = atob(dataUrl.split(',')[1] || '');
-          const printable = raw.replace(/[^\x20-\x7E\t\r\n]/g, ' ').trim();
-          if (printable.length > 50) {
-            setPdfText(printable);
-          }
-        } catch {
-          // Binary PDF
-        }
-      };
-      reader.readAsDataURL(file);
-    }
+
+      if (isTextFile) {
+        reader.readAsText(file);
+      } else {
+        reader.readAsDataURL(file);
+      }
+    });
+
+  const processUploadedFiles = async (files: File[]) => {
+    const nextFiles = await Promise.all(files.map(readUploadedFile));
+    setUploadedFiles(nextFiles);
+    setPdfFileName(nextFiles.map(file => file.name).join(', '));
+    setPdfFileData(nextFiles.find(file => file.fileData)?.fileData || '');
+    setPdfText(nextFiles.filter(file => file.text).map(file => file.text).join('\n\n'));
   };
 
   const handleFileInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (file) {
-      processUploadedFile(file);
+    const files = Array.from(e.target.files || []) as File[];
+    if (files.length > 0) {
+      void processUploadedFiles(files);
     }
   };
 
@@ -249,14 +253,15 @@ export const ExamManagerQuestionExtractor: React.FC<ExamManagerQuestionExtractor
   const handleDrop = (e: React.DragEvent) => {
     e.preventDefault();
     setIsDragOver(false);
-    const file = e.dataTransfer.files?.[0];
-    if (file) {
-      processUploadedFile(file);
+    const files = Array.from(e.dataTransfer.files || []) as File[];
+    if (files.length > 0) {
+      void processUploadedFiles(files);
     }
   };
 
   // Load Built-in Sample Paper
   const handleLoadSamplePaper = () => {
+    setUploadedFiles([]);
     setPdfFileName('NBTE_National_Master_Paper_2026.pdf');
     setPdfText(SAMPLE_QUESTION_PAPER_TEXT);
     setPdfFileData('');
@@ -271,7 +276,7 @@ export const ExamManagerQuestionExtractor: React.FC<ExamManagerQuestionExtractor
   // Trigger Extraction
   const handleExtract = async () => {
     const textToExtract = pdfText.trim();
-    if (!textToExtract && !pdfFileData) {
+    if (!textToExtract && !pdfFileData && uploadedFiles.length === 0) {
       setStatusMessage({ type: 'error', text: 'Please upload a question paper PDF or load sample paper text.' });
       return;
     }
@@ -280,29 +285,41 @@ export const ExamManagerQuestionExtractor: React.FC<ExamManagerQuestionExtractor
     setStatusMessage(null);
 
     try {
-      const res = await api.extractQuestionsFromPaper({
-        paper_text: textToExtract,
-        file_data: pdfFileData || undefined,
-        file_name: pdfFileName || 'uploaded_paper.pdf',
+      const extractionInputs = uploadedFiles.length > 0
+        ? uploadedFiles.map(file => ({
+            paper_text: file.text,
+            file_data: file.fileData,
+            file_name: file.name,
+          }))
+        : [{
+            paper_text: textToExtract,
+            file_data: pdfFileData || undefined,
+            file_name: pdfFileName || 'uploaded_paper.pdf',
+          }];
+      const responses = await Promise.all(extractionInputs.map(input => api.extractQuestionsFromPaper({
+        ...input,
         subject: paperSubject || 'Academic Examination',
         category: paperCategory || 'Competitive Exam',
-      });
+      })));
 
-      const extracted: ExtractedQuestion[] = (res.extractedQuestions || []).map((q, idx) => ({
-        ...q,
-        tempId: q.tempId || `EXT-${Date.now()}-${idx + 1}`,
-      }));
+      const extracted: ExtractedQuestion[] = responses.flatMap((res, fileIndex) =>
+        (res.extractedQuestions || []).map((q, questionIndex) => ({
+          ...q,
+          tempId: q.tempId || `EXT-${Date.now()}-${fileIndex + 1}-${questionIndex + 1}`,
+        }))
+      );
+      const aiEngineUsedForBatch = responses.some(res => res.aiEngineUsed);
 
       setExtractedQuestions(extracted);
       setActiveExtractedIndex(0);
       setSelectedExtractedIds(new Set(extracted.map(q => q.tempId)));
-      setExtractionSummary(res.extractionSummary || `Extracted ${extracted.length} questions.`);
-      setAiEngineUsed(res.aiEngineUsed || false);
+      setExtractionSummary(responses.map(res => res.extractionSummary).filter(Boolean).join(' ') || `Extracted ${extracted.length} questions.`);
+      setAiEngineUsed(aiEngineUsedForBatch);
       setLocalAssignments({});
 
       setStatusMessage({
         type: 'success',
-        text: `Extracted ${extracted.length} questions into the sidebar (${res.aiEngineUsed ? 'Gemini 3.7 Flash Engine' : 'Heuristic Parser'}).`,
+        text: `Extracted ${extracted.length} questions from ${responses.length} file${responses.length === 1 ? '' : 's'} into the sidebar (${aiEngineUsedForBatch ? 'Gemini 3.7 Flash Engine' : 'Heuristic Parser'}).`,
       });
     } catch (err: any) {
       setStatusMessage({ type: 'error', text: err.message || 'Failed to extract questions.' });
@@ -605,6 +622,7 @@ export const ExamManagerQuestionExtractor: React.FC<ExamManagerQuestionExtractor
             type="file"
             accept=".pdf,.txt,.docx,.json,.csv"
             onChange={handleFileInputChange}
+            multiple
             className="hidden"
           />
 
@@ -614,12 +632,23 @@ export const ExamManagerQuestionExtractor: React.FC<ExamManagerQuestionExtractor
             {pdfFileName ? (
               <span className="flex items-center justify-center gap-1.5 text-emerald-800">
                 <CheckCircle2 className="w-4 h-4 text-emerald-600" />
-                <span>Selected File: {pdfFileName}</span>
+                <span>{uploadedFiles.length > 1 ? `${uploadedFiles.length} files selected` : `Selected File: ${pdfFileName}`}</span>
               </span>
             ) : (
               'Drag & Drop Question Paper PDF here, or Browse from device'
             )}
           </p>
+
+          {uploadedFiles.length > 0 && (
+            <div className="mx-auto mt-2 max-w-xl space-y-1 text-left">
+              {uploadedFiles.map(file => (
+                <div key={file.name} className="flex items-center gap-2 rounded-md bg-white/80 px-2 py-1 text-[11px] text-slate-700">
+                  <FileText className="h-3.5 w-3.5 shrink-0 text-emerald-700" />
+                  <span className="truncate">{file.name}</span>
+                </div>
+              ))}
+            </div>
+          )}
 
           <p className="text-[11px] text-slate-500 mt-1">
             Supports .pdf, .docx, .txt, .json formats. ZeroLeak isolates text without exposing unreleased master papers.
@@ -631,7 +660,7 @@ export const ExamManagerQuestionExtractor: React.FC<ExamManagerQuestionExtractor
               onClick={() => fileInputRef.current?.click()}
               className="px-4 py-2 bg-slate-900 hover:bg-slate-800 text-white rounded-lg font-bold text-xs shadow-xs transition-colors"
             >
-              Browse PDF / Document
+              Browse Files / Documents
             </button>
 
             <button
@@ -685,13 +714,14 @@ export const ExamManagerQuestionExtractor: React.FC<ExamManagerQuestionExtractor
             )}
           </div>
 
-          {(pdfText || pdfFileName || extractedQuestions.length > 0) && (
+          {(pdfText || pdfFileName || uploadedFiles.length > 0 || extractedQuestions.length > 0) && (
             <button
               type="button"
               onClick={() => {
                 setPdfText('');
                 setPdfFileData('');
                 setPdfFileName('');
+                setUploadedFiles([]);
                 setExtractedQuestions([]);
                 setSelectedExtractedIds(new Set());
                 setLocalAssignments({});
