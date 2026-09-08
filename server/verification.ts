@@ -64,6 +64,7 @@ export interface OrgVerificationInput {
   official_email: string;
   website?: string;
   address?: string;
+  state?: string;
   contact?: string;
   rep_name?: string;
   rep_email?: string;
@@ -320,11 +321,24 @@ function checkOfficialSource(input: OrgVerificationInput): VerificationCheck {
   // legal name, confirms the official source. A domain match whose submitted legal
   // name contradicts the registry record is a FAIL (identity mismatch).
   if (regMatches || nameConsistent) {
+    // Soft state corroboration — recorded in the detail only, never changes the
+    // decision (avoids failing a genuine org over a data-entry / formatting nuance).
+    let stateNote = '';
+    const submittedState = normalizeName(input.state || '');
+    const recordState = normalizeName(rec.state || '');
+    if (submittedState && recordState) {
+      stateNote =
+        submittedState === recordState
+          ? ` State corroborated (${rec.state}).`
+          : ` Submitted state "${input.state}" differs from registry state "${rec.state}" — noted for review.`;
+    } else if (recordState) {
+      stateNote = ` Registry state on record: ${rec.state}.`;
+    }
     return {
       id: 'official_source',
       label: 'Official-source verification (accreditation registry)',
       status: 'PASS',
-      detail: `Matched official record "${rec.name}" (${rec.regNumber}) in ${rec.source}.`,
+      detail: `Matched official record "${rec.name}" (${rec.regNumber}) in ${rec.source}.${stateNote}`,
     };
   }
 

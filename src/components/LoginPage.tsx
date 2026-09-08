@@ -189,16 +189,8 @@ export const LoginPage: React.FC<LoginPageProps> = ({
           {/* Left Column: Login Form & Organization Link */}
           <div className="lg:col-span-5 space-y-4">
             <div className="bg-white p-6 sm:p-8 border border-slate-200 rounded-xl shadow-xs space-y-5">
-              <div className="flex items-center gap-3">
-                <ZeroLeakLogo size="md" />
-                <div>
-                  <h1 className="text-xl font-extrabold text-slate-950 tracking-tight">
-                    ZeroLeak Portal Sign In
-                  </h1>
-                  <p className="text-[11px] text-slate-500">
-                    Cryptographic Examination & Paper Protection System
-                  </p>
-                </div>
+              <div className="flex flex-col items-center text-center gap-1">
+                <ZeroLeakLogo variant="signin" size="md" showSubtitle={false} />
               </div>
 
               {errorMessage && (

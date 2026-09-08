@@ -540,7 +540,7 @@ async function startServer() {
   app.post('/api/registration/verify-organization', async (req: Request, res: Response) => {
     try {
       const {
-        name, type, reg_number, auth_id, official_email, website, address, contact,
+        name, type, reg_number, auth_id, official_email, website, address, state, contact,
         rep_name, rep_designation, rep_contact, rep_email,
         account, documents,
       } = req.body || {};
@@ -563,7 +563,7 @@ async function startServer() {
       });
 
       const engineInput: OrgVerificationInput = {
-        name, type, reg_number, auth_id, official_email, website, address, contact,
+        name, type, reg_number, auth_id, official_email, website, address, state, contact,
         rep_name, rep_email: rep_email || ownerEmail,
         documents: Array.isArray(documents) ? documents : [],
       };
@@ -583,8 +583,8 @@ async function startServer() {
       // Persist the organization with the engine's verdict.
       executeRun(
         db,
-        `INSERT INTO organizations (id, name, type, reg_number, auth_id, official_email, website, address, contact, status, domain_verified, verification_method, verification_source, verification_message, verified_at, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        `INSERT INTO organizations (id, name, type, reg_number, auth_id, official_email, website, address, contact, state, status, domain_verified, verification_method, verification_source, verification_message, verified_at, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         [
           orgId,
           name || 'Unnamed Organization',
@@ -595,6 +595,7 @@ async function startServer() {
           website || '',
           address || '',
           contact || '',
+          state || '',
           result.status,
           result.evidence.checks.find((c) => c.id === 'email_domain')?.status === 'PASS' ? 1 : 0,
           result.verificationMethod,

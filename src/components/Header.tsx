@@ -66,9 +66,9 @@ export const Header: React.FC<HeaderProps> = ({
 
   return (
     <header className="sticky top-0 z-30 w-full h-16 bg-white border-b border-slate-200 text-slate-900 px-4 lg:px-8 flex items-center justify-between transition-colors shadow-xs">
-      {/* Official ZeroLeak Logo */}
+      {/* Official ZeroLeak Logo (standard brand mark) */}
       <div className="flex items-center gap-4">
-        <ZeroLeakLogo size="md" />
+        <ZeroLeakLogo size="md" variant="standard" showSubtitle={false} />
       </div>
 
       {/* Authenticated Institutional Security Status & User Bar */}

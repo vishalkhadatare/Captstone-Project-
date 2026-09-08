@@ -514,6 +514,7 @@ function initializeSchema(db: Database) {
   safeAddColumn('question_translations', 'source_language TEXT DEFAULT "English"');
 
   // Two-stage registration: Stage-1 verification-engine result columns
+  safeAddColumn('organizations', 'state TEXT');
   safeAddColumn('organizations', 'verification_method TEXT');
   safeAddColumn('organizations', 'verification_source TEXT');
   safeAddColumn('organizations', 'verification_message TEXT');

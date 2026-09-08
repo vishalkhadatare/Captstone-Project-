@@ -24,6 +24,7 @@ export interface AccreditationRecord {
   domain: string; // official institutional domain (matches official_email / website)
   type: string;
   jurisdiction: string;
+  state?: string; // Indian state / UT the institution is registered in (soft corroboration only)
   source: string; // human-readable issuing authority
 }
 
@@ -36,6 +37,7 @@ export const ACCREDITATION_REGISTRY: AccreditationRecord[] = [
     domain: 'nbte.edu.in',
     type: 'Government Examination Board',
     jurisdiction: 'IN',
+    state: 'Delhi',
     source: 'National Accreditation Registry — Ministry of Education (IN)',
   },
   {
@@ -44,6 +46,7 @@ export const ACCREDITATION_REGISTRY: AccreditationRecord[] = [
     domain: 'cbse.gov.in',
     type: 'Central Examination Board',
     jurisdiction: 'IN',
+    state: 'Delhi',
     source: 'National Accreditation Registry — Ministry of Education (IN)',
   },
   {
@@ -52,7 +55,84 @@ export const ACCREDITATION_REGISTRY: AccreditationRecord[] = [
     domain: 'nta.ac.in',
     type: 'National Recruitment Commission',
     jurisdiction: 'IN',
+    state: 'Delhi',
     source: 'National Accreditation Registry — Ministry of Education (IN)',
+  },
+
+  // --- UGC-recognized universities (University Grants Commission) --------------
+  {
+    name: 'University of Delhi',
+    regNumber: 'UGC/DU/1922-CENTRAL',
+    domain: 'du.ac.in',
+    type: 'Central University',
+    jurisdiction: 'IN',
+    state: 'Delhi',
+    source: 'University Grants Commission (UGC) — Recognized University (IN)',
+  },
+  {
+    name: 'University of Mumbai',
+    regNumber: 'UGC/MU/1857-STATE',
+    domain: 'mu.ac.in',
+    type: 'State University',
+    jurisdiction: 'IN',
+    state: 'Maharashtra',
+    source: 'University Grants Commission (UGC) — Recognized University (IN)',
+  },
+  {
+    name: 'Savitribai Phule Pune University',
+    regNumber: 'UGC/SPPU/1949-STATE',
+    domain: 'unipune.ac.in',
+    type: 'State University',
+    jurisdiction: 'IN',
+    state: 'Maharashtra',
+    source: 'University Grants Commission (UGC) — Recognized University (IN)',
+  },
+  {
+    name: 'Jawaharlal Nehru University',
+    regNumber: 'UGC/JNU/1969-CENTRAL',
+    domain: 'jnu.ac.in',
+    type: 'Central University',
+    jurisdiction: 'IN',
+    state: 'Delhi',
+    source: 'University Grants Commission (UGC) — Recognized University (IN)',
+  },
+  {
+    name: 'Anna University',
+    regNumber: 'UGC/AU/1978-STATE',
+    domain: 'annauniv.edu',
+    type: 'State Technical University',
+    jurisdiction: 'IN',
+    state: 'Tamil Nadu',
+    source: 'University Grants Commission (UGC) — Recognized University (IN)',
+  },
+
+  // --- AICTE-approved technical institutions (All India Council for Technical Education) ---
+  {
+    name: 'Veermata Jijabai Technological Institute',
+    regNumber: 'AICTE/MH/VJTI-1887',
+    domain: 'vjti.ac.in',
+    type: 'AICTE-Approved Technical Institution',
+    jurisdiction: 'IN',
+    state: 'Maharashtra',
+    source: 'All India Council for Technical Education (AICTE) — Approved Institution (IN)',
+  },
+  {
+    name: 'College of Engineering Pune Technological University',
+    regNumber: 'AICTE/MH/COEP-1854',
+    domain: 'coeptech.ac.in',
+    type: 'AICTE-Approved Technical University',
+    jurisdiction: 'IN',
+    state: 'Maharashtra',
+    source: 'All India Council for Technical Education (AICTE) — Approved Institution (IN)',
+  },
+  {
+    name: 'National Institute of Technology Tiruchirappalli',
+    regNumber: 'AICTE/TN/NITT-1964',
+    domain: 'nitt.edu',
+    type: 'AICTE-Approved Technical Institution',
+    jurisdiction: 'IN',
+    state: 'Tamil Nadu',
+    source: 'All India Council for Technical Education (AICTE) — Approved Institution (IN)',
   },
 ];
 

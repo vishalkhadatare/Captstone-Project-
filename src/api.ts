@@ -106,6 +106,30 @@ export const api = {
   login: (payload: any) => request<{ message: string; token: string; user: User; device: any; deviceWarning?: string }>('/api/auth/login', { method: 'POST', body: JSON.stringify({ ...payload, device_fingerprint: getDeviceFingerprint() }) }),
   getMe: () => request<{ user: User }>('/api/auth/me'),
 
+  // Two-stage public registration
+  //   Stage 1: rule-based organization verification (creates the ORG_OWNER +
+  //            returns a short-lived device-binding token ONLY when VERIFIED).
+  //   Stage 2: ECDSA owner device/workstation binding (challenge → sign → verify),
+  //            which returns the full session token. The binding token is passed
+  //            explicitly (it is not yet the stored session token).
+  verifyOrganization: (payload: any) =>
+    request<{ result: RegistrationVerificationResult; orgId: string; token: string | null; user: User | null }>(
+      '/api/registration/verify-organization',
+      { method: 'POST', body: JSON.stringify(payload) },
+    ),
+  deviceBindingChallenge: (payload: { public_key: string; device_name?: string }, bindingToken: string) =>
+    request<{ challengeId: string; challenge: string }>(
+      '/api/registration/device-binding/challenge',
+      { method: 'POST', body: JSON.stringify(payload) },
+      bindingToken,
+    ),
+  deviceBindingVerify: (payload: { challengeId: string; signature: string }, bindingToken: string) =>
+    request<{ message: string; token: string; user: User; device: TrustedDevice }>(
+      '/api/registration/device-binding/verify',
+      { method: 'POST', body: JSON.stringify(payload) },
+      bindingToken,
+    ),
+
   // Organizations
   registerOrg: (payload: any) => request<{ message: string; orgId: string }>('/api/organizations/register', { method: 'POST', body: JSON.stringify(payload) }),
   getCurrentOrg: () => request<{ organization: Organization | null; documents: OrganizationDocument[]; history: VerificationHistoryItem[]; representatives: any[] }>('/api/organizations/current'),

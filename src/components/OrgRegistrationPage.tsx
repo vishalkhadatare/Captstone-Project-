@@ -3,18 +3,22 @@ import {
   Building2,
   ShieldCheck,
   Upload,
-  KeyRound,
-  FileCheck2,
-  ArrowRight,
   ArrowLeft,
+  ArrowRight,
   CheckCircle2,
   AlertTriangle,
-  Mail,
+  Loader2,
+  Laptop,
+  KeyRound,
   Lock,
+  FileCheck2,
+  MapPin,
+  RefreshCw,
 } from 'lucide-react';
 import { ZeroLeakLogo } from './ZeroLeakLogo';
 import { api, setStoredAuth } from '../api';
 import { User } from '../types';
+import { getOrCreateDeviceKeyPair, exportPublicKeyBase64, signChallengeBase64 } from '../deviceKeys';
 
 interface OrgRegistrationPageProps {
   onRegistrationSuccess?: (user: User, token: string) => void;
@@ -23,146 +27,215 @@ interface OrgRegistrationPageProps {
   onBackToLanding: () => void;
 }
 
+// Stage-1 outcome as surfaced to the user. Internal verification substeps
+// (OCR / SHA-256 / registry lookups / rule engine) are NEVER shown here.
+type VerifyState = 'idle' | 'running' | 'VERIFIED' | 'PENDING_VERIFICATION' | 'VERIFICATION_FAILED';
+type BindState = 'idle' | 'binding' | 'completed' | 'error';
+
+interface DocSlot {
+  name: string;
+  size: number;
+  dataUrl: string;
+}
+
+const INDIAN_STATES = [
+  'Andhra Pradesh', 'Arunachal Pradesh', 'Assam', 'Bihar', 'Chhattisgarh', 'Delhi', 'Goa',
+  'Gujarat', 'Haryana', 'Himachal Pradesh', 'Jharkhand', 'Karnataka', 'Kerala', 'Madhya Pradesh',
+  'Maharashtra', 'Manipur', 'Meghalaya', 'Mizoram', 'Nagaland', 'Odisha', 'Punjab', 'Rajasthan',
+  'Sikkim', 'Tamil Nadu', 'Telangana', 'Tripura', 'Uttar Pradesh', 'Uttarakhand', 'West Bengal',
+  'Jammu & Kashmir', 'Ladakh', 'Chandigarh', 'Puducherry',
+];
+
+function fileToDataUrl(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result || ''));
+    reader.onerror = () => reject(reader.error);
+    reader.readAsDataURL(file);
+  });
+}
+
+// Short, user-friendly outcome copy. Deliberately says nothing about the internal
+// verification pipeline (documents/OCR/registry/rules) — only what the user should do.
+function outcomeCopy(state: VerifyState): { title: string; body: string; tone: 'ok' | 'warn' | 'fail' } {
+  if (state === 'VERIFIED') {
+    return { title: 'Organization Verified', body: 'Your organization has been verified. Continue to secure your owner workstation.', tone: 'ok' };
+  }
+  if (state === 'PENDING_VERIFICATION') {
+    return {
+      title: 'Verification in review',
+      body: 'We could not automatically confirm your organization yet. Please make sure your official email uses your institution’s own domain and that your uploaded documents are clear, machine-readable PDFs showing your legal name and registration number, then submit again.',
+      tone: 'warn',
+    };
+  }
+  return {
+    title: 'Verification failed',
+    body: 'We could not verify your organization with the details provided. Please double-check your legal organization name, registration/institution ID, and official institutional email, then submit again.',
+    tone: 'fail',
+  };
+}
+
 export const OrgRegistrationPage: React.FC<OrgRegistrationPageProps> = ({
   onRegistrationSuccess,
   onLoginRedirect,
   onNavigateLogin,
   onBackToLanding,
 }) => {
-  const [step, setStep] = useState(1);
-  const [loading, setLoading] = useState(false);
-  const [errorMessage, setErrorMessage] = useState<string | null>(null);
-
   const navigateLogin = onLoginRedirect || onNavigateLogin;
 
-  // Step 1: Org Details
-  const [orgName, setOrgName] = useState('');
-  const [orgType, setOrgType] = useState('Central University');
-  const [regNumber, setRegNumber] = useState('');
-  const [authId, setAuthId] = useState('');
-  const [officialEmail, setOfficialEmail] = useState('');
-  const [website, setWebsite] = useState('');
-  const [address, setAddress] = useState('');
-  const [contact, setContact] = useState('');
+  // Stepper: EXACTLY two stages.
+  const [stage, setStage] = useState<1 | 2>(1);
 
-  // Step 2: Authorized Representative
-  const [repName, setRepName] = useState('');
-  const [repDesignation, setRepDesignation] = useState('Controller of Examinations');
-  const [repEmail, setRepEmail] = useState('');
-  const [repContact, setRepContact] = useState('');
-  const [repPassword, setRepPassword] = useState('');
+  // ---- Stage 1: organization + owner details ------------------------------
+  const [orgName, setOrgName] = useState('National Board of Technical Examinations');
+  const [orgType, setOrgType] = useState('Government Examination Board');
+  const [regNumber, setRegNumber] = useState('NBTE/2026/REG-9482');
+  const [authId, setAuthId] = useState('AUTH-NBTE-01');
+  const [state, setState] = useState('Delhi');
+  const [officialEmail, setOfficialEmail] = useState('registrar@nbte.edu.in');
+  const [website, setWebsite] = useState('https://nbte.edu.in');
+  const [contact, setContact] = useState('+91 11 2338 9000');
+  const [address, setAddress] = useState('Institutional Enclave, Sector 5, New Delhi 110001');
 
-  // Step 3: Documents
-  const [certUploaded, setCertUploaded] = useState(false);
-  const [authLetterUploaded, setAuthLetterUploaded] = useState(false);
-  const [officialIdUploaded, setOfficialIdUploaded] = useState(false);
+  const [repName, setRepName] = useState('Dr. Anand Vardhan Sharma');
+  const [repDesignation, setRepDesignation] = useState('Registrar & Controller of Examinations');
+  const [repEmail, setRepEmail] = useState('registrar@nbte.edu.in');
+  const [repContact, setRepContact] = useState('+91 98765 43210');
+  const [password, setPassword] = useState('');
 
-  // Step 4: Domain OTP
-  const [domainOtp, setDomainOtp] = useState('884219');
-  const [otpEntered, setOtpEntered] = useState('');
-  const [domainVerified, setDomainVerified] = useState(false);
+  // Real document uploads (read to base64 data URLs; the file content never
+  // leaves as anything other than what the backend hashes + extracts).
+  const [estDoc, setEstDoc] = useState<DocSlot | null>(null);       // Organization / Establishment Certificate (optional)
+  const [accredDoc, setAccredDoc] = useState<DocSlot | null>(null); // Recognition / Accreditation Document (required)
+  const [authRepDoc, setAuthRepDoc] = useState<DocSlot | null>(null); // Authorized Representative Document (required)
 
-  // Step 5: Completed Org ID
-  const [registeredOrgId, setRegisteredOrgId] = useState<string | null>(null);
+  const [verifyState, setVerifyState] = useState<VerifyState>('idle');
+  const [stage1Error, setStage1Error] = useState<string | null>(null);
 
-  const handleVerifyOtp = () => {
-    if (otpEntered.trim() === domainOtp || otpEntered.trim() === '884219' || otpEntered.trim().length === 6) {
-      setDomainVerified(true);
-      setErrorMessage(null);
-    } else {
-      setErrorMessage('Invalid verification OTP code. Enter 884219 for verification testing.');
+  // ---- Stage 2: owner device / workstation binding ------------------------
+  const [bindingToken, setBindingToken] = useState<string | null>(null);
+  const [bindState, setBindState] = useState<BindState>('idle');
+  const [bindError, setBindError] = useState<string | null>(null);
+  const [bindProgress, setBindProgress] = useState<string>('');
+  const [completed, setCompleted] = useState<{ user: User; token: string } | null>(null);
+
+  const stage2Unlocked = verifyState === 'VERIFIED' && !!bindingToken;
+
+  const handleDocChange = async (
+    e: React.ChangeEvent<HTMLInputElement>,
+    setter: (v: DocSlot | null) => void,
+  ) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    try {
+      const dataUrl = await fileToDataUrl(file);
+      setter({ name: file.name, size: file.size, dataUrl });
+    } catch {
+      setStage1Error('That file could not be read. Please try a different file.');
     }
   };
 
-  const handleFinalSubmit = async () => {
-    setLoading(true);
-    setErrorMessage(null);
+  const handleSubmitStage1 = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setStage1Error(null);
 
+    if (!orgName.trim() || !regNumber.trim() || !officialEmail.trim() || !state.trim()) {
+      setStage1Error('Please complete the required organization details (name, registration ID, state, official email).');
+      return;
+    }
+    if (!repName.trim() || !repEmail.trim()) {
+      setStage1Error('Please provide the authorized representative’s name and official email.');
+      return;
+    }
+    if (password.length < 6) {
+      setStage1Error('Please set an owner passphrase of at least 6 characters.');
+      return;
+    }
+    if (!accredDoc || !authRepDoc) {
+      setStage1Error('Please attach the Recognition / Accreditation document and the Authorized Representative document.');
+      return;
+    }
+
+    const documents = [
+      accredDoc && { doc_type: 'ACCREDITATION_CERTIFICATE', file_name: accredDoc.name, file_size: accredDoc.size, file_data: accredDoc.dataUrl },
+      authRepDoc && { doc_type: 'AUTHORIZATION_LETTER', file_name: authRepDoc.name, file_size: authRepDoc.size, file_data: authRepDoc.dataUrl },
+      estDoc && { doc_type: 'ESTABLISHMENT_CERTIFICATE', file_name: estDoc.name, file_size: estDoc.size, file_data: estDoc.dataUrl },
+    ].filter(Boolean);
+
+    setVerifyState('running');
     try {
-      // 1. Register Org in DB
-      const orgRes = await api.registerOrg({
+      const res = await api.verifyOrganization({
         name: orgName,
         type: orgType,
         reg_number: regNumber,
         auth_id: authId,
+        state,
         official_email: officialEmail,
-        website: website,
-        address: address,
-        contact: contact,
+        website,
+        address,
+        contact,
         rep_name: repName,
         rep_designation: repDesignation,
-        rep_email: repEmail,
         rep_contact: repContact,
+        rep_email: repEmail,
+        account: { email: repEmail, username: repEmail, password, full_name: repName },
+        documents,
       });
 
-      const orgId = orgRes.orgId;
-      setRegisteredOrgId(orgId);
-
-      // 2. Upload initial document records
-      await api.uploadOrgDoc({
-        doc_type: 'ACCREDITATION_CERTIFICATE',
-        file_name: 'Institutional_Accreditation_Certificate.pdf',
-        file_size: 2048576,
-      });
-
-      await api.uploadOrgDoc({
-        doc_type: 'AUTHORIZATION_LETTER',
-        file_name: 'Controller_Authorization_Gazette.pdf',
-        file_size: 1048576,
-      });
-
-      // 3. Register Authorized Representative as ORG_OWNER User
-      const userRes = await api.register({
-        email: repEmail,
-        username: repEmail.split('@')[0],
-        password: repPassword,
-        full_name: repName,
-        role: 'ORG_OWNER',
-        org_id: orgId,
-        device_name: `${repName}'s Certified Primary Terminal`,
-      });
-
-      setStoredAuth(userRes.token, userRes.user);
-      if (onRegistrationSuccess) {
-        onRegistrationSuccess(userRes.user, userRes.token);
-      } else if (navigateLogin) {
-        navigateLogin();
+      if (res.result.status === 'VERIFIED' && res.token && res.user) {
+        setBindingToken(res.token);
+        setVerifyState('VERIFIED');
+        setStage(2);
+      } else {
+        // PENDING or FAILED → stay in Stage 1, Stage 2 stays locked. No account, no token.
+        setVerifyState(res.result.status);
       }
     } catch (err: any) {
-      setErrorMessage(err.message || 'Registration failed. Please check institutional details.');
-      setLoading(false);
+      // Includes the "account already exists / please sign in" case from the server.
+      setVerifyState('idle');
+      setStage1Error(err.message || 'Submission failed. Please try again.');
     }
   };
 
-  const nextStep = () => {
-    setErrorMessage(null);
-    if (step === 1) {
-      if (!orgName || !regNumber || !officialEmail) {
-        setErrorMessage('Please complete all mandatory institutional details.');
-        return;
-      }
-    } else if (step === 2) {
-      if (!repName || !repEmail || !repPassword) {
-        setErrorMessage('Please fill in authorized representative details and passphrase.');
-        return;
-      }
-      if (repPassword.length < 6) {
-        setErrorMessage('Passphrase must be at least 6 characters.');
-        return;
-      }
-    } else if (step === 3) {
-      if (!certUploaded || !authLetterUploaded) {
-        setErrorMessage('Please confirm document upload attachments.');
-        return;
-      }
-    } else if (step === 4) {
-      if (!domainVerified) {
-        setErrorMessage('Please verify your official institutional domain OTP.');
-        return;
-      }
+  const handleBindDevice = async () => {
+    if (!bindingToken) return;
+    setBindError(null);
+    setBindState('binding');
+    try {
+      setBindProgress('Generating this workstation’s secure device key…');
+      const pair = await getOrCreateDeviceKeyPair();
+      const publicKey = await exportPublicKeyBase64(pair);
+
+      setBindProgress('Requesting a one-time binding challenge…');
+      const { challengeId, challenge } = await api.deviceBindingChallenge(
+        { public_key: publicKey, device_name: `${repName || 'Organization Owner'} — Primary Workstation` },
+        bindingToken,
+      );
+
+      setBindProgress('Signing the challenge on this device…');
+      const signature = await signChallengeBase64(pair, challenge);
+
+      setBindProgress('Establishing trusted device binding…');
+      const res = await api.deviceBindingVerify({ challengeId, signature }, bindingToken);
+
+      setStoredAuth(res.token, res.user);
+      setCompleted({ user: res.user, token: res.token });
+      setBindState('completed');
+    } catch (err: any) {
+      setBindError(err.message || 'Device binding failed. Please try again.');
+      setBindState('error');
     }
-    setStep(prev => prev + 1);
   };
+
+  const enterDashboard = () => {
+    if (completed && onRegistrationSuccess) {
+      onRegistrationSuccess(completed.user, completed.token);
+    } else if (navigateLogin) {
+      navigateLogin();
+    }
+  };
+
+  const oc = outcomeCopy(verifyState);
 
   return (
     <div className="min-h-screen bg-slate-50 flex flex-col justify-center py-12 px-4 sm:px-6 lg:px-8 font-sans">
@@ -180,429 +253,234 @@ export const OrgRegistrationPage: React.FC<OrgRegistrationPageProps> = ({
         </div>
 
         <h2 className="text-center text-2xl font-extrabold text-slate-900 tracking-tight">
-          Educational Organization Accreditation
+          Educational Organization Registration
         </h2>
         <p className="mt-1 text-center text-xs text-slate-500">
-          Establish an official cryptographic examination enclave for your institution.
+          Establish an official, verified examination enclave for your institution.
         </p>
 
-        {/* 5-Step Stepper Bar */}
-        <div className="mt-8 mb-6 grid grid-cols-5 gap-2 text-center text-[11px] font-semibold">
-          {[
-            { n: 1, label: 'Organization' },
-            { n: 2, label: 'Representative' },
-            { n: 3, label: 'Documents' },
-            { n: 4, label: 'Domain OTP' },
-            { n: 5, label: 'Review' },
-          ].map(s => (
-            <div
-              key={s.n}
-              className={`p-2 rounded-lg border transition-colors ${
-                step === s.n
-                  ? 'bg-emerald-900 text-white border-emerald-900'
-                  : step > s.n
-                  ? 'bg-emerald-50 text-emerald-850 border-emerald-200'
-                  : 'bg-white text-slate-400 border-slate-200'
-              }`}
-            >
-              <div className="font-bold">Step 0{s.n}</div>
-              <div className="truncate text-[10px]">{s.label}</div>
+        {/* Two-Stage Stepper (exactly two stages) */}
+        <div className="mt-8 mb-6 grid grid-cols-2 gap-3 text-center text-[11px] font-semibold">
+          <div
+            className={`p-3 rounded-lg border transition-colors ${
+              stage === 1 ? 'bg-emerald-900 text-white border-emerald-900' : 'bg-emerald-50 text-emerald-800 border-emerald-200'
+            }`}
+          >
+            <div className="flex items-center justify-center gap-1.5 font-bold">
+              {verifyState === 'VERIFIED' ? <CheckCircle2 className="w-3.5 h-3.5" /> : <Building2 className="w-3.5 h-3.5" />}
+              <span>Stage 1</span>
             </div>
-          ))}
+            <div className="text-[10px] mt-0.5">Organization Registration &amp; Verification</div>
+          </div>
+          <div
+            className={`p-3 rounded-lg border transition-colors ${
+              stage === 2 && stage2Unlocked
+                ? 'bg-emerald-900 text-white border-emerald-900'
+                : stage2Unlocked
+                ? 'bg-emerald-50 text-emerald-800 border-emerald-200'
+                : 'bg-white text-slate-400 border-slate-200'
+            }`}
+          >
+            <div className="flex items-center justify-center gap-1.5 font-bold">
+              {bindState === 'completed' ? <CheckCircle2 className="w-3.5 h-3.5" /> : stage2Unlocked ? <Laptop className="w-3.5 h-3.5" /> : <Lock className="w-3.5 h-3.5" />}
+              <span>Stage 2</span>
+            </div>
+            <div className="text-[10px] mt-0.5">Owner Device / Workstation Binding</div>
+          </div>
         </div>
 
-        <div className="bg-white p-6 sm:p-8 border border-slate-200 rounded-xl shadow-xs space-y-6">
-          {errorMessage && (
-            <div className="p-3 bg-rose-50 border border-rose-200 text-rose-700 text-xs rounded-lg flex items-center gap-2">
-              <AlertTriangle className="w-4 h-4 shrink-0" />
-              <span>{errorMessage}</span>
-            </div>
-          )}
+        {/* ================= STAGE 1 ================= */}
+        {stage === 1 && (
+          <form onSubmit={handleSubmitStage1} className="bg-white p-6 sm:p-8 border border-slate-200 rounded-xl shadow-xs space-y-6">
+            {stage1Error && (
+              <div className="p-3 bg-rose-50 border border-rose-200 text-rose-700 text-xs rounded-lg flex items-start gap-2">
+                <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5" />
+                <span>{stage1Error}</span>
+              </div>
+            )}
 
-          {/* STEP 1: Organization Details */}
-          {step === 1 && (
+            {/* Non-VERIFIED outcome banner (short, friendly, no internal details) */}
+            {(verifyState === 'PENDING_VERIFICATION' || verifyState === 'VERIFICATION_FAILED') && (
+              <div
+                className={`p-4 rounded-lg border text-xs flex items-start gap-3 ${
+                  oc.tone === 'warn' ? 'bg-amber-50 border-amber-200 text-amber-900' : 'bg-rose-50 border-rose-200 text-rose-800'
+                }`}
+              >
+                <AlertTriangle className="w-5 h-5 shrink-0 mt-0.5" />
+                <div>
+                  <div className="font-bold">{oc.title}</div>
+                  <p className="mt-0.5 leading-relaxed">{oc.body}</p>
+                </div>
+              </div>
+            )}
+
             <div className="space-y-4 text-xs">
-              <h3 className="text-sm font-bold text-slate-900 border-b pb-2">
-                1. Institutional Legal Information
-              </h3>
+              <h3 className="text-sm font-bold text-slate-900 border-b pb-2">Institutional Details</h3>
 
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div className="sm:col-span-2">
-                  <label className="block text-slate-700 font-bold mb-1">
-                    Legal Organization Name *
-                  </label>
+                  <label className="block text-slate-700 font-bold mb-1">Legal Organization Name *</label>
                   <input
-                    type="text"
-                    value={orgName}
-                    onChange={e => setOrgName(e.target.value)}
-                    placeholder="e.g. National Board of Technical Examinations & Assessment"
-                    required
+                    type="text" value={orgName} onChange={e => setOrgName(e.target.value)} required
                     className="w-full px-3 py-2 rounded-lg bg-slate-50 border border-slate-300 text-slate-900 focus:bg-white focus:border-emerald-800 focus:outline-hidden"
                   />
                 </div>
 
                 <div>
-                  <label className="block text-slate-700 font-bold mb-1">
-                    Organization Type
-                  </label>
+                  <label className="block text-slate-700 font-bold mb-1">Organization Type</label>
                   <select
-                    value={orgType}
-                    onChange={e => setOrgType(e.target.value)}
+                    value={orgType} onChange={e => setOrgType(e.target.value)}
                     className="w-full px-3 py-2 rounded-lg bg-slate-50 border border-slate-300 text-slate-900 focus:bg-white focus:border-emerald-800 focus:outline-hidden"
                   >
-                    <option value="Central Examination Board">Central Examination Board</option>
-                    <option value="State Examination Authority">State Examination Authority</option>
-                    <option value="Autonomous University">Autonomous University</option>
-                    <option value="Technical Education Council">Technical Education Council</option>
-                    <option value="Recruitment Commission">National Recruitment Commission</option>
+                    <option>Government Examination Board</option>
+                    <option>Central Examination Board</option>
+                    <option>State Examination Authority</option>
+                    <option>Central University</option>
+                    <option>State University</option>
+                    <option>Autonomous University</option>
+                    <option>Technical Education Council</option>
+                    <option>AICTE-Approved Technical Institution</option>
+                    <option>National Recruitment Commission</option>
                   </select>
                 </div>
 
                 <div>
-                  <label className="block text-slate-700 font-bold mb-1">
-                    Registration / Gazette Number *
-                  </label>
+                  <label className="block text-slate-700 font-bold mb-1">Registration / Institution ID *</label>
                   <input
-                    type="text"
-                    value={regNumber}
-                    onChange={e => setRegNumber(e.target.value)}
-                    placeholder="e.g. REG/2026/EXAM-9921"
-                    required
+                    type="text" value={regNumber} onChange={e => setRegNumber(e.target.value)} required
                     className="w-full px-3 py-2 rounded-lg bg-slate-50 border border-slate-300 text-slate-900 focus:bg-white focus:border-emerald-800 focus:outline-hidden"
                   />
                 </div>
 
                 <div>
-                  <label className="block text-slate-700 font-bold mb-1">
-                    University / Board Authority ID
-                  </label>
+                  <label className="block text-slate-700 font-bold mb-1">University / Board Authority ID</label>
                   <input
-                    type="text"
-                    value={authId}
-                    onChange={e => setAuthId(e.target.value)}
-                    placeholder="e.g. AUTH-NBTE-01"
+                    type="text" value={authId} onChange={e => setAuthId(e.target.value)}
                     className="w-full px-3 py-2 rounded-lg bg-slate-50 border border-slate-300 text-slate-900 focus:bg-white focus:border-emerald-800 focus:outline-hidden"
                   />
                 </div>
 
                 <div>
-                  <label className="block text-slate-700 font-bold mb-1">
-                    Official Institutional Email *
-                  </label>
+                  <label className="block text-slate-700 font-bold mb-1">State / Union Territory *</label>
+                  <div className="relative">
+                    <MapPin className="w-3.5 h-3.5 text-slate-400 absolute left-2.5 top-1/2 -translate-y-1/2" />
+                    <select
+                      value={state} onChange={e => setState(e.target.value)} required
+                      className="w-full pl-8 pr-3 py-2 rounded-lg bg-slate-50 border border-slate-300 text-slate-900 focus:bg-white focus:border-emerald-800 focus:outline-hidden"
+                    >
+                      <option value="">Select state…</option>
+                      {INDIAN_STATES.map(s => <option key={s} value={s}>{s}</option>)}
+                    </select>
+                  </div>
+                </div>
+
+                <div>
+                  <label className="block text-slate-700 font-bold mb-1">Official Institutional Email *</label>
                   <input
-                    type="email"
-                    value={officialEmail}
-                    onChange={e => setOfficialEmail(e.target.value)}
-                    placeholder="contact@nbte.edu.in"
-                    required
+                    type="email" value={officialEmail} onChange={e => setOfficialEmail(e.target.value)} required
+                    placeholder="registrar@yourinstitution.edu.in"
                     className="w-full px-3 py-2 rounded-lg bg-slate-50 border border-slate-300 text-slate-900 focus:bg-white focus:border-emerald-800 focus:outline-hidden"
                   />
                 </div>
 
                 <div>
-                  <label className="block text-slate-700 font-bold mb-1">
-                    Official Website URL
-                  </label>
+                  <label className="block text-slate-700 font-bold mb-1">Official Website</label>
                   <input
-                    type="text"
-                    value={website}
-                    onChange={e => setWebsite(e.target.value)}
-                    placeholder="https://nbte.edu.in"
+                    type="text" value={website} onChange={e => setWebsite(e.target.value)}
                     className="w-full px-3 py-2 rounded-lg bg-slate-50 border border-slate-300 text-slate-900 focus:bg-white focus:border-emerald-800 focus:outline-hidden"
                   />
                 </div>
 
                 <div>
-                  <label className="block text-slate-700 font-bold mb-1">
-                    Official Contact Number
-                  </label>
+                  <label className="block text-slate-700 font-bold mb-1">Official Contact Number</label>
                   <input
-                    type="text"
-                    value={contact}
-                    onChange={e => setContact(e.target.value)}
-                    placeholder="+91 (11) 2338-9000"
+                    type="text" value={contact} onChange={e => setContact(e.target.value)}
                     className="w-full px-3 py-2 rounded-lg bg-slate-50 border border-slate-300 text-slate-900 focus:bg-white focus:border-emerald-800 focus:outline-hidden"
                   />
                 </div>
 
                 <div className="sm:col-span-2">
-                  <label className="block text-slate-700 font-bold mb-1">
-                    Registered Headquarters Address
-                  </label>
+                  <label className="block text-slate-700 font-bold mb-1">Registered Address</label>
                   <input
-                    type="text"
-                    value={address}
-                    onChange={e => setAddress(e.target.value)}
-                    placeholder="Institutional Enclave, Sector 5, New Delhi 110001"
+                    type="text" value={address} onChange={e => setAddress(e.target.value)}
                     className="w-full px-3 py-2 rounded-lg bg-slate-50 border border-slate-300 text-slate-900 focus:bg-white focus:border-emerald-800 focus:outline-hidden"
                   />
                 </div>
               </div>
             </div>
-          )}
 
-          {/* STEP 2: Authorized Representative */}
-          {step === 2 && (
             <div className="space-y-4 text-xs">
-              <h3 className="text-sm font-bold text-slate-900 border-b pb-2">
-                2. Authorized Representative (Organization Owner Account)
-              </h3>
-
+              <h3 className="text-sm font-bold text-slate-900 border-b pb-2">Authorized Representative (Organization Owner Account)</h3>
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div>
-                  <label className="block text-slate-700 font-bold mb-1">
-                    Full Legal Name *
-                  </label>
+                  <label className="block text-slate-700 font-bold mb-1">Full Legal Name *</label>
                   <input
-                    type="text"
-                    value={repName}
-                    onChange={e => setRepName(e.target.value)}
-                    placeholder="Dr. Anand Vardhan Sharma"
-                    required
+                    type="text" value={repName} onChange={e => setRepName(e.target.value)} required
                     className="w-full px-3 py-2 rounded-lg bg-slate-50 border border-slate-300 text-slate-900 focus:bg-white focus:border-emerald-800 focus:outline-hidden"
                   />
                 </div>
-
                 <div>
-                  <label className="block text-slate-700 font-bold mb-1">
-                    Designation *
-                  </label>
+                  <label className="block text-slate-700 font-bold mb-1">Designation</label>
                   <input
-                    type="text"
-                    value={repDesignation}
-                    onChange={e => setRepDesignation(e.target.value)}
-                    placeholder="Controller of Examinations"
-                    required
+                    type="text" value={repDesignation} onChange={e => setRepDesignation(e.target.value)}
                     className="w-full px-3 py-2 rounded-lg bg-slate-50 border border-slate-300 text-slate-900 focus:bg-white focus:border-emerald-800 focus:outline-hidden"
                   />
                 </div>
-
                 <div>
-                  <label className="block text-slate-700 font-bold mb-1">
-                    Representative Official Email *
-                  </label>
+                  <label className="block text-slate-700 font-bold mb-1">Representative Official Email *</label>
                   <input
-                    type="email"
-                    value={repEmail}
-                    onChange={e => setRepEmail(e.target.value)}
-                    placeholder="anand.sharma@nbte.edu.in"
-                    required
+                    type="email" value={repEmail} onChange={e => setRepEmail(e.target.value)} required
                     className="w-full px-3 py-2 rounded-lg bg-slate-50 border border-slate-300 text-slate-900 focus:bg-white focus:border-emerald-800 focus:outline-hidden"
                   />
                 </div>
-
                 <div>
-                  <label className="block text-slate-700 font-bold mb-1">
-                    Representative Mobile / Direct Line
-                  </label>
+                  <label className="block text-slate-700 font-bold mb-1">Representative Direct Line</label>
                   <input
-                    type="text"
-                    value={repContact}
-                    onChange={e => setRepContact(e.target.value)}
-                    placeholder="+91 98765 43210"
+                    type="text" value={repContact} onChange={e => setRepContact(e.target.value)}
                     className="w-full px-3 py-2 rounded-lg bg-slate-50 border border-slate-300 text-slate-900 focus:bg-white focus:border-emerald-800 focus:outline-hidden"
                   />
                 </div>
-
                 <div className="sm:col-span-2">
-                  <label className="block text-slate-700 font-bold mb-1">
-                    Master Terminal Passphrase *
-                  </label>
+                  <label className="block text-slate-700 font-bold mb-1">Owner Account Passphrase *</label>
                   <input
-                    type="password"
-                    value={repPassword}
-                    onChange={e => setRepPassword(e.target.value)}
-                    placeholder="Create a strong secret passphrase (min 6 characters)"
-                    required
+                    type="password" value={password} onChange={e => setPassword(e.target.value)} required
+                    placeholder="Create a strong passphrase (min 6 characters)"
                     className="w-full px-3 py-2 rounded-lg bg-slate-50 border border-slate-300 text-slate-900 focus:bg-white focus:border-emerald-800 focus:outline-hidden"
                   />
                   <p className="text-[10px] text-slate-500 mt-1">
-                    This passphrase will be used by the Organization Owner to log in and manage examination manager permissions.
+                    Used by the Organization Owner to sign in after registration completes.
                   </p>
                 </div>
               </div>
             </div>
-          )}
 
-          {/* STEP 3: Documents Upload */}
-          {step === 3 && (
-            <div className="space-y-4 text-xs">
-              <h3 className="text-sm font-bold text-slate-900 border-b pb-2">
-                3. Institutional Verification Documents
-              </h3>
+            <div className="space-y-3 text-xs">
+              <h3 className="text-sm font-bold text-slate-900 border-b pb-2">Verification Documents</h3>
+              <p className="text-[11px] text-slate-500 -mt-1">
+                Upload clear, machine-readable PDF documents. Accepted: PDF, PNG, JPG.
+              </p>
 
-              <div className="space-y-3">
-                <div
-                  onClick={() => setCertUploaded(!certUploaded)}
-                  className={`p-4 rounded-lg border-2 border-dashed cursor-pointer flex items-center justify-between transition-colors ${
-                    certUploaded ? 'border-emerald-500 bg-emerald-50' : 'border-slate-300 hover:bg-slate-50'
-                  }`}
-                >
-                  <div className="flex items-center gap-3">
-                    <Upload className="w-5 h-5 text-emerald-900" />
-                    <div>
-                      <div className="font-bold text-slate-900">
-                        1. Institutional Accreditation / University Act Certificate
-                      </div>
-                      <div className="text-[11px] text-slate-500">
-                        PDF or scanned copy of central/state recognition.
-                      </div>
-                    </div>
-                  </div>
-                  {certUploaded && <CheckCircle2 className="w-5 h-5 text-emerald-600" />}
-                </div>
-
-                <div
-                  onClick={() => setAuthLetterUploaded(!authLetterUploaded)}
-                  className={`p-4 rounded-lg border-2 border-dashed cursor-pointer flex items-center justify-between transition-colors ${
-                    authLetterUploaded ? 'border-emerald-500 bg-emerald-50' : 'border-slate-300 hover:bg-slate-50'
-                  }`}
-                >
-                  <div className="flex items-center gap-3">
-                    <Upload className="w-5 h-5 text-emerald-900" />
-                    <div>
-                      <div className="font-bold text-slate-900">
-                        2. Controller of Examinations Official Authorization Letter
-                      </div>
-                      <div className="text-[11px] text-slate-500">
-                        Official gazette or appointment notification letter.
-                      </div>
-                    </div>
-                  </div>
-                  {authLetterUploaded && <CheckCircle2 className="w-5 h-5 text-emerald-600" />}
-                </div>
-
-                <div
-                  onClick={() => setOfficialIdUploaded(!officialIdUploaded)}
-                  className={`p-4 rounded-lg border-2 border-dashed cursor-pointer flex items-center justify-between transition-colors ${
-                    officialIdUploaded ? 'border-emerald-500 bg-emerald-50' : 'border-slate-300 hover:bg-slate-50'
-                  }`}
-                >
-                  <div className="flex items-center gap-3">
-                    <Upload className="w-5 h-5 text-emerald-900" />
-                    <div>
-                      <div className="font-bold text-slate-900">
-                        3. Representative Official Photo ID (Aadhaar / National ID)
-                      </div>
-                      <div className="text-[11px] text-slate-500">
-                        Official government identification card.
-                      </div>
-                    </div>
-                  </div>
-                  {officialIdUploaded && <CheckCircle2 className="w-5 h-5 text-emerald-600" />}
-                </div>
-              </div>
+              <DocUpload
+                label="Organization / Establishment Certificate"
+                hint="Certificate of establishment or university act (recommended)."
+                doc={estDoc}
+                onChange={e => handleDocChange(e, setEstDoc)}
+              />
+              <DocUpload
+                label="Recognition / Accreditation Document *"
+                hint="UGC / AICTE / board recognition or accreditation certificate."
+                doc={accredDoc}
+                onChange={e => handleDocChange(e, setAccredDoc)}
+              />
+              <DocUpload
+                label="Authorized Representative Document *"
+                hint="Official authorization / appointment letter for the representative."
+                doc={authRepDoc}
+                onChange={e => handleDocChange(e, setAuthRepDoc)}
+              />
             </div>
-          )}
 
-          {/* STEP 4: Official Domain OTP */}
-          {step === 4 && (
-            <div className="space-y-4 text-xs">
-              <h3 className="text-sm font-bold text-slate-900 border-b pb-2">
-                4. Official Institutional Domain Verification
-              </h3>
-
-              <div className="p-4 rounded-lg bg-emerald-50 border border-emerald-200 text-emerald-900 space-y-1">
-                <div className="font-bold">Institutional Domain Challenge</div>
-                <p className="text-[11px]">
-                  ZeroLeak verifies that you possess authorized access to the institutional domain:
-                  <span className="font-mono font-bold ml-1">{officialEmail}</span>.
-                </p>
-                <p className="text-[10px] text-emerald-700 pt-1">
-                  Verification OTP challenge token: <span className="font-mono font-bold bg-emerald-100 px-1.5 py-0.5 rounded">884219</span>
-                </p>
-              </div>
-
-              <div className="space-y-2">
-                <label className="block text-slate-700 font-bold">
-                  Enter 6-Digit Domain OTP Code
-                </label>
-                <div className="flex gap-2">
-                  <input
-                    type="text"
-                    value={otpEntered}
-                    onChange={e => setOtpEntered(e.target.value)}
-                    placeholder="Enter 884219"
-                    maxLength={6}
-                    className="w-48 px-3 py-2 rounded-lg bg-slate-50 border border-slate-300 text-slate-900 font-mono text-center tracking-widest text-sm focus:bg-white focus:border-emerald-800 focus:outline-hidden"
-                  />
-                  <button
-                    type="button"
-                    onClick={handleVerifyOtp}
-                    className="px-4 py-2 bg-emerald-900 hover:bg-emerald-800 text-white rounded-lg font-bold text-xs"
-                  >
-                    Verify Domain OTP
-                  </button>
-                </div>
-                {domainVerified && (
-                  <p className="text-xs text-emerald-700 font-bold flex items-center gap-1 mt-1">
-                    <CheckCircle2 className="w-4 h-4 text-emerald-600" />
-                    Official Domain Successfully Validated!
-                  </p>
-                )}
-              </div>
-            </div>
-          )}
-
-          {/* STEP 5: Review & Submission */}
-          {step === 5 && (
-            <div className="space-y-4 text-xs">
-              <h3 className="text-sm font-bold text-slate-900 border-b pb-2">
-                5. Accreditation Summary & Submission Review
-              </h3>
-
-              <div className="grid grid-cols-2 gap-3 p-4 rounded-lg bg-slate-50 border border-slate-200">
-                <div>
-                  <span className="text-slate-500 block">Organization Name:</span>
-                  <span className="font-bold text-slate-900">{orgName}</span>
-                </div>
-                <div>
-                  <span className="text-slate-500 block">Organization Type:</span>
-                  <span className="font-bold text-slate-900">{orgType}</span>
-                </div>
-                <div>
-                  <span className="text-slate-500 block">Registration Number:</span>
-                  <span className="font-mono text-slate-900">{regNumber}</span>
-                </div>
-                <div>
-                  <span className="text-slate-500 block">Official Domain Email:</span>
-                  <span className="font-mono text-slate-900">{officialEmail}</span>
-                </div>
-                <div>
-                  <span className="text-slate-500 block">Authorized Representative:</span>
-                  <span className="font-bold text-slate-900">{repName} ({repDesignation})</span>
-                </div>
-                <div>
-                  <span className="text-slate-500 block">Initial Verification Status:</span>
-                  <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-bold bg-amber-100 text-amber-800">
-                    PENDING REVIEW
-                  </span>
-                </div>
-              </div>
-
-              {/* State Machine Visualization */}
-              <div className="p-3 bg-slate-100 rounded-lg border border-slate-200 text-[10px] text-slate-600 space-y-1">
-                <span className="font-bold uppercase tracking-wider block text-slate-700">
-                  Verification Lifecycle Sequence:
-                </span>
-                <p className="font-mono text-slate-700">
-                  PENDING → DOCUMENT_SUBMITTED → IDENTITY_VALIDATION → ORGANIZATION_VALIDATION → AUTHORIZED_REPRESENTATIVE_VERIFICATION → MANUAL_INDEPENDENT_REVIEW → VERIFIED
-                </p>
-              </div>
-            </div>
-          )}
-
-          {/* Stepper Navigation Buttons */}
-          <div className="flex items-center justify-between pt-4 border-t border-slate-100">
-            {step > 1 ? (
-              <button
-                type="button"
-                onClick={() => setStep(prev => prev - 1)}
-                className="px-4 py-2 text-xs font-bold text-slate-600 bg-slate-100 hover:bg-slate-200 rounded-lg transition-colors"
-              >
-                Previous Step
-              </button>
-            ) : (
+            <div className="flex items-center justify-between pt-4 border-t border-slate-100">
               <button
                 type="button"
                 onClick={navigateLogin}
@@ -610,31 +488,161 @@ export const OrgRegistrationPage: React.FC<OrgRegistrationPageProps> = ({
               >
                 Already registered? Sign In
               </button>
-            )}
 
-            {step < 5 ? (
               <button
-                type="button"
-                onClick={nextStep}
-                className="inline-flex items-center gap-1.5 px-5 py-2 bg-emerald-900 hover:bg-emerald-800 text-white text-xs font-bold rounded-lg transition-colors shadow-xs"
-              >
-                <span>Continue</span>
-                <ArrowRight className="w-3.5 h-3.5" />
-              </button>
-            ) : (
-              <button
-                type="button"
-                disabled={loading}
-                onClick={handleFinalSubmit}
+                type="submit"
+                disabled={verifyState === 'running'}
                 className="inline-flex items-center gap-2 px-6 py-2.5 bg-emerald-800 hover:bg-emerald-700 text-white text-xs font-bold rounded-lg transition-colors shadow-md disabled:opacity-50"
               >
-                <ShieldCheck className="w-4 h-4" />
-                <span>{loading ? 'Registering Enclave...' : 'Submit Institutional Registration'}</span>
+                {verifyState === 'running' ? (
+                  <>
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                    <span>Verification in progress…</span>
+                  </>
+                ) : verifyState === 'PENDING_VERIFICATION' || verifyState === 'VERIFICATION_FAILED' ? (
+                  <>
+                    <RefreshCw className="w-4 h-4" />
+                    <span>Submit for Verification Again</span>
+                  </>
+                ) : (
+                  <>
+                    <ShieldCheck className="w-4 h-4" />
+                    <span>Submit for Verification</span>
+                  </>
+                )}
               </button>
+            </div>
+          </form>
+        )}
+
+        {/* ================= STAGE 2 ================= */}
+        {stage === 2 && stage2Unlocked && (
+          <div className="bg-white p-6 sm:p-8 border border-slate-200 rounded-xl shadow-xs space-y-6">
+            <div className="p-4 rounded-lg bg-emerald-50 border border-emerald-200 text-emerald-900 flex items-start gap-3">
+              <CheckCircle2 className="w-5 h-5 shrink-0 mt-0.5 text-emerald-600" />
+              <div className="text-xs">
+                <div className="font-bold">Organization Verified</div>
+                <p className="mt-0.5">Final step: bind this workstation as the trusted Organization Owner device.</p>
+              </div>
+            </div>
+
+            {bindState !== 'completed' ? (
+              <div className="space-y-4 text-xs">
+                <h3 className="text-sm font-bold text-slate-900 border-b pb-2 flex items-center gap-2">
+                  <Laptop className="w-4 h-4 text-emerald-900" />
+                  <span>Owner Device / Workstation Binding</span>
+                </h3>
+
+                <div className="p-4 rounded-lg bg-slate-50 border border-slate-200 text-slate-600 space-y-2">
+                  <p className="leading-relaxed">
+                    This creates a cryptographic key pair for your workstation. The private key is generated on
+                    this device and never leaves it; only the public key is registered with ZeroLeak.
+                  </p>
+                  <div className="flex items-center gap-2 text-emerald-900 font-semibold">
+                    <KeyRound className="w-3.5 h-3.5" />
+                    <span>Device identity &amp; trusted binding are established here.</span>
+                  </div>
+                </div>
+
+                {bindError && (
+                  <div className="p-3 bg-rose-50 border border-rose-200 text-rose-700 rounded-lg flex items-start gap-2">
+                    <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5" />
+                    <span>{bindError}</span>
+                  </div>
+                )}
+
+                {bindState === 'binding' && (
+                  <div className="p-3 bg-emerald-50 border border-emerald-200 text-emerald-900 rounded-lg flex items-center gap-2">
+                    <Loader2 className="w-4 h-4 animate-spin shrink-0" />
+                    <span>{bindProgress || 'Binding this workstation…'}</span>
+                  </div>
+                )}
+
+                <div className="flex justify-end pt-2">
+                  <button
+                    type="button"
+                    onClick={handleBindDevice}
+                    disabled={bindState === 'binding'}
+                    className="inline-flex items-center gap-2 px-6 py-2.5 bg-emerald-800 hover:bg-emerald-700 text-white text-xs font-bold rounded-lg transition-colors shadow-md disabled:opacity-50"
+                  >
+                    {bindState === 'binding' ? (
+                      <>
+                        <Loader2 className="w-4 h-4 animate-spin" />
+                        <span>Securing Workstation…</span>
+                      </>
+                    ) : bindState === 'error' ? (
+                      <>
+                        <RefreshCw className="w-4 h-4" />
+                        <span>Retry Device Binding</span>
+                      </>
+                    ) : (
+                      <>
+                        <ShieldCheck className="w-4 h-4" />
+                        <span>Bind This Workstation</span>
+                      </>
+                    )}
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <div className="space-y-4 text-center py-4">
+                <div className="flex flex-col items-center gap-2">
+                  <div className="w-14 h-14 rounded-full bg-emerald-100 flex items-center justify-center">
+                    <Laptop className="w-7 h-7 text-emerald-700" />
+                  </div>
+                  <div className="inline-flex items-center gap-1.5 text-emerald-800 font-bold text-sm">
+                    <CheckCircle2 className="w-4 h-4 text-emerald-600" />
+                    <span>Owner Device / Workstation Trusted</span>
+                  </div>
+                </div>
+
+                <div className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-emerald-900 text-white text-sm font-bold">
+                  <ShieldCheck className="w-4 h-4" />
+                  <span>Secure Registration Completed</span>
+                </div>
+
+                <div className="pt-2">
+                  <button
+                    type="button"
+                    onClick={enterDashboard}
+                    className="inline-flex items-center gap-2 px-6 py-2.5 bg-emerald-800 hover:bg-emerald-700 text-white text-xs font-bold rounded-lg transition-colors shadow-md"
+                  >
+                    <FileCheck2 className="w-4 h-4" />
+                    <span>Enter Secure Dashboard</span>
+                    <ArrowRight className="w-3.5 h-3.5" />
+                  </button>
+                </div>
+              </div>
             )}
           </div>
-        </div>
+        )}
       </div>
     </div>
   );
 };
+
+// Reusable document upload row.
+const DocUpload: React.FC<{
+  label: string;
+  hint: string;
+  doc: DocSlot | null;
+  onChange: (e: React.ChangeEvent<HTMLInputElement>) => void;
+}> = ({ label, hint, doc, onChange }) => (
+  <label
+    className={`p-4 rounded-lg border-2 border-dashed cursor-pointer flex items-center justify-between transition-colors ${
+      doc ? 'border-emerald-500 bg-emerald-50' : 'border-slate-300 hover:bg-slate-50'
+    }`}
+  >
+    <div className="flex items-center gap-3">
+      <Upload className="w-5 h-5 text-emerald-900 shrink-0" />
+      <div>
+        <div className="font-bold text-slate-900">{label}</div>
+        <div className="text-[11px] text-slate-500">
+          {doc ? `${doc.name} · ${(doc.size / 1024).toFixed(0)} KB` : hint}
+        </div>
+      </div>
+    </div>
+    {doc && <CheckCircle2 className="w-5 h-5 text-emerald-600 shrink-0" />}
+    <input type="file" accept=".pdf,.png,.jpg,.jpeg,application/pdf,image/*" className="hidden" onChange={onChange} />
+  </label>
+);
