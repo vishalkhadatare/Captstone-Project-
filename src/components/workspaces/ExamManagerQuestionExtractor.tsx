@@ -2225,7 +2225,10 @@ export const ExamManagerQuestionExtractor: React.FC<ExamManagerQuestionExtractor
                     </div>
 
                     {(() => {
-                      const displayImageUrl = activeQuestion.diagram_url || (activeQuestion.question_images && activeQuestion.question_images[0]) || activeQuestion.diagram_data;
+                      const rawUrl = activeQuestion.diagram_url || (activeQuestion.question_images && activeQuestion.question_images[0]) || activeQuestion.diagram_data;
+                      const displayImageUrl = rawUrl && typeof rawUrl === 'string' && (rawUrl.startsWith('/questions/') || rawUrl.startsWith('public/questions/')) && !rawUrl.includes('?')
+                        ? `${rawUrl}?v=clean300dpi`
+                        : rawUrl;
                       return displayImageUrl ? (
                         <div className="space-y-2">
                           {activeQuestion.options_extraction_status === 'uncertain' && (

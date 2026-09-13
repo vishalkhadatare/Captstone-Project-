@@ -8396,7 +8396,15 @@ async function startServer() {
   if (!fs.existsSync(questionsStaticDir)) fs.mkdirSync(questionsStaticDir, { recursive: true });
   const debugStaticDir = path.join(questionsStaticDir, 'debug');
   if (!fs.existsSync(debugStaticDir)) fs.mkdirSync(debugStaticDir, { recursive: true });
-  app.use('/questions', express.static(questionsStaticDir));
+  app.use('/questions', express.static(questionsStaticDir, {
+    etag: false,
+    lastModified: false,
+    setHeaders: (res) => {
+      res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
+      res.setHeader('Pragma', 'no-cache');
+      res.setHeader('Expires', '0');
+    },
+  }));
 
   if (process.env.NODE_ENV !== 'production') {
     const vite = await createViteServer({

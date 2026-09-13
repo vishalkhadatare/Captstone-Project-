@@ -22,6 +22,9 @@ __pycache__/
 # Generated question crops from PDF processing
 public/questions/*
 !public/questions/.gitkeep
+!public/questions/paper1/
+!public/questions/paper2/
+!public/questions/paper3/
 public/papers/*
 !public/papers/.gitkeep
 
