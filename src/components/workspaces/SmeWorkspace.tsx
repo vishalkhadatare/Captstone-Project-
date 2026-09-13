@@ -14,6 +14,7 @@ import {
 import { User, Question } from '../../types';
 import { api } from '../../api';
 import { NavSubTab } from '../Sidebar';
+import { AuthorityProctorEnclave } from '../proctor/AuthorityProctorEnclave';
 
 interface SmeWorkspaceProps {
   currentUser: User | null;
@@ -178,7 +179,12 @@ export const SmeWorkspace: React.FC<SmeWorkspaceProps> = ({
 
       {/* SME UNIFIED DASHBOARD & REVIEW WORKSPACE */}
       {(activeSubTab === 'dashboard' || activeSubTab === 'assigned_questions' || activeSubTab === 'question_verification') && (
-        <div className="space-y-6">
+        <AuthorityProctorEnclave
+          currentUser={currentUser}
+          workspaceType="SME_QUESTION_VETTING"
+          title="SME Question Vetting Enclave"
+        >
+          <div className="space-y-6">
           {/* Top Metrics Banner */}
           <div className="p-6 rounded-xl bg-white border border-slate-200 shadow-xs space-y-4">
             <div className="border-b pb-3 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2">
@@ -410,19 +416,30 @@ export const SmeWorkspace: React.FC<SmeWorkspaceProps> = ({
                       <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                         {(() => {
                           try {
-                            const opts = JSON.parse(selectedQuestion.options_json);
-                            if (Array.isArray(opts)) {
-                              return opts.map((opt: string, idx: number) => (
-                                <div
-                                  key={idx}
-                                  className="p-2.5 rounded-lg bg-white border border-slate-200 text-slate-800 flex items-start gap-2 shadow-2xs"
-                                >
-                                  <span className="font-mono font-bold text-slate-500 shrink-0">
-                                    ({String.fromCharCode(65 + idx)})
-                                  </span>
-                                  <span className="text-xs leading-normal">{opt}</span>
-                                </div>
-                              ));
+                            const raw = typeof selectedQuestion.options_json === 'string'
+                              ? JSON.parse(selectedQuestion.options_json)
+                              : selectedQuestion.options_json;
+                            const opts = Array.isArray(raw) ? raw : [];
+                            if (opts.length > 0) {
+                              return opts.map((opt: any, idx: number) => {
+                                const optText = typeof opt === 'string'
+                                  ? opt
+                                  : (opt?.text ?? opt?.value ?? opt?.option ?? JSON.stringify(opt));
+                                const optLabel = (typeof opt === 'object' && opt?.label)
+                                  ? opt.label
+                                  : String.fromCharCode(65 + idx);
+                                return (
+                                  <div
+                                    key={idx}
+                                    className="p-2.5 rounded-lg bg-white border border-slate-200 text-slate-800 flex items-start gap-2 shadow-2xs"
+                                  >
+                                    <span className="font-mono font-bold text-slate-500 shrink-0">
+                                      ({optLabel})
+                                    </span>
+                                    <span className="text-xs leading-normal">{optText}</span>
+                                  </div>
+                                );
+                              });
                             }
                             return null;
                           } catch {
@@ -557,7 +574,8 @@ export const SmeWorkspace: React.FC<SmeWorkspaceProps> = ({
             </div>
           </div>
         </div>
-      )}
+      </AuthorityProctorEnclave>
+    )}
 
       {/* VERIFICATION HISTORY */}
       {activeSubTab === 'verification_history' && (

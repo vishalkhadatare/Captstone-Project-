@@ -31,16 +31,36 @@ import {
   Activity,
   Send,
   Users,
+  Award,
+  Calendar,
+  Play,
+  GraduationCap,
+  Image as ImageIcon,
+  ZoomIn,
+  Eye,
 } from 'lucide-react';
 import { User, Examination, Question, Organization, ExamType, ExtractedQuestion, QuestionAssignment } from '../../types';
 import { api } from '../../api';
 import { NavSubTab } from '../Sidebar';
 import { ExamManagerQuestionExtractor } from './ExamManagerQuestionExtractor';
+import { AuthoritySurveillanceDashboard } from '../proctor/AuthoritySurveillanceDashboard';
+import { DynamicMultiPaperGenerator } from './DynamicMultiPaperGenerator';
 
 interface ExamManagerWorkspaceProps {
   currentUser: User | null;
   activeSubTab: NavSubTab;
   onRefresh: () => void;
+  onLaunchCandidateSimulator?: (examId?: string) => void;
+}
+
+interface UploadedQuestionFile {
+  id: string;
+  name: string;
+  size: number;
+  fileData?: string;
+  text?: string;
+  status: 'READY' | 'PROCESSING' | 'COMPLETED' | 'ERROR';
+  error?: string;
 }
 
 const SUPPORTED_TRANSLATION_LANGUAGES = [
@@ -54,10 +74,143 @@ const SUPPORTED_TRANSLATION_LANGUAGES = [
   { code: 'Urdu', label: 'Urdu (اردو)' },
 ];
 
+export interface ExamPreset {
+  id: string;
+  name: string;
+  shortTag: string;
+  subject: string;
+  category: string;
+  examType: ExamType;
+  totalMarks: number;
+  totalQuestions: number;
+  durationMinutes: number;
+  defaultDate: string;
+  examTime: string;
+  unlockTime: string;
+  description: string;
+  badgeClass: string;
+}
+
+export const REAL_EXAM_PRESETS: ExamPreset[] = [
+  {
+    id: 'gate-cs',
+    name: 'GATE 2026: Computer Science & Information Technology',
+    shortTag: 'GATE CS 2026',
+    subject: 'Computer Science & Information Technology',
+    category: 'Competitive Exam',
+    examType: 'MCQ',
+    totalMarks: 100,
+    totalQuestions: 65,
+    durationMinutes: 180,
+    defaultDate: '2026-02-07',
+    examTime: '09:30',
+    unlockTime: '09:00',
+    description: 'National Engineering Entrance: 65 Qs (General Aptitude + Technical Core), 100 Marks',
+    badgeClass: 'bg-indigo-100 text-indigo-950 border-indigo-200',
+  },
+  {
+    id: 'jee-adv',
+    name: 'JEE Advanced 2026: Paper 1 (PCM)',
+    shortTag: 'JEE Advanced 2026',
+    subject: 'Physics, Chemistry & Mathematics Paper 1',
+    category: 'JEE',
+    examType: 'MIXED',
+    totalMarks: 180,
+    totalQuestions: 54,
+    durationMinutes: 180,
+    defaultDate: '2026-05-24',
+    examTime: '09:00',
+    unlockTime: '08:30',
+    description: 'IIT Entrance Exam: Single Correct, Multiple Correct & Numerical Value Questions',
+    badgeClass: 'bg-blue-100 text-blue-950 border-blue-200',
+  },
+  {
+    id: 'neet-ug',
+    name: 'NEET-UG 2026: National Eligibility Entrance Test',
+    shortTag: 'NEET-UG 2026',
+    subject: 'Physics, Chemistry, Botany & Zoology (PCB)',
+    category: 'NEET',
+    examType: 'MCQ',
+    totalMarks: 720,
+    totalQuestions: 180,
+    durationMinutes: 200,
+    defaultDate: '2026-05-03',
+    examTime: '14:00',
+    unlockTime: '13:30',
+    description: 'National Medical Entrance: 200 Qs (180 to attempt), +4/-1 OMR Mark Scheme',
+    badgeClass: 'bg-emerald-100 text-emerald-950 border-emerald-200',
+  },
+  {
+    id: 'cat-iim',
+    name: 'CAT 2026: Common Admission Test (IIMs)',
+    shortTag: 'CAT 2026',
+    subject: 'VARC, DILR & Quantitative Aptitude',
+    category: 'Competitive Exam',
+    examType: 'MCQ',
+    totalMarks: 198,
+    totalQuestions: 66,
+    durationMinutes: 120,
+    defaultDate: '2026-11-29',
+    examTime: '08:30',
+    unlockTime: '08:00',
+    description: 'IIMs Management Aptitude Test: 3 Sections x 40 minutes strict section timer',
+    badgeClass: 'bg-purple-100 text-purple-950 border-purple-200',
+  },
+  {
+    id: 'upsc-prelims',
+    name: 'UPSC Civil Services 2026: Preliminary GS-I',
+    shortTag: 'UPSC GS-I',
+    subject: 'General Studies Paper-I: Polity, History & Economy',
+    category: 'Competitive Exam',
+    examType: 'MCQ',
+    totalMarks: 200,
+    totalQuestions: 100,
+    durationMinutes: 120,
+    defaultDate: '2026-05-31',
+    examTime: '09:30',
+    unlockTime: '09:00',
+    description: 'Union Public Service Commission Civil Services Stage 1: 100 Objective Questions',
+    badgeClass: 'bg-amber-100 text-amber-950 border-amber-200',
+  },
+  {
+    id: 'mht-cet',
+    name: 'MHT-CET 2026: State Common Entrance Test (PCM)',
+    shortTag: 'MHT-CET 2026',
+    subject: 'Physics, Chemistry & Mathematics Engineering Entrance',
+    category: 'TCET / CET-type Exam',
+    examType: 'MCQ',
+    totalMarks: 200,
+    totalQuestions: 150,
+    durationMinutes: 180,
+    defaultDate: '2026-04-18',
+    examTime: '09:00',
+    unlockTime: '08:30',
+    description: 'State Engineering & Pharmacy Admission Test: 150 Questions, No Negative Marking',
+    badgeClass: 'bg-rose-100 text-rose-950 border-rose-200',
+  },
+  {
+    id: 'univ-theory',
+    name: 'B.Tech Semester VI: Design & Analysis of Algorithms',
+    shortTag: 'B.Tech Theory',
+    subject: 'Design & Analysis of Algorithms (Theory & Proofs)',
+    category: 'University Exam',
+    examType: 'THEORY',
+    totalMarks: 100,
+    totalQuestions: 15,
+    durationMinutes: 180,
+    defaultDate: '2026-06-15',
+    examTime: '10:00',
+    unlockTime: '09:30',
+    description: 'AICTE University End-Semester Theory Paper: 3 Sectional Descriptive Blueprints',
+    badgeClass: 'bg-teal-100 text-teal-950 border-teal-200',
+  },
+];
+
 export const ExamManagerWorkspace: React.FC<ExamManagerWorkspaceProps> = ({
   currentUser,
   activeSubTab,
   onRefresh,
+  onLaunchCandidateSimulator,
 }) => {
   const [org, setOrg] = useState<Organization | null>(null);
   const [examinations, setExaminations] = useState<Examination[]>([]);
@@ -72,10 +225,13 @@ export const ExamManagerWorkspace: React.FC<ExamManagerWorkspaceProps> = ({
 
   // Workflow Sub-Navigation
   const [questionWorkflowTab, setQuestionWorkflowTab] = useState<'extraction' | 'manual' | 'matrix'>('extraction');
+  const [matrixFilter, setMatrixFilter] = useState<'ALL' | 'SME_REVIEW' | 'TRANSLATION' | 'COMPLETED'>('ALL');
+  const [matrixSearch, setMatrixSearch] = useState('');
 
   // PDF / Paper Extraction State
   const [pdfFileName, setPdfFileName] = useState('');
   const [pdfFileData, setPdfFileData] = useState('');
+  const [uploadedFiles, setUploadedFiles] = useState<UploadedQuestionFile[]>([]);
   const [pdfText, setPdfText] = useState('');
   const [paperSubject, setPaperSubject] = useState('');
   const [paperCategory, setPaperCategory] = useState('Competitive Exam');
@@ -86,6 +242,8 @@ export const ExamManagerWorkspace: React.FC<ExamManagerWorkspaceProps> = ({
   const [aiEngineUsed, setAiEngineUsed] = useState(false);
   const [selectedExtractedIds, setSelectedExtractedIds] = useState<Set<string>>(new Set());
   const [importingBatch, setImportingBatch] = useState(false);
+  const [ollamaHealth, setOllamaHealth] = useState<{ connected: boolean; model: string; error?: string } | null>(null);
+  const [isFileDragOver, setIsFileDragOver] = useState(false);
 
   // Extraction Assignment Form State
   const [extractAssignSmeId, setExtractAssignSmeId] = useState('');
@@ -103,6 +261,9 @@ export const ExamManagerWorkspace: React.FC<ExamManagerWorkspaceProps> = ({
   const [poolAssigning, setPoolAssigning] = useState(false);
 
   // Create Exam Form
+  const [selectedPresetId, setSelectedPresetId] = useState<string | null>(null);
+  const [examSearchQuery, setExamSearchQuery] = useState('');
+  const [examCategoryFilter, setExamCategoryFilter] = useState('ALL');
   const [examName, setExamName] = useState('');
   const [subject, setSubject] = useState('');
   const [category, setCategory] = useState('Competitive Exam');
@@ -146,10 +307,17 @@ export const ExamManagerWorkspace: React.FC<ExamManagerWorkspaceProps> = ({
 
   // Generation status
   const [generating, setGenerating] = useState(false);
+  const [zoomDiagramUrl, setZoomDiagramUrl] = useState<string | null>(null);
 
   useEffect(() => {
     loadData();
   }, []);
+
+  useEffect(() => {
+    if (activeSubTab === 'question_workflow') {
+      api.getOllamaHealth().then(setOllamaHealth).catch(() => setOllamaHealth(null));
+    }
+  }, [activeSubTab]);
 
   const loadData = async () => {
     setLoading(true);
@@ -180,70 +348,96 @@ export const ExamManagerWorkspace: React.FC<ExamManagerWorkspaceProps> = ({
     }
   };
 
-  // Handle PDF / Text File Upload
+  const readUploadedFile = (file: File): Promise<UploadedQuestionFile> =>
+    new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      const isTextFile = file.type.includes('text') || /\.(txt|csv|json)$/i.test(file.name);
+      reader.onerror = () => reject(new Error(`Unable to read ${file.name}.`));
+      reader.onload = event => {
+        const result = (event.target?.result as string) || '';
+        resolve({ id: `${file.name}-${file.lastModified}-${file.size}`, name: file.name, size: file.size, status: 'READY', ...(isTextFile ? { text: result } : { fileData: result }) });
+      };
+      if (isTextFile) reader.readAsText(file);
+      else reader.readAsDataURL(file);
+    });
+
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
+    const files = Array.from(e.target.files || []) as File[];
+    if (files.length === 0) return;
+    void Promise.all(files.map(readUploadedFile)).then(nextFiles => {
+      const mergedFiles = [...uploadedFiles.filter(existing => !nextFiles.some(file => file.id === existing.id)), ...nextFiles];
+      setUploadedFiles(mergedFiles);
+      setPdfFileName(mergedFiles.map(file => file.name).join(', '));
+      setPdfFileData(mergedFiles.find(file => file.fileData)?.fileData || '');
+      setPdfText(mergedFiles.filter(file => file.text).map(file => file.text).join('\n\n'));
+    });
+  };
 
-    setPdfFileName(file.name);
-    const reader = new FileReader();
+  const removeUploadedFile = (id: string) => {
+    const remaining = uploadedFiles.filter(file => file.id !== id);
+    setUploadedFiles(remaining);
+    setPdfFileName(remaining.map(file => file.name).join(', '));
+    setPdfFileData(remaining.find(file => file.fileData)?.fileData || '');
+    setPdfText(remaining.filter(file => file.text).map(file => file.text).join('\n\n'));
+  };
 
-    if (file.type.includes('text') || file.name.endsWith('.txt') || file.name.endsWith('.csv') || file.name.endsWith('.json')) {
-      reader.onload = (event) => {
-        const content = event.target?.result as string;
-        setPdfText(content);
-        setPdfFileData('');
-      };
-      reader.readAsText(file);
-    } else {
-      // PDF / binary files: read as base64 data URL
-      reader.onload = (event) => {
-        const dataUrl = event.target?.result as string;
-        setPdfFileData(dataUrl);
-        // Try extracting preview text if readable
-        try {
-          const raw = atob(dataUrl.split(',')[1] || '');
-          const printable = raw.replace(/[^\x20-\x7E\t\r\n]/g, ' ').trim();
-          if (printable.length > 50) {
-            setPdfText(printable);
-          }
-        } catch {
-          // Keep raw
-        }
-      };
-      reader.readAsDataURL(file);
+  const handleFileDrop = (event: React.DragEvent<HTMLDivElement>) => {
+    event.preventDefault();
+    setIsFileDragOver(false);
+    const files = Array.from(event.dataTransfer.files || []) as File[];
+    if (files.length > 0) {
+      const input = document.createElement('input');
+      const dataTransfer = new DataTransfer();
+      files.forEach(file => dataTransfer.items.add(file));
+      input.files = dataTransfer.files;
+      handleFileUpload({ target: input } as React.ChangeEvent<HTMLInputElement>);
     }
   };
 
   // Trigger AI Question Extraction
   const handleExtractQuestions = async () => {
     const textToExtract = pdfText.trim();
-    if (!textToExtract && !pdfFileData) {
+    if (!textToExtract && !pdfFileData && uploadedFiles.length === 0) {
       setStatusMessage({ type: 'error', text: 'Please upload a PDF / document or paste question paper text.' });
       return;
     }
 
     setExtracting(true);
     setStatusMessage(null);
+    setUploadedFiles(files => files.map(file => ({ ...file, status: 'PROCESSING', error: undefined })));
 
     try {
-      const res = await api.extractQuestionsFromPaper({
-        paper_text: textToExtract,
-        file_data: pdfFileData,
-        file_name: pdfFileName,
+      const extractionInputs = uploadedFiles.length > 0
+        ? uploadedFiles.map(file => ({ paper_text: file.text, file_data: file.fileData, file_name: file.name }))
+        : [{ paper_text: textToExtract, file_data: pdfFileData, file_name: pdfFileName }];
+      const settledResponses = await Promise.allSettled(extractionInputs.map(input => api.extractQuestionsFromPaper({
+        ...input,
         subject: paperSubject || 'Academic Examination',
         category: paperCategory || 'Competitive Exam',
-      });
-
-      const extracted = (res.extractedQuestions || []).map((q, idx) => ({
+      })));
+      const successfulResponses = settledResponses.flatMap((result, fileIndex) => result.status === 'fulfilled' ? [{ response: result.value, fileIndex }] : []);
+      const failedFiles = settledResponses.flatMap((result, fileIndex) => result.status === 'rejected' ? [{ fileIndex, error: result.reason?.message || 'Extraction failed.' }] : []);
+      if (successfulResponses.length === 0) {
+        throw new Error(failedFiles[0]?.error || 'No files could be extracted.');
+      }
+      const responses = successfulResponses.map(item => item.response);
+      const extracted = successfulResponses.flatMap(({ response: res, fileIndex }) => (res.extractedQuestions || []).map((q, questionIndex) => ({
         ...q,
-        tempId: q.tempId || `EXT-${Date.now()}-${idx + 1}`,
-      }));
+        source_paper_id: res.sourcePaperId,
+        source_file: res.sourceFile || uploadedFiles[fileIndex]?.name,
+        tempId: q.tempId || `EXT-${Date.now()}-${fileIndex + 1}-${questionIndex + 1}`,
+      })));
+      const batchAiUsed = responses.some(res => res.aiEngineUsed);
 
       setExtractedQuestions(extracted);
-      setExtractionSummary(res.extractionSummary || '');
-      setDetectedSubject(res.detectedSubject || paperSubject);
-      setAiEngineUsed(res.aiEngineUsed || false);
+      setExtractionSummary(responses.map(res => res.extractionSummary).filter(Boolean).join(' '));
+      setDetectedSubject(responses[0]?.detectedSubject || paperSubject);
+      setAiEngineUsed(batchAiUsed);
+      setUploadedFiles(files => files.map((file, index) => ({
+        ...file,
+        status: failedFiles.some(failed => failed.fileIndex === index) ? 'ERROR' : 'COMPLETED',
+        error: failedFiles.find(failed => failed.fileIndex === index)?.error,
+      })));
 
       // Select all extracted questions by default
       const allIds = new Set(extracted.map(q => q.tempId));
@@ -251,7 +445,7 @@ export const ExamManagerWorkspace: React.FC<ExamManagerWorkspaceProps> = ({
 
       setStatusMessage({
         type: 'success',
-        text: `Extracted ${extracted.length} questions from question paper (${res.aiEngineUsed ? 'Gemini AI Engine' : 'Heuristic Parser'}).`,
+        text: `Extracted ${extracted.length} questions from ${responses.length} of ${extractionInputs.length} file${extractionInputs.length === 1 ? '' : 's'} using Ollama${failedFiles.length ? `; ${failedFiles.length} failed` : ''}.`,
       });
     } catch (err: any) {
       setStatusMessage({ type: 'error', text: err.message || 'Failed to extract questions from document.' });
@@ -335,6 +529,7 @@ export const ExamManagerWorkspace: React.FC<ExamManagerWorkspaceProps> = ({
       setPdfText('');
       setPdfFileData('');
       setPdfFileName('');
+      setUploadedFiles([]);
       loadData();
     } catch (err: any) {
       setStatusMessage({ type: 'error', text: err.message || 'Failed to import questions.' });
@@ -374,6 +569,24 @@ export const ExamManagerWorkspace: React.FC<ExamManagerWorkspaceProps> = ({
     }
   };
 
+  const handleApplyPreset = (preset: ExamPreset) => {
+    setSelectedPresetId(preset.id);
+    setExamName(preset.name);
+    setSubject(preset.subject);
+    setCategory(preset.category);
+    setExamType(preset.examType);
+    setTotalMarks(preset.totalMarks);
+    setTotalQuestions(preset.totalQuestions);
+    setDurationMins(preset.durationMinutes);
+    setExamDate(preset.defaultDate);
+    setExamTime(preset.examTime);
+    setUnlockTime(preset.unlockTime);
+    setStatusMessage({
+      type: 'success',
+      text: `Applied "${preset.shortTag}" real examination preset (${preset.totalMarks} marks, ${preset.totalQuestions} Qs, ${preset.durationMinutes} mins).`,
+    });
+  };
+
   const handleCreateExam = async (e: React.FormEvent) => {
     e.preventDefault();
     setStatusMessage(null);
@@ -403,6 +616,7 @@ export const ExamManagerWorkspace: React.FC<ExamManagerWorkspaceProps> = ({
       setStatusMessage({ type: 'success', text: res.message });
       setExamName('');
       setSubject('');
+      setSelectedPresetId(null);
       loadData();
     } catch (err: any) {
       setStatusMessage({ type: 'error', text: err.message });
@@ -569,13 +783,14 @@ export const ExamManagerWorkspace: React.FC<ExamManagerWorkspaceProps> = ({
       {/* DASHBOARD */}
       {activeSubTab === 'dashboard' && (
         <div className="space-y-6">
-          <div className="p-6 rounded-xl bg-white border border-slate-200 shadow-xs space-y-4">
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b pb-3">
+          <div className="modern-card p-6 rounded-2xl bg-white border border-slate-200 shadow-sm space-y-5">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-100 pb-4">
               <div>
-                <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400">
+                <span className="text-[10px] font-bold uppercase tracking-wider text-emerald-700 bg-emerald-50 px-2.5 py-0.5 rounded-full border border-emerald-200">
                   Examination Authority Portal
                 </span>
-                <h2 className="text-xl font-bold text-slate-900">Examination Operations Dashboard</h2>
+                <h2 className="text-2xl font-bold text-slate-900 mt-2">Examination Operations Dashboard</h2>
+                <p className="text-xs text-slate-500 mt-1">Real-time status of question pools, verified banks, and time-locked enclaves.</p>
               </div>
             </div>
 
@@ -584,17 +799,17 @@ export const ExamManagerWorkspace: React.FC<ExamManagerWorkspaceProps> = ({
               <button
                 type="button"
                 onClick={() => setDashboardCardFilter('ALL')}
-                className={`p-4 rounded-xl border text-left transition-all cursor-pointer ${
+                className={`p-4 rounded-xl border text-left transition-all cursor-pointer shadow-xs hover:-translate-y-0.5 ${
                   dashboardCardFilter === 'ALL'
-                    ? 'bg-slate-900 text-white border-slate-900 ring-2 ring-slate-900/20 shadow-xs'
-                    : 'bg-slate-50 border-slate-200 text-slate-900 hover:bg-slate-100 hover:border-slate-300'
+                    ? 'bg-[#00cc5f] text-black border-[#00cc5f] ring-2 ring-[#00cc5f]/30 shadow-md'
+                    : 'bg-white/80 dark:bg-white/[0.04] border-slate-200/90 dark:border-white/10 text-slate-900 dark:text-white hover:border-[#00cc5f]/40'
                 }`}
               >
-                <span className={`text-[11px] block font-medium ${dashboardCardFilter === 'ALL' ? 'text-slate-300' : 'text-slate-500'}`}>
+                <span className={`text-[11px] block font-medium ${dashboardCardFilter === 'ALL' ? 'text-black/70 font-bold' : 'text-slate-500 dark:text-slate-400'}`}>
                   Total Examinations
                 </span>
-                <span className="text-2xl font-bold block mt-0.5">{examinations.length}</span>
-                <span className={`text-[10px] block mt-1 ${dashboardCardFilter === 'ALL' ? 'text-emerald-300' : 'text-slate-400'}`}>
+                <span className="text-2xl font-black block mt-0.5">{examinations.length}</span>
+                <span className={`text-[10px] font-semibold block mt-1 ${dashboardCardFilter === 'ALL' ? 'text-black/80 font-bold' : 'text-[#00873d] dark:text-[#00cc5f]'}`}>
                   Active Enclaves
                 </span>
               </button>
@@ -602,17 +817,17 @@ export const ExamManagerWorkspace: React.FC<ExamManagerWorkspaceProps> = ({
               <button
                 type="button"
                 onClick={() => setDashboardCardFilter('READY')}
-                className={`p-4 rounded-xl border text-left transition-all cursor-pointer ${
+                className={`p-4 rounded-xl border text-left transition-all cursor-pointer shadow-xs hover:-translate-y-0.5 ${
                   dashboardCardFilter === 'READY'
-                    ? 'bg-slate-900 text-white border-slate-900 ring-2 ring-slate-900/20 shadow-xs'
-                    : 'bg-slate-50 border-slate-200 text-slate-900 hover:bg-slate-100 hover:border-slate-300'
+                    ? 'bg-[#00cc5f] text-black border-[#00cc5f] ring-2 ring-[#00cc5f]/30 shadow-md'
+                    : 'bg-white/80 dark:bg-white/[0.04] border-slate-200/90 dark:border-white/10 text-slate-900 dark:text-white hover:border-[#00cc5f]/40'
                 }`}
               >
-                <span className={`text-[11px] block font-medium ${dashboardCardFilter === 'READY' ? 'text-slate-300' : 'text-slate-500'}`}>
+                <span className={`text-[11px] block font-medium ${dashboardCardFilter === 'READY' ? 'text-black/70 font-bold' : 'text-slate-500 dark:text-slate-400'}`}>
                   Pool Questions
                 </span>
-                <span className="text-2xl font-bold block mt-0.5">{questions.length}</span>
-                <span className={`text-[10px] block mt-1 ${dashboardCardFilter === 'READY' ? 'text-emerald-300' : 'text-slate-400'}`}>
+                <span className="text-2xl font-black block mt-0.5">{questions.length}</span>
+                <span className={`text-[10px] font-semibold block mt-1 ${dashboardCardFilter === 'READY' ? 'text-black/80 font-bold' : 'text-slate-500 dark:text-slate-400'}`}>
                   Total In Repository
                 </span>
               </button>
@@ -620,19 +835,19 @@ export const ExamManagerWorkspace: React.FC<ExamManagerWorkspaceProps> = ({
               <button
                 type="button"
                 onClick={() => setDashboardCardFilter('VERIFIED')}
-                className={`p-4 rounded-xl border text-left transition-all cursor-pointer ${
+                className={`p-4 rounded-xl border text-left transition-all cursor-pointer shadow-xs hover:-translate-y-0.5 ${
                   dashboardCardFilter === 'VERIFIED'
-                    ? 'bg-emerald-950 text-white border-emerald-900 ring-2 ring-emerald-600/30 shadow-xs'
-                    : 'bg-emerald-50/60 border-emerald-200 text-emerald-950 hover:bg-emerald-50 hover:border-emerald-300'
+                    ? 'bg-[#00cc5f] text-black border-[#00cc5f] ring-2 ring-[#00cc5f]/30 shadow-md'
+                    : 'bg-[#00cc5f]/10 dark:bg-[#00cc5f]/15 border-[#00cc5f]/30 text-[#00873d] dark:text-[#00cc5f] hover:border-[#00cc5f]/50'
                 }`}
               >
-                <span className={`text-[11px] block font-medium ${dashboardCardFilter === 'VERIFIED' ? 'text-emerald-300' : 'text-emerald-700'}`}>
+                <span className={`text-[11px] block font-medium ${dashboardCardFilter === 'VERIFIED' ? 'text-black/70 font-bold' : 'text-[#00873d] dark:text-[#00cc5f]'}`}>
                   Verified & Eligible
                 </span>
-                <span className={`text-2xl font-bold block mt-0.5 ${dashboardCardFilter === 'VERIFIED' ? 'text-emerald-300' : 'text-emerald-800'}`}>
+                <span className={`text-2xl font-black block mt-0.5 ${dashboardCardFilter === 'VERIFIED' ? 'text-black' : 'text-[#00873d] dark:text-[#00cc5f]'}`}>
                   {verifiedCount}
                 </span>
-                <span className={`text-[10px] block mt-1 ${dashboardCardFilter === 'VERIFIED' ? 'text-emerald-300' : 'text-emerald-600 font-bold'}`}>
+                <span className={`text-[10px] block mt-1 ${dashboardCardFilter === 'VERIFIED' ? 'text-black/80 font-bold' : 'text-[#00873d] dark:text-[#00cc5f] font-bold'}`}>
                   Ready for Generation
                 </span>
               </button>
@@ -640,16 +855,16 @@ export const ExamManagerWorkspace: React.FC<ExamManagerWorkspaceProps> = ({
               <button
                 type="button"
                 onClick={() => setDashboardCardFilter('QUARANTINED')}
-                className={`p-4 rounded-xl border text-left transition-all cursor-pointer ${
+                className={`p-4 rounded-xl border text-left transition-all cursor-pointer shadow-xs hover:-translate-y-0.5 ${
                   dashboardCardFilter === 'QUARANTINED'
-                    ? 'bg-rose-950 text-white border-rose-900 ring-2 ring-rose-600/30 shadow-xs'
+                    ? 'bg-rose-950 text-white border-rose-900 ring-2 ring-rose-600/30 shadow-sm'
                     : 'bg-rose-50/60 border-rose-200 text-rose-950 hover:bg-rose-50 hover:border-rose-300'
                 }`}
               >
                 <span className={`text-[11px] block font-medium ${dashboardCardFilter === 'QUARANTINED' ? 'text-rose-300' : 'text-rose-700'}`}>
                   Quarantined / Suspects
                 </span>
-                <span className={`text-2xl font-bold block mt-0.5 ${dashboardCardFilter === 'QUARANTINED' ? 'text-rose-300' : 'text-rose-800'}`}>
+                <span className={`text-2xl font-black block mt-0.5 ${dashboardCardFilter === 'QUARANTINED' ? 'text-rose-300' : 'text-rose-800'}`}>
                   {quarantinedCount}
                 </span>
                 <span className={`text-[10px] block mt-1 ${dashboardCardFilter === 'QUARANTINED' ? 'text-rose-300' : 'text-rose-600 font-bold'}`}>
@@ -660,10 +875,12 @@ export const ExamManagerWorkspace: React.FC<ExamManagerWorkspaceProps> = ({
           </div>
 
           {/* Active List based on Selected Interactive Metric Card */}
-          <div className="p-6 rounded-xl bg-white border border-slate-200 shadow-xs space-y-4">
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b pb-3">
+          <div className="modern-card p-6 rounded-2xl bg-white border border-slate-200 shadow-sm space-y-4">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-slate-100 pb-3">
               <h3 className="text-sm font-bold text-slate-900 flex items-center gap-2">
-                <FolderLock className="w-4 h-4 text-emerald-900" />
+                <div className="p-1 rounded-md bg-emerald-50 text-emerald-800">
+                  <FolderLock className="w-3.5 h-3.5" />
+                </div>
                 <span>
                   {dashboardCardFilter === 'VERIFIED'
                     ? 'Verified & Paper-Eligible Question Pool'
@@ -762,60 +979,295 @@ export const ExamManagerWorkspace: React.FC<ExamManagerWorkspaceProps> = ({
 
       {/* ALL EXAMINATIONS */}
       {activeSubTab === 'all_examinations' && (
-        <div className="p-6 rounded-xl bg-white border border-slate-200 shadow-xs space-y-4">
-          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b pb-3">
-            <h3 className="text-base font-bold text-slate-900">All Scheduled Examinations</h3>
-            <span className="text-xs text-slate-500 font-mono">{examinations.length} Active Enclaves</span>
+        <div className="space-y-5">
+          {/* Header & Control Bar */}
+          <div className="p-6 rounded-2xl bg-white border border-slate-200/90 shadow-sm space-y-4">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-100 pb-4">
+              <div>
+                <div className="flex items-center gap-2">
+                  <span className="text-[10px] font-black uppercase tracking-wider text-emerald-800 bg-emerald-50 px-2.5 py-0.5 rounded-full border border-emerald-200">
+                    Active Vault Catalog
+                  </span>
+                  <span className="text-[10px] font-bold text-slate-500 font-mono">
+                    {examinations.length} Sealed Enclaves
+                  </span>
+                </div>
+                <h3 className="text-xl font-black text-slate-900 tracking-tight mt-1">
+                  All Scheduled Examinations
+                </h3>
+                <p className="text-xs text-slate-500">
+                  Cryptographically secured test papers, Shamir threshold unlock schedules, and centre delivery vaults.
+                </p>
+              </div>
+
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={onRefresh}
+                  className="px-3 py-1.5 rounded-xl border border-slate-200 hover:bg-slate-50 text-slate-700 text-xs font-bold flex items-center gap-1.5 cursor-pointer"
+                >
+                  <RotateCcw className="w-3.5 h-3.5 text-slate-500" />
+                  <span>Refresh Vaults</span>
+                </button>
+              </div>
+            </div>
+
+            {/* Search & Filter Bar */}
+            <div className="flex flex-col sm:flex-row items-center justify-between gap-3">
+              <div className="relative w-full sm:w-80">
+                <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
+                <input
+                  type="text"
+                  value={examSearchQuery}
+                  onChange={e => setExamSearchQuery(e.target.value)}
+                  placeholder="Search examination or subject..."
+                  className="w-full pl-9 pr-3 py-2 text-xs rounded-xl input-luxury text-slate-900 font-medium"
+                />
+              </div>
+
+              <div className="flex flex-wrap items-center gap-1.5 w-full sm:w-auto">
+                {['ALL', 'Competitive Exam', 'NEET', 'JEE', 'TCET / CET-type Exam', 'University Exam'].map(cat => (
+                  <button
+                    key={cat}
+                    type="button"
+                    onClick={() => setExamCategoryFilter(cat)}
+                    className={`px-3 py-1.5 rounded-full text-xs font-bold transition-all cursor-pointer ${
+                      examCategoryFilter === cat
+                        ? 'bg-[#00cc5f] text-black shadow-[0_2px_10px_rgba(0,204,95,0.35)]'
+                        : 'bg-white/70 dark:bg-white/[0.04] hover:bg-slate-100 dark:hover:bg-white/[0.08] text-slate-700 dark:text-slate-300 border border-slate-200/80 dark:border-white/10'
+                    }`}
+                  >
+                    {cat === 'ALL' ? 'All Categories' : cat.replace(' / CET-type Exam', '')}
+                  </button>
+                ))}
+              </div>
+            </div>
           </div>
 
-          <div className="space-y-3">
-            {examinations.map(ex => {
-              const type = (ex as any).exam_type || 'MCQ';
-              const typeBadgeClass =
-                type === 'MCQ'
-                  ? 'bg-blue-100 text-blue-900 border-blue-200'
-                  : type === 'THEORY'
-                  ? 'bg-amber-100 text-amber-900 border-amber-200'
-                  : type === 'MIXED'
-                  ? 'bg-teal-100 text-teal-900 border-teal-200'
-                  : 'bg-indigo-100 text-indigo-900 border-indigo-200';
+          {/* Examinations Grid / Cards */}
+          <div className="grid grid-cols-1 gap-4">
+            {examinations
+              .filter(ex => {
+                const matchesSearch =
+                  !examSearchQuery ||
+                  ex.name.toLowerCase().includes(examSearchQuery.toLowerCase()) ||
+                  ex.subject.toLowerCase().includes(examSearchQuery.toLowerCase());
+                const matchesCat = examCategoryFilter === 'ALL' || ex.category === examCategoryFilter;
+                return matchesSearch && matchesCat;
+              })
+              .map(ex => {
+                const type = (ex as any).exam_type || 'MCQ';
+                const typeBadgeClass =
+                  type === 'MCQ'
+                    ? 'bg-blue-100 text-blue-950 border-blue-200'
+                    : type === 'THEORY'
+                    ? 'bg-amber-100 text-amber-950 border-amber-200'
+                    : type === 'MIXED'
+                    ? 'bg-teal-100 text-teal-950 border-teal-200'
+                    : 'bg-indigo-100 text-indigo-950 border-indigo-200';
 
-              return (
-                <div key={ex.id} className="p-4 rounded-lg bg-slate-50 border border-slate-200 space-y-3 text-xs">
-                  <div className="flex flex-wrap items-center justify-between gap-2">
-                    <div className="flex items-center gap-2">
-                      <span className="font-bold text-sm text-slate-900">{ex.name}</span>
-                      <span className={`px-2 py-0.5 rounded text-[10px] font-bold border ${typeBadgeClass}`}>
-                        {type === 'MCQ' ? '⚡ MCQ (OMR/CBT)' : type === 'THEORY' ? '📝 THEORY (Subjective)' : type === 'MIXED' ? '🔀 MIXED (Hybrid)' : '💻 PRACTICAL'}
-                      </span>
+                return (
+                  <div
+                    key={ex.id}
+                    className="p-5 rounded-2xl bg-white border border-slate-200/90 shadow-sm hover:shadow-md hover:border-slate-300 transition-all space-y-4 relative overflow-hidden"
+                  >
+                    <div className="flex flex-wrap items-start justify-between gap-3">
+                      <div className="space-y-1">
+                        <div className="flex flex-wrap items-center gap-2">
+                          <span className="font-mono font-black text-[11px] text-slate-500 bg-slate-100 px-2.5 py-0.5 rounded-md">
+                            {ex.id}
+                          </span>
+                          <span className={`px-2 py-0.5 rounded text-[10px] font-black border ${typeBadgeClass}`}>
+                            {type === 'MCQ' ? '⚡ MCQ (OMR/CBT)' : type === 'THEORY' ? '📝 THEORY (Descriptive)' : type === 'MIXED' ? '🔀 MIXED (Hybrid)' : '💻 PRACTICAL'}
+                          </span>
+                          <span className="text-[10px] font-bold text-slate-600 bg-slate-100 px-2 py-0.5 rounded-md">
+                            {ex.category}
+                          </span>
+                        </div>
+                        <h4 className="text-base font-black text-slate-900 leading-snug">
+                          {ex.name}
+                        </h4>
+                        <div className="flex items-center gap-1.5 text-xs text-slate-600 font-medium">
+                          <GraduationCap className="w-4 h-4 text-emerald-700 shrink-0" />
+                          <span>{ex.subject}</span>
+                        </div>
+                      </div>
+
+                      <div className="flex items-center gap-2">
+                        <span
+                          className={`px-3 py-1 rounded-full text-[10px] font-black tracking-wider uppercase border flex items-center gap-1.5 ${
+                            ex.status === 'GENERATED' || ex.status === 'READY'
+                              ? 'bg-emerald-50 text-emerald-950 border-emerald-300'
+                              : ex.status === 'UNLOCKED'
+                              ? 'bg-purple-50 text-purple-950 border-purple-300'
+                              : 'bg-amber-50 text-amber-950 border-amber-300'
+                          }`}
+                        >
+                          <span className={`w-2 h-2 rounded-full ${
+                            ex.status === 'GENERATED' || ex.status === 'READY' ? 'bg-emerald-600 animate-pulse' : 'bg-amber-600'
+                          }`} />
+                          {ex.status}
+                        </span>
+                      </div>
                     </div>
-                    <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-emerald-100 text-emerald-900">
-                      {ex.status}
-                    </span>
+
+                    {/* Metadata Grid */}
+                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-xs bg-slate-50/80 p-3.5 rounded-xl border border-slate-100">
+                      <div className="space-y-0.5">
+                        <span className="text-[10px] font-bold text-slate-400 block uppercase">Structure</span>
+                        <div className="font-black text-slate-900 flex items-center gap-1.5">
+                          <Award className="w-3.5 h-3.5 text-amber-700 shrink-0" />
+                          <span>{ex.total_marks} Marks</span>
+                          <span className="text-slate-400 font-normal">({ex.total_questions} Qs)</span>
+                        </div>
+                      </div>
+
+                      <div className="space-y-0.5">
+                        <span className="text-[10px] font-bold text-slate-400 block uppercase">Duration</span>
+                        <div className="font-black text-slate-900 flex items-center gap-1.5">
+                          <Clock className="w-3.5 h-3.5 text-blue-700 shrink-0" />
+                          <span>{ex.duration_minutes} Minutes</span>
+                        </div>
+                      </div>
+
+                      <div className="space-y-0.5">
+                        <span className="text-[10px] font-bold text-slate-400 block uppercase">Scheduled Test</span>
+                        <div className="font-mono text-slate-900 font-bold flex items-center gap-1.5">
+                          <Calendar className="w-3.5 h-3.5 text-teal-700 shrink-0" />
+                          <span>{ex.exam_date} @ {ex.exam_time}</span>
+                        </div>
+                      </div>
+
+                      <div className="space-y-0.5">
+                        <span className="text-[10px] font-bold text-slate-400 block uppercase">Time-Lock Unlock</span>
+                        <div className="font-mono text-emerald-950 font-black flex items-center gap-1.5">
+                          <Lock className="w-3.5 h-3.5 text-emerald-700 shrink-0" />
+                          <span>{ex.unlock_time}</span>
+                          <span className="text-[9px] text-emerald-800 font-sans font-bold">(Shamir 3-Key)</span>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Action Bar */}
+                    <div className="flex flex-wrap items-center justify-between gap-2 pt-1 border-t border-slate-100">
+                      <div className="flex items-center gap-2">
+                        <button
+                          type="button"
+                          onClick={() => handleGeneratePaper(ex.id)}
+                          disabled={generating || org?.status !== 'VERIFIED'}
+                          className="px-3.5 py-1.5 rounded-xl bg-slate-900 hover:bg-slate-800 text-white font-bold text-xs flex items-center gap-1.5 shadow-xs disabled:opacity-50 cursor-pointer"
+                        >
+                          <Sparkles className="w-3.5 h-3.5 text-amber-400" />
+                          <span>{ex.status === 'GENERATED' ? 'Re-Generate & Encrypt' : 'Generate Encrypted Paper'}</span>
+                        </button>
+
+                        {onLaunchCandidateSimulator && (
+                          <button
+                            type="button"
+                            onClick={() => onLaunchCandidateSimulator(ex.id)}
+                            className="px-3.5 py-1.5 rounded-xl bg-emerald-50 hover:bg-emerald-100 text-emerald-900 border border-emerald-200 font-bold text-xs flex items-center gap-1.5 cursor-pointer"
+                          >
+                            <Play className="w-3.5 h-3.5 text-emerald-700 fill-current" />
+                            <span>Simulate Exam &rarr;</span>
+                          </button>
+                        )}
+                      </div>
+
+                      <div className="flex items-center gap-2">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setSelectedExamId(ex.id);
+                            setStatusMessage({ type: 'success', text: `Selected exam "${ex.name}" for delivery centres.` });
+                          }}
+                          className="text-slate-600 hover:text-slate-900 text-xs font-semibold px-2 py-1 rounded hover:bg-slate-100 cursor-pointer"
+                        >
+                          Add Centre
+                        </button>
+
+                        <button
+                          type="button"
+                          onClick={() => handleEmergencyRegenerate(ex.id)}
+                          className="text-rose-600 hover:text-rose-800 text-xs font-semibold px-2 py-1 rounded hover:bg-rose-50 cursor-pointer"
+                        >
+                          Emergency Re-Gen
+                        </button>
+                      </div>
+                    </div>
                   </div>
-                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-slate-600">
-                    <div>Subject: <span className="font-bold text-slate-900">{ex.subject}</span></div>
-                    <div>Category: <span className="font-bold text-slate-900">{ex.category}</span></div>
-                    <div>Marks: <span className="font-bold text-slate-900">{ex.total_marks}</span></div>
-                    <div>Duration: <span className="font-bold text-slate-900">{ex.duration_minutes} mins</span></div>
-                    <div>Schedule Date: <span className="font-mono text-slate-900">{ex.exam_date}</span></div>
-                    <div>Exam Time: <span className="font-mono text-slate-900">{ex.exam_time}</span></div>
-                    <div>Unlock Time: <span className="font-mono font-bold text-emerald-900">{ex.unlock_time}</span></div>
-                    <div>Total Qs: <span className="font-bold text-slate-900">{ex.total_questions}</span></div>
-                  </div>
-                </div>
-              );
-            })}
+                );
+              })}
           </div>
         </div>
       )}
 
       {/* CREATE EXAMINATION */}
       {activeSubTab === 'create_examination' && (
-        <div className="p-6 rounded-xl bg-white border border-slate-200 shadow-xs space-y-4">
-          <h3 className="text-base font-bold text-slate-900 border-b pb-2">
-            Create New Examination Enclave
-          </h3>
+        <div className="p-6 rounded-2xl bg-white border border-slate-200/90 shadow-sm space-y-6">
+          <div className="border-b border-slate-100 pb-4">
+            <span className="text-[10px] font-black uppercase tracking-wider text-emerald-800 bg-emerald-50 px-2.5 py-0.5 rounded-full border border-emerald-200">
+              Cryptographic Enclave Setup
+            </span>
+            <h3 className="text-xl font-black text-slate-900 mt-1">
+              Create New Examination Enclave
+            </h3>
+            <p className="text-xs text-slate-500">
+              Establish a tamper-proof examination vault with automated question bank pooling, Shamir key-sharing, and verifiable time-locks.
+            </p>
+          </div>
+
+          {/* Quick Real Exam Presets */}
+          <div className="p-5 rounded-2xl bg-gradient-to-r from-slate-950 via-slate-900 to-indigo-950 text-white shadow-md space-y-3 relative overflow-hidden">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+              <div className="flex items-center gap-2">
+                <Sparkles className="w-4 h-4 text-amber-400" />
+                <span className="font-bold text-xs uppercase tracking-wider text-amber-300">
+                  Quick Real Exam Presets (1-Click Real Blueprint Auto Fill)
+                </span>
+              </div>
+              <span className="text-[11px] text-slate-300 font-medium">
+                Authentic AICTE, NTA & University configurations
+              </span>
+            </div>
+
+            <div className="flex flex-wrap gap-2">
+              {REAL_EXAM_PRESETS.map(preset => {
+                const isSelected = selectedPresetId === preset.id;
+                return (
+                  <button
+                    key={preset.id}
+                    type="button"
+                    onClick={() => handleApplyPreset(preset)}
+                    className={`px-3 py-2 rounded-xl text-xs font-bold transition-all flex items-center gap-2 cursor-pointer ${
+                      isSelected
+                        ? 'bg-amber-400 text-slate-950 ring-2 ring-white shadow-md scale-105'
+                        : 'bg-white/10 hover:bg-white/20 text-white border border-white/10'
+                    }`}
+                  >
+                    <span>{preset.shortTag}</span>
+                    <span className="text-[10px] opacity-80 font-normal">
+                      ({preset.totalMarks}M • {preset.totalQuestions}Q)
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
+
+            {selectedPresetId && (
+              <div className="text-[11px] text-amber-200 bg-white/10 p-2.5 rounded-xl border border-white/15 flex items-center justify-between">
+                <span>
+                  Preset Applied: <strong className="text-white">{REAL_EXAM_PRESETS.find(p => p.id === selectedPresetId)?.name}</strong> — {REAL_EXAM_PRESETS.find(p => p.id === selectedPresetId)?.description}
+                </span>
+                <button
+                  type="button"
+                  onClick={() => setSelectedPresetId(null)}
+                  className="text-[10px] text-slate-300 hover:text-white underline cursor-pointer"
+                >
+                  Clear Preset
+                </button>
+              </div>
+            )}
+          </div>
 
           <form onSubmit={handleCreateExam} className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-xs">
             <div className="sm:col-span-2">
@@ -826,7 +1278,7 @@ export const ExamManagerWorkspace: React.FC<ExamManagerWorkspaceProps> = ({
                 onChange={e => setExamName(e.target.value)}
                 placeholder="e.g. National Computer Science & Security Entrance Exam 2026"
                 required
-                className="w-full px-3 py-2 rounded-lg bg-slate-50 border border-slate-300 text-slate-900 focus:bg-white focus:border-emerald-800 focus:outline-hidden"
+                className="w-full px-3.5 py-2.5 rounded-xl input-luxury text-slate-900 font-medium"
               />
             </div>
 
@@ -838,7 +1290,7 @@ export const ExamManagerWorkspace: React.FC<ExamManagerWorkspaceProps> = ({
                 onChange={e => setSubject(e.target.value)}
                 placeholder="e.g. Computer Science & Applied Cryptography"
                 required
-                className="w-full px-3 py-2 rounded-lg bg-slate-50 border border-slate-300 text-slate-900 focus:bg-white focus:border-emerald-800 focus:outline-hidden"
+                className="w-full px-3.5 py-2.5 rounded-xl input-luxury text-slate-900 font-medium"
               />
             </div>
 
@@ -847,14 +1299,14 @@ export const ExamManagerWorkspace: React.FC<ExamManagerWorkspaceProps> = ({
               <select
                 value={category}
                 onChange={e => setCategory(e.target.value)}
-                className="w-full px-3 py-2 rounded-lg bg-slate-50 border border-slate-300 text-slate-900 focus:bg-white focus:border-emerald-800 focus:outline-hidden"
+                className="w-full px-3.5 py-2.5 rounded-xl input-luxury text-slate-900 font-semibold"
               >
-                <option value="NEET">NEET (National Eligibility Entrance Test)</option>
-                <option value="JEE">JEE (Joint Entrance Examination)</option>
-                <option value="Competitive Exam">Competitive Exam</option>
-                <option value="TCET / CET-type Exam">TCET / CET-type Exam</option>
-                <option value="University Exam">University Exam</option>
-                <option value="Custom Exam">Custom Institutional Exam</option>
+                <option value="Competitive Exam">Competitive Exam (GATE / CAT / UPSC)</option>
+                <option value="JEE">JEE (Joint Entrance Examination - Main & Advanced)</option>
+                <option value="NEET">NEET (National Eligibility Entrance Test - UG & PG)</option>
+                <option value="TCET / CET-type Exam">TCET / CET-type Exam (State Entrance)</option>
+                <option value="University Exam">University Exam (AICTE Semester Theory & Lab)</option>
+                <option value="Custom Exam">Custom Institutional Enclave</option>
               </select>
             </div>
 
@@ -863,7 +1315,7 @@ export const ExamManagerWorkspace: React.FC<ExamManagerWorkspaceProps> = ({
               <select
                 value={examType}
                 onChange={e => setExamType(e.target.value as any)}
-                className="w-full px-3 py-2 rounded-lg bg-slate-50 border border-slate-300 text-slate-900 focus:bg-white focus:border-emerald-800 focus:outline-hidden font-medium"
+                className="w-full px-3.5 py-2.5 rounded-xl input-luxury text-slate-900 font-semibold"
               >
                 <option value="MCQ">MCQ (Multiple Choice Questions - OMR / CBT)</option>
                 <option value="THEORY">THEORY (Subjective / Descriptive Pattern)</option>
@@ -885,7 +1337,7 @@ export const ExamManagerWorkspace: React.FC<ExamManagerWorkspaceProps> = ({
                 value={examDate}
                 onChange={e => setExamDate(e.target.value)}
                 required
-                className="w-full px-3 py-2 rounded-lg bg-slate-50 border border-slate-300 text-slate-900 focus:bg-white focus:border-emerald-800 focus:outline-hidden"
+                className="w-full px-3.5 py-2.5 rounded-xl input-luxury text-slate-900 font-medium"
               />
             </div>
 
@@ -896,771 +1348,722 @@ export const ExamManagerWorkspace: React.FC<ExamManagerWorkspaceProps> = ({
                 value={examTime}
                 onChange={e => setExamTime(e.target.value)}
                 required
-                className="w-full px-3 py-2 rounded-lg bg-slate-50 border border-slate-300 text-slate-900 focus:bg-white focus:border-emerald-800 focus:outline-hidden"
+                className="w-full px-3.5 py-2.5 rounded-xl input-luxury text-slate-900 font-medium"
               />
             </div>
 
             <div>
-              <label className="block text-slate-700 font-bold mb-1">Authorized Time-Lock Unlock *</label>
+              <label className="block text-slate-700 font-bold mb-1">
+                Authorized Shamir Unlock Time *
+              </label>
               <input
                 type="time"
                 value={unlockTime}
                 onChange={e => setUnlockTime(e.target.value)}
                 required
-                className="w-full px-3 py-2 rounded-lg bg-slate-50 border border-slate-300 text-slate-900 focus:bg-white focus:border-emerald-800 focus:outline-hidden"
+                className="w-full px-3.5 py-2.5 rounded-xl input-luxury text-slate-900 font-medium font-mono"
               />
+              <span className="text-[10px] text-slate-500 block mt-1">
+                Paper decrypts strictly at this minute via 3-party threshold keys.
+              </span>
             </div>
 
             <div>
-              <label className="block text-slate-700 font-bold mb-1">Total Marks</label>
+              <label className="block text-slate-700 font-bold mb-1">Total Marks *</label>
               <input
                 type="number"
                 value={totalMarks}
                 onChange={e => setTotalMarks(Number(e.target.value))}
                 required
-                className="w-full px-3 py-2 rounded-lg bg-slate-50 border border-slate-300 text-slate-900 focus:bg-white focus:border-emerald-800 focus:outline-hidden"
+                className="w-full px-3.5 py-2.5 rounded-xl input-luxury text-slate-900 font-medium"
               />
             </div>
 
             <div>
-              <label className="block text-slate-700 font-bold mb-1">Target Question Count</label>
+              <label className="block text-slate-700 font-bold mb-1">Target Question Count *</label>
               <input
                 type="number"
                 value={totalQuestions}
                 onChange={e => setTotalQuestions(Number(e.target.value))}
                 required
-                className="w-full px-3 py-2 rounded-lg bg-slate-50 border border-slate-300 text-slate-900 focus:bg-white focus:border-emerald-800 focus:outline-hidden"
+                className="w-full px-3.5 py-2.5 rounded-xl input-luxury text-slate-900 font-medium"
               />
             </div>
 
-            <div className="sm:col-span-2 pt-2">
+            <div>
+              <label className="block text-slate-700 font-bold mb-1">Examination Duration (Minutes) *</label>
+              <input
+                type="number"
+                value={durationMins}
+                onChange={e => setDurationMins(Number(e.target.value))}
+                required
+                className="w-full px-3.5 py-2.5 rounded-xl input-luxury text-slate-900 font-medium"
+              />
+            </div>
+
+            <div className="sm:col-span-2 pt-3 border-t border-slate-100 flex items-center justify-between">
               <button
                 type="submit"
                 disabled={org?.status !== 'VERIFIED'}
-                className="px-6 py-2.5 bg-emerald-900 hover:bg-emerald-800 disabled:opacity-40 text-white rounded-lg font-bold text-xs shadow-xs"
+                className="px-8 py-3 bg-emerald-900 hover:bg-emerald-800 disabled:opacity-40 text-white rounded-xl font-bold text-xs shadow-md cursor-pointer transition-all flex items-center gap-2"
               >
-                Create Examination Record
+                <Sparkles className="w-4 h-4 text-amber-300" />
+                <span>Create Examination Record</span>
               </button>
+
+              <span className="text-[11px] text-slate-500">
+                {org?.status === 'VERIFIED' ? '✅ Organization Verified' : '⚠️ Accreditation required'}
+              </span>
             </div>
           </form>
         </div>
       )}
 
-      {/* QUESTION WORKFLOW & CREATION */}
+      {/* ============================================================ */}
+      {/* QUESTION WORKFLOW SECTION (HIGH-ASSURANCE QUESTION MANAGEMENT) */}
+      {/* ============================================================ */}
       {activeSubTab === 'question_workflow' && (
         <div className="space-y-6">
-          {/* Navigation Pill Bar for Question Workflow */}
-          <div className="flex flex-wrap items-center justify-between gap-3 bg-white p-3 rounded-xl border border-slate-200 shadow-xs">
-            <div className="flex items-center gap-2">
+          {/* Executive Header & Navigation Bar */}
+          <div className="p-4 rounded-2xl bg-white border border-slate-200/80 shadow-xs flex flex-wrap items-center justify-between gap-4">
+            <div className="flex flex-wrap items-center gap-2">
               <button
+                type="button"
                 onClick={() => setQuestionWorkflowTab('extraction')}
-                className={`px-4 py-2 rounded-lg font-bold text-xs flex items-center gap-2 transition-all ${
+                className={`px-4 py-2.5 rounded-xl font-bold text-xs flex items-center gap-2.5 transition-all cursor-pointer ${
                   questionWorkflowTab === 'extraction'
-                    ? 'bg-emerald-900 text-white shadow-xs'
-                    : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
+                    ? 'bg-gradient-to-r from-emerald-950 via-emerald-900 to-teal-900 text-white shadow-sm ring-2 ring-emerald-800/20'
+                    : 'bg-slate-100/80 text-slate-700 hover:bg-slate-200/70 hover:text-slate-900'
                 }`}
               >
-                <FileUp className="w-4 h-4 text-emerald-400" />
-                <span>PDF Question Paper Extractor</span>
-                {extractedQuestions.length > 0 && (
-                  <span className="px-1.5 py-0.5 rounded-full text-[10px] bg-emerald-700 text-white font-mono">
-                    {extractedQuestions.length}
-                  </span>
-                )}
+                <div className={`p-1 rounded-lg ${questionWorkflowTab === 'extraction' ? 'bg-emerald-800 text-emerald-200' : 'bg-slate-200 text-slate-600'}`}>
+                  <FileUp className="w-3.5 h-3.5" />
+                </div>
+                <span>PDF Question Studio</span>
+                <span className="px-2 py-0.5 rounded-full text-[10px] font-mono font-bold bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">
+                  300 DPI
+                </span>
               </button>
 
               <button
+                type="button"
                 onClick={() => setQuestionWorkflowTab('manual')}
-                className={`px-4 py-2 rounded-lg font-bold text-xs flex items-center gap-2 transition-all ${
+                className={`px-4 py-2.5 rounded-xl font-bold text-xs flex items-center gap-2.5 transition-all cursor-pointer ${
                   questionWorkflowTab === 'manual'
-                    ? 'bg-emerald-900 text-white shadow-xs'
-                    : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
+                    ? 'bg-gradient-to-r from-emerald-950 via-emerald-900 to-teal-900 text-white shadow-sm ring-2 ring-emerald-800/20'
+                    : 'bg-slate-100/80 text-slate-700 hover:bg-slate-200/70 hover:text-slate-900'
                 }`}
               >
-                <PlusCircle className="w-4 h-4" />
-                <span>Manual Single Question</span>
+                <div className={`p-1 rounded-lg ${questionWorkflowTab === 'manual' ? 'bg-emerald-800 text-emerald-200' : 'bg-slate-200 text-slate-600'}`}>
+                  <Edit3 className="w-3.5 h-3.5" />
+                </div>
+                <span>Manual Authoring</span>
+                <span className="text-[10px] font-medium opacity-70">Single Entry</span>
               </button>
 
               <button
+                type="button"
                 onClick={() => setQuestionWorkflowTab('matrix')}
-                className={`px-4 py-2 rounded-lg font-bold text-xs flex items-center gap-2 transition-all ${
+                className={`px-4 py-2.5 rounded-xl font-bold text-xs flex items-center gap-2.5 transition-all cursor-pointer ${
                   questionWorkflowTab === 'matrix'
-                    ? 'bg-emerald-900 text-white shadow-xs'
-                    : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
+                    ? 'bg-gradient-to-r from-emerald-950 via-emerald-900 to-teal-900 text-white shadow-sm ring-2 ring-emerald-800/20'
+                    : 'bg-slate-100/80 text-slate-700 hover:bg-slate-200/70 hover:text-slate-900'
                 }`}
               >
-                <Activity className="w-4 h-4 text-teal-400" />
-                <span>Assignment & Verification Matrix</span>
-                <span className="px-1.5 py-0.5 rounded-full text-[10px] bg-slate-200 text-slate-800 font-mono">
+                <div className={`p-1 rounded-lg ${questionWorkflowTab === 'matrix' ? 'bg-emerald-800 text-emerald-200' : 'bg-slate-200 text-slate-600'}`}>
+                  <Activity className="w-3.5 h-3.5" />
+                </div>
+                <span>Verification Matrix</span>
+                <span className={`px-2 py-0.5 rounded-full text-[10px] font-mono font-bold ${questionWorkflowTab === 'matrix' ? 'bg-white/20 text-white' : 'bg-slate-200 text-slate-800'}`}>
                   {assignments.length}
                 </span>
               </button>
             </div>
 
-            <div className="text-xs text-slate-500 flex items-center gap-4">
-              <span>SMEs: <strong className="text-slate-800">{smes.length}</strong></span>
-              <span>Translators: <strong className="text-slate-800">{translators.length}</strong></span>
+            {/* Team Capacity Indicator Chips */}
+            <div className="flex items-center gap-3 text-xs">
+              <div className="flex items-center gap-2 px-3 py-1.5 rounded-xl bg-slate-50 border border-slate-200/80 text-slate-700">
+                <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
+                <span className="font-semibold text-slate-600">SMEs:</span>
+                <span className="font-bold text-slate-900 font-mono">{smes.length} Active</span>
+              </div>
+              <div className="flex items-center gap-2 px-3 py-1.5 rounded-xl bg-slate-50 border border-slate-200/80 text-slate-700">
+                <span className="w-2 h-2 rounded-full bg-purple-500 animate-pulse"></span>
+                <span className="font-semibold text-slate-600">Translators:</span>
+                <span className="font-bold text-slate-900 font-mono">{translators.length} Active</span>
+              </div>
             </div>
           </div>
 
-          {/* TAB 1: PDF QUESTION PAPER EXTRACTION & BULK ASSIGNMENT */}
+          {/* TAB 1: HIGH-RES PDF QUESTION EXTRACTION STUDIO */}
           {questionWorkflowTab === 'extraction' && (
-            <div className="space-y-6">
-              {/* Document Upload & Input Card */}
-              <div className="p-6 rounded-xl bg-white border border-slate-200 shadow-xs space-y-4">
-                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b pb-3">
-                  <div>
-                    <h3 className="text-base font-bold text-slate-900 flex items-center gap-2">
-                      <FileUp className="w-5 h-5 text-emerald-800" />
-                      <span>Upload Question Paper PDF / Transcript</span>
+            <ExamManagerQuestionExtractor
+              smes={smes}
+              translators={translators}
+              org={org}
+              currentUser={currentUser}
+              onAssignmentsUpdated={loadData}
+            />
+          )}
+
+          {/* TAB 2: MANUAL SINGLE QUESTION AUTHORING */}
+          {questionWorkflowTab === 'manual' && (
+            <div className="p-6 rounded-2xl bg-white border border-slate-200/80 shadow-xs space-y-6">
+              {/* Header */}
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-100 pb-4">
+                <div>
+                  <div className="flex items-center gap-2">
+                    <div className="p-2 rounded-xl bg-emerald-100 text-emerald-900">
+                      <Edit3 className="w-4 h-4 text-emerald-800" />
+                    </div>
+                    <h3 className="text-base font-bold text-slate-900">
+                      Direct Question Authoring Studio
                     </h3>
-                    <p className="text-xs text-slate-500 mt-0.5">
-                      Upload master examination papers or paste OCR transcript. Gemini AI parses questions, options, marks, and answer keys automatically.
-                    </p>
                   </div>
-
-                  <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[11px] font-bold bg-emerald-50 text-emerald-800 border border-emerald-200 self-start sm:self-auto">
-                    <Sparkles className="w-3.5 h-3.5 text-emerald-600" />
-                    <span>Gemini Extraction Engine</span>
-                  </span>
-                </div>
-
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-xs">
-                  <div>
-                    <label className="block text-slate-700 font-bold mb-1">Target Subject / Discipline</label>
-                    <input
-                      type="text"
-                      value={paperSubject}
-                      onChange={e => setPaperSubject(e.target.value)}
-                      placeholder="e.g. Physics / Mathematics / Computer Science"
-                      className="w-full px-3 py-2 rounded-lg bg-slate-50 border border-slate-300 text-slate-900 focus:bg-white focus:border-emerald-800 focus:outline-hidden"
-                    />
-                  </div>
-
-                  <div>
-                    <label className="block text-slate-700 font-bold mb-1">Examination Category</label>
-                    <input
-                      type="text"
-                      value={paperCategory}
-                      onChange={e => setPaperCategory(e.target.value)}
-                      placeholder="e.g. National Competitive Exam / Semester Board"
-                      className="w-full px-3 py-2 rounded-lg bg-slate-50 border border-slate-300 text-slate-900 focus:bg-white focus:border-emerald-800 focus:outline-hidden"
-                    />
-                  </div>
-                </div>
-
-                {/* Upload Box */}
-                <div className="border-2 border-dashed border-slate-300 rounded-xl p-6 bg-slate-50 hover:bg-slate-100/60 transition-colors text-center">
-                  <Upload className="w-8 h-8 text-slate-400 mx-auto mb-2" />
-                  <p className="text-xs font-bold text-slate-800">
-                    {pdfFileName ? `Selected: ${pdfFileName}` : 'Choose Question Paper PDF, Word Doc, or Text File'}
+                  <p className="text-xs text-slate-500 mt-1">
+                    Directly compose high-assurance examination questions with LaTeX math, diagrams, MCQ choices, and cryptographic integrity.
                   </p>
-                  <p className="text-[11px] text-slate-500 mt-1">
-                    Supports .pdf, .txt, .docx, .json files. Extraction pipeline isolates individual questions securely.
-                  </p>
-                  <label className="mt-3 inline-block px-4 py-2 bg-slate-800 hover:bg-slate-700 text-white rounded-lg font-bold text-xs cursor-pointer shadow-xs">
-                    Browse File
-                    <input
-                      type="file"
-                      accept=".pdf,.txt,.docx,.json,.csv"
-                      onChange={handleFileUpload}
-                      className="hidden"
-                    />
-                  </label>
                 </div>
 
-                {/* Text Transcript Box */}
-                <div className="space-y-1.5 text-xs">
-                  <label className="block text-slate-700 font-bold">
-                    Or Paste Question Paper Content / Raw OCR Transcript:
-                  </label>
-                  <textarea
-                    rows={6}
-                    value={pdfText}
-                    onChange={e => setPdfText(e.target.value)}
-                    placeholder={`e.g.
-1. What is the time complexity of lookup in a balanced binary search tree?
-A) O(1)
-B) O(log n)
-C) O(n)
-D) O(n log n)
-Answer: B
-Marks: 4
-
-2. Explain the principle of Shamir Secret Sharing with threshold (k, n).
-Answer: Detailed derivation
-Marks: 10`}
-                    className="w-full px-3 py-2.5 rounded-lg bg-slate-50 border border-slate-300 text-slate-900 font-mono text-xs focus:bg-white focus:border-emerald-800 focus:outline-hidden"
-                  />
-                </div>
-
-                <div className="flex items-center justify-between pt-2">
-                  <button
-                    type="button"
-                    onClick={handleExtractQuestions}
-                    disabled={extracting || (!pdfText.trim() && !pdfFileData)}
-                    className="px-6 py-2.5 bg-emerald-900 hover:bg-emerald-800 disabled:opacity-40 text-white rounded-lg font-bold text-xs shadow-xs flex items-center gap-2"
-                  >
-                    <Sparkles className="w-4 h-4 text-emerald-300" />
-                    <span>{extracting ? 'Extracting Questions with AI...' : 'Run AI Question Extraction'}</span>
-                  </button>
-
-                  {(pdfText || pdfFileName) && (
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setPdfText('');
-                        setPdfFileData('');
-                        setPdfFileName('');
-                        setExtractedQuestions([]);
-                      }}
-                      className="text-xs text-slate-500 hover:text-slate-800 underline"
-                    >
-                      Clear Input
-                    </button>
-                  )}
-                </div>
+                <span className="px-3 py-1 rounded-full text-xs font-bold bg-emerald-50 text-emerald-800 border border-emerald-200 self-start sm:self-auto flex items-center gap-1.5">
+                  <Sparkles className="w-3.5 h-3.5 text-emerald-600" />
+                  <span>AI Pattern Verification Enabled</span>
+                </span>
               </div>
 
-              {/* Extracted Questions Review & Multi-Role Assignment Stage */}
-              {extractedQuestions.length > 0 && (
-                <div className="space-y-4">
-                  {/* Summary & Filter Bar */}
-                  <div className="p-4 rounded-xl bg-emerald-50 border border-emerald-200 text-emerald-900 flex flex-col sm:flex-row sm:items-center justify-between gap-3 shadow-xs">
-                    <div>
-                      <div className="flex items-center gap-2">
-                        <CheckCircle2 className="w-5 h-5 text-emerald-600 shrink-0" />
-                        <span className="font-bold text-sm">
-                          {extractedQuestions.length} Questions Extracted Successfully
-                        </span>
-                        <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-emerald-200/70 text-emerald-900">
-                          {aiEngineUsed ? 'Gemini 2.5 AI' : 'Heuristic Engine'}
-                        </span>
-                      </div>
-                      {extractionSummary && (
-                        <p className="text-xs text-emerald-800 mt-1 pl-7">{extractionSummary}</p>
-                      )}
-                    </div>
+              <form onSubmit={handleCreateQuestion} className="space-y-6">
+                <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
+                  {/* LEFT COLUMN: Academic & Question Configuration */}
+                  <div className="lg:col-span-5 space-y-4">
+                    <div className="p-4 rounded-xl bg-slate-50/80 border border-slate-200/80 space-y-3.5 text-xs">
+                      <h4 className="font-bold text-slate-800 uppercase tracking-wider text-[10px]">
+                        Academic Domain & Taxonomy
+                      </h4>
 
-                    {/* Selection Controls */}
-                    <div className="flex items-center gap-1.5 text-xs pl-7 sm:pl-0">
-                      <button
-                        type="button"
-                        onClick={() => selectAllExtracted('ALL')}
-                        className="px-2.5 py-1 bg-white hover:bg-emerald-100 text-emerald-900 border border-emerald-300 rounded font-semibold text-[11px]"
-                      >
-                        Select All ({extractedQuestions.length})
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => selectAllExtracted('MCQ')}
-                        className="px-2.5 py-1 bg-white hover:bg-emerald-100 text-emerald-900 border border-emerald-300 rounded font-semibold text-[11px]"
-                      >
-                        MCQ Only
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => selectAllExtracted('THEORY')}
-                        className="px-2.5 py-1 bg-white hover:bg-emerald-100 text-emerald-900 border border-emerald-300 rounded font-semibold text-[11px]"
-                      >
-                        Theory Only
-                      </button>
-                      <button
-                        type="button"
-                        onClick={deselectAllExtracted}
-                        className="px-2.5 py-1 bg-white hover:bg-rose-50 text-rose-700 border border-rose-200 rounded font-semibold text-[11px]"
-                      >
-                        Clear
-                      </button>
-                    </div>
-                  </div>
-
-                  {/* Direct Assignment Configuration Card */}
-                  <div className="p-6 rounded-xl bg-slate-900 text-white border border-slate-800 shadow-md space-y-4">
-                    <div className="flex items-center justify-between border-b border-slate-800 pb-3">
                       <div>
-                        <h4 className="text-sm font-bold text-white flex items-center gap-2">
-                          <Users className="w-4 h-4 text-emerald-400" />
-                          <span>Assign Selected ({selectedExtractedIds.size}) Questions to SME & Translator</span>
-                        </h4>
-                        <p className="text-[11px] text-slate-400 mt-0.5">
-                          Selected questions will be ingested into the secure question bank and assigned immediately to experts.
-                        </p>
+                        <label className="block text-slate-700 font-bold mb-1">Subject / Discipline *</label>
+                        <input
+                          type="text"
+                          value={qSubject}
+                          onChange={e => setQSubject(e.target.value)}
+                          placeholder="e.g. Physics / Mathematics / Computer Science"
+                          required
+                          className="w-full px-3 py-2 rounded-lg bg-white border border-slate-300 text-slate-900 focus:border-emerald-800 focus:outline-hidden"
+                        />
+                        {/* Quick Subject Chips */}
+                        <div className="flex flex-wrap gap-1.5 mt-1.5">
+                          {['Physics', 'Chemistry', 'Mathematics', 'Computer Science', 'Biology'].map(subj => (
+                            <button
+                              key={subj}
+                              type="button"
+                              onClick={() => setQSubject(subj)}
+                              className="px-2 py-0.5 rounded text-[10px] bg-white border border-slate-200 hover:border-emerald-500 text-slate-600 hover:text-emerald-800 transition-colors"
+                            >
+                              {subj}
+                            </button>
+                          ))}
+                        </div>
                       </div>
 
-                      <span className="text-xs font-mono text-emerald-400 font-bold bg-emerald-950/60 px-3 py-1 rounded-full border border-emerald-800">
-                        {selectedExtractedIds.size} of {extractedQuestions.length} Selected
-                      </span>
-                    </div>
-
-                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 text-xs">
-                      {/* SME Assignment */}
                       <div>
-                        <label className="block text-slate-300 font-bold mb-1">Assign to SME for Review</label>
+                        <label className="block text-slate-700 font-bold mb-1">Topic / Syllabus Module *</label>
+                        <input
+                          type="text"
+                          value={qTopic}
+                          onChange={e => setQTopic(e.target.value)}
+                          placeholder="e.g. Asymmetric Cryptography / Thermodynamics"
+                          required
+                          className="w-full px-3 py-2 rounded-lg bg-white border border-slate-300 text-slate-900 focus:border-emerald-800 focus:outline-hidden"
+                        />
+                      </div>
+
+                      {/* Question Type Toggle Cards */}
+                      <div>
+                        <label className="block text-slate-700 font-bold mb-1.5">Question Format</label>
+                        <div className="grid grid-cols-2 gap-2">
+                          <button
+                            type="button"
+                            onClick={() => setExamType('MCQ')}
+                            className={`p-2.5 rounded-xl border font-bold text-xs flex flex-col items-center gap-1 transition-all ${
+                              examType === 'MCQ'
+                                ? 'bg-emerald-50 border-emerald-500 text-emerald-950 ring-2 ring-emerald-500/20 shadow-xs'
+                                : 'bg-white border-slate-200 text-slate-600 hover:bg-slate-100/50'
+                            }`}
+                          >
+                            <span className="text-sm">🔘</span>
+                            <span>Multiple Choice (MCQ)</span>
+                          </button>
+
+                          <button
+                            type="button"
+                            onClick={() => setExamType('THEORY')}
+                            className={`p-2.5 rounded-xl border font-bold text-xs flex flex-col items-center gap-1 transition-all ${
+                              examType === 'THEORY'
+                                ? 'bg-emerald-50 border-emerald-500 text-emerald-950 ring-2 ring-emerald-500/20 shadow-xs'
+                                : 'bg-white border-slate-200 text-slate-600 hover:bg-slate-100/50'
+                            }`}
+                          >
+                            <span className="text-sm">📝</span>
+                            <span>Theory / Descriptive</span>
+                          </button>
+                        </div>
+                      </div>
+
+                      {/* Difficulty Selection Pills */}
+                      <div>
+                        <label className="block text-slate-700 font-bold mb-1.5">Cognitive Difficulty Level</label>
+                        <div className="grid grid-cols-3 gap-2">
+                          {(['EASY', 'MEDIUM', 'HARD'] as const).map(diff => {
+                            const isSelected = qDifficulty === diff;
+                            const colorClass =
+                              diff === 'EASY'
+                                ? isSelected ? 'bg-emerald-700 text-white border-emerald-700 shadow-xs' : 'bg-white text-emerald-800 border-emerald-200 hover:bg-emerald-50'
+                                : diff === 'MEDIUM'
+                                ? isSelected ? 'bg-amber-600 text-white border-amber-600 shadow-xs' : 'bg-white text-amber-800 border-amber-200 hover:bg-amber-50'
+                                : isSelected ? 'bg-rose-700 text-white border-rose-700 shadow-xs' : 'bg-white text-rose-800 border-rose-200 hover:bg-rose-50';
+
+                            return (
+                              <button
+                                key={diff}
+                                type="button"
+                                onClick={() => setQDifficulty(diff)}
+                                className={`py-1.5 rounded-lg border font-bold text-[11px] text-center transition-all ${colorClass}`}
+                              >
+                                {diff}
+                              </button>
+                            );
+                          })}
+                        </div>
+                      </div>
+
+                      {/* Marks & Scoring */}
+                      <div className="grid grid-cols-2 gap-3 pt-1">
+                        <div>
+                          <label className="block text-slate-700 font-bold mb-1">Marks (+)</label>
+                          <input
+                            type="number"
+                            value={qMarks}
+                            onChange={e => setQMarks(Number(e.target.value))}
+                            min={1}
+                            max={100}
+                            className="w-full px-3 py-2 rounded-lg bg-white border border-slate-300 text-slate-900 font-mono font-bold text-center focus:border-emerald-800 focus:outline-hidden"
+                          />
+                        </div>
+
+                        <div>
+                          <label className="block text-slate-700 font-bold mb-1">Negative (-)</label>
+                          <input
+                            type="number"
+                            step="0.25"
+                            defaultValue={1.0}
+                            className="w-full px-3 py-2 rounded-lg bg-white border border-slate-300 text-slate-900 font-mono font-bold text-center focus:border-emerald-800 focus:outline-hidden"
+                          />
+                        </div>
+                      </div>
+
+                      {/* SME Verifier Assignment */}
+                      <div className="pt-2 border-t border-slate-200/80">
+                        <label className="block text-slate-700 font-bold mb-1">Assign to SME Verifier</label>
                         <select
-                          value={extractAssignSmeId}
-                          onChange={e => setExtractAssignSmeId(e.target.value)}
-                          className="w-full px-3 py-2 rounded-lg bg-slate-800 border border-slate-700 text-white focus:border-emerald-500 focus:outline-hidden"
+                          value={assignedSmeId}
+                          onChange={e => setAssignedSmeId(e.target.value)}
+                          className="w-full px-3 py-2 rounded-lg bg-white border border-slate-300 text-slate-900 focus:border-emerald-800 focus:outline-hidden text-xs"
                         >
-                          <option value="">-- No SME Assignment (Direct Pool) --</option>
+                          <option value="">-- No Assignment (Direct Pool Draft) --</option>
                           {smes.map(s => (
                             <option key={s.id} value={s.id}>
                               {s.full_name} ({s.email})
                             </option>
                           ))}
                         </select>
-                        <span className="text-[10px] text-slate-400 mt-0.5 block">
-                          SME will review answer keys & syllabus alignment.
-                        </span>
-                      </div>
-
-                      {/* Linguistic Translator Assignment */}
-                      <div>
-                        <label className="block text-slate-300 font-bold mb-1">Assign to Linguistic Translator</label>
-                        <select
-                          value={extractAssignTranslatorId}
-                          onChange={e => setExtractAssignTranslatorId(e.target.value)}
-                          className="w-full px-3 py-2 rounded-lg bg-slate-800 border border-slate-700 text-white focus:border-emerald-500 focus:outline-hidden"
-                        >
-                          <option value="">-- No Translator Assignment --</option>
-                          {translators.map(t => (
-                            <option key={t.id} value={t.id}>
-                              {t.full_name} ({t.email})
-                            </option>
-                          ))}
-                        </select>
-                        <span className="text-[10px] text-slate-400 mt-0.5 block">
-                          Translator will convert statements to regional vernacular.
-                        </span>
-                      </div>
-
-                      {/* Target Language */}
-                      <div>
-                        <label className="block text-slate-300 font-bold mb-1">Target Language for Translation</label>
-                        <select
-                          value={extractAssignTargetLanguage}
-                          onChange={e => setExtractAssignTargetLanguage(e.target.value)}
-                          disabled={!extractAssignTranslatorId}
-                          className="w-full px-3 py-2 rounded-lg bg-slate-800 border border-slate-700 text-white focus:border-emerald-500 focus:outline-hidden disabled:opacity-50"
-                        >
-                          {SUPPORTED_TRANSLATION_LANGUAGES.map(l => (
-                            <option key={l.code} value={l.code}>
-                              {l.label}
-                            </option>
-                          ))}
-                        </select>
                       </div>
                     </div>
+                  </div>
 
-                    {/* Assignment Instructions / Notes */}
-                    <div className="text-xs">
-                      <label className="block text-slate-300 font-bold mb-1">Special Instructions / Review Notes (Optional)</label>
-                      <input
-                        type="text"
-                        value={extractAssignNotes}
-                        onChange={e => setExtractAssignNotes(e.target.value)}
-                        placeholder="e.g. Ensure strict adherence to CBSE Class 12 Syllabus 2026 and verify MCQ answer derivations."
-                        className="w-full px-3 py-2 rounded-lg bg-slate-800 border border-slate-700 text-white placeholder-slate-500 focus:border-emerald-500 focus:outline-hidden"
+                  {/* RIGHT COLUMN: Question Statement, Options & AI Check */}
+                  <div className="lg:col-span-7 space-y-4">
+                    {/* Question Content Input */}
+                    <div className="p-4 rounded-xl bg-slate-50/80 border border-slate-200/80 space-y-2">
+                      <div className="flex items-center justify-between text-xs">
+                        <label className="text-slate-800 font-bold">
+                          Question Content Statement *
+                        </label>
+                        <span className="text-[11px] font-mono text-slate-400">
+                          {qContent.length} characters
+                        </span>
+                      </div>
+                      <textarea
+                        rows={5}
+                        value={qContent}
+                        onChange={e => setQContent(e.target.value)}
+                        placeholder="Write the complete question statement. Include formulas, equations, or scenario criteria..."
+                        required
+                        className="w-full px-3.5 py-2.5 rounded-xl bg-white border border-slate-300 text-slate-900 text-xs focus:border-emerald-800 focus:outline-hidden leading-relaxed"
                       />
                     </div>
 
-                    <div className="flex items-center justify-end gap-3 pt-2 border-t border-slate-800">
+                    {/* AI Similarity & Duplicate Check Banner */}
+                    <div className="p-3.5 rounded-xl bg-emerald-50/60 border border-emerald-200/80 flex flex-wrap items-center justify-between gap-3 text-xs">
+                      <div className="flex items-center gap-2">
+                        <Sparkles className="w-4 h-4 text-emerald-700 shrink-0" />
+                        <div>
+                          <span className="font-bold text-emerald-950">AI Question Pool Duplicate Engine</span>
+                          <p className="text-[11px] text-emerald-800/80">Scan current repository for semantic similarity before saving.</p>
+                        </div>
+                      </div>
+
+                      <div className="flex items-center gap-2">
+                        <button
+                          type="button"
+                          onClick={handleCheckAiSimilarity}
+                          disabled={aiChecking || !qContent}
+                          className="px-3.5 py-1.5 bg-emerald-800 hover:bg-emerald-700 disabled:opacity-40 text-white rounded-lg font-bold text-xs shadow-2xs flex items-center gap-1.5 transition-all cursor-pointer"
+                        >
+                          <Sparkles className="w-3 h-3 text-emerald-300" />
+                          <span>{aiChecking ? 'Analyzing...' : 'Scan Pool'}</span>
+                        </button>
+                        {aiCheckResult && (
+                          <span className="px-2.5 py-1 rounded-md text-[11px] font-bold bg-white text-emerald-900 border border-emerald-300 font-mono shadow-2xs">
+                            Score: {aiCheckResult.similarityScore ?? '0.04'} (Clear)
+                          </span>
+                        )}
+                      </div>
+                    </div>
+
+                    {/* MCQ Options Builder */}
+                    {examType === 'MCQ' && (
+                      <div className="p-4 rounded-xl bg-slate-50/80 border border-slate-200/80 space-y-3">
+                        <div className="flex items-center justify-between">
+                          <label className="text-slate-800 font-bold text-xs">
+                            MCQ Answer Choices (Click letter to set as Correct Answer)
+                          </label>
+                          <span className="text-[11px] font-bold text-emerald-800">
+                            Current Key: Option {qCorrectAnswer || 'A'}
+                          </span>
+                        </div>
+
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                          {qOptions.map((opt, i) => {
+                            const letter = String.fromCharCode(65 + i);
+                            const isCorrect = (qCorrectAnswer || 'A').toUpperCase() === letter;
+
+                            return (
+                              <div
+                                key={i}
+                                className={`flex items-center gap-2 p-2 rounded-xl border transition-all ${
+                                  isCorrect
+                                    ? 'bg-emerald-50/80 border-emerald-500 ring-2 ring-emerald-500/20'
+                                    : 'bg-white border-slate-200 hover:border-slate-300'
+                                }`}
+                              >
+                                <button
+                                  type="button"
+                                  onClick={() => setQCorrectAnswer(letter)}
+                                  className={`w-7 h-7 rounded-full font-bold text-xs flex items-center justify-center shrink-0 transition-colors cursor-pointer ${
+                                    isCorrect
+                                      ? 'bg-emerald-700 text-white shadow-2xs'
+                                      : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
+                                  }`}
+                                  title="Mark as correct answer"
+                                >
+                                  {letter}
+                                </button>
+                                <input
+                                  type="text"
+                                  value={opt}
+                                  onChange={e => {
+                                    const newOpts = [...qOptions];
+                                    newOpts[i] = e.target.value;
+                                    setQOptions(newOpts);
+                                  }}
+                                  placeholder={`Option ${letter} text...`}
+                                  className="w-full px-2 py-1 text-xs bg-transparent border-0 text-slate-900 focus:outline-hidden"
+                                />
+                              </div>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Action Bar */}
+                    <div className="flex items-center justify-end gap-3 pt-3 border-t border-slate-200/80">
                       <button
                         type="button"
-                        onClick={handleImportExtracted}
-                        disabled={importingBatch || selectedExtractedIds.size === 0}
-                        className="px-6 py-2.5 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-40 text-white rounded-lg font-bold text-xs shadow-md flex items-center gap-2 transition-all"
+                        onClick={() => {
+                          setQContent('');
+                          setQSubject('');
+                          setQTopic('');
+                          setQOptions(['', '', '', '']);
+                        }}
+                        className="px-4 py-2 text-slate-500 hover:text-slate-800 font-bold text-xs transition-colors cursor-pointer"
                       >
-                        <Send className="w-4 h-4" />
-                        <span>
-                          {importingBatch
-                            ? 'Ingesting & Enqueueing Tasks...'
-                            : `Import & Enqueue ${selectedExtractedIds.size} Selected Questions`}
-                        </span>
+                        Reset Form
+                      </button>
+
+                      <button
+                        type="submit"
+                        className="px-6 py-2.5 bg-gradient-to-r from-emerald-900 via-emerald-800 to-teal-800 hover:from-emerald-800 hover:to-teal-700 text-white rounded-xl font-bold text-xs shadow-md flex items-center gap-2 transition-all cursor-pointer"
+                      >
+                        <Send className="w-3.5 h-3.5 text-emerald-300" />
+                        <span>Save & Enqueue to Pool</span>
                       </button>
                     </div>
                   </div>
-
-                  {/* Question Cards List */}
-                  <div className="space-y-3">
-                    {extractedQuestions.map((q, idx) => {
-                      const isSelected = selectedExtractedIds.has(q.tempId);
-                      return (
-                        <div
-                          key={q.tempId}
-                          className={`p-4 rounded-xl border transition-all text-xs space-y-3 ${
-                            isSelected
-                              ? 'bg-white border-emerald-400 ring-2 ring-emerald-500/10 shadow-xs'
-                              : 'bg-slate-50/70 border-slate-200 opacity-70'
-                          }`}
-                        >
-                          <div className="flex items-start justify-between gap-3">
-                            <div className="flex items-center gap-3">
-                              <button
-                                type="button"
-                                onClick={() => toggleExtractedSelection(q.tempId)}
-                                className="text-emerald-800 hover:text-emerald-900"
-                              >
-                                {isSelected ? (
-                                  <CheckSquare className="w-5 h-5 text-emerald-700" />
-                                ) : (
-                                  <Square className="w-5 h-5 text-slate-400" />
-                                )}
-                              </button>
-                              <span className="font-bold text-slate-900 text-xs">
-                                Question #{idx + 1}
-                              </span>
-                              <span
-                                className={`px-2 py-0.5 rounded text-[10px] font-bold ${
-                                  q.question_type === 'MCQ'
-                                    ? 'bg-blue-100 text-blue-900'
-                                    : 'bg-amber-100 text-amber-900'
-                                }`}
-                              >
-                                {q.question_type}
-                              </span>
-                            </div>
-
-                            <div className="flex items-center gap-2">
-                              <span className="font-mono text-[11px] text-slate-600 bg-slate-100 px-2 py-0.5 rounded">
-                                Marks: {q.marks} {q.negative_marks ? `(-${q.negative_marks})` : ''}
-                              </span>
-                              <button
-                                type="button"
-                                onClick={() => removeExtractedQuestion(q.tempId)}
-                                className="p-1 text-slate-400 hover:text-rose-600 rounded"
-                                title="Remove from batch"
-                              >
-                                <Trash2 className="w-4 h-4" />
-                              </button>
-                            </div>
-                          </div>
-
-                          {/* Editable Question Text */}
-                          <div>
-                            <textarea
-                              rows={2}
-                              value={q.content_text}
-                              onChange={e => updateExtractedQuestion(q.tempId, { content_text: e.target.value })}
-                              className="w-full px-3 py-1.5 rounded-lg bg-slate-50 border border-slate-300 text-slate-900 text-xs focus:bg-white focus:border-emerald-800 focus:outline-hidden"
-                            />
-                          </div>
-
-                          {/* MCQ Options */}
-                          {q.question_type === 'MCQ' && q.options && q.options.length > 0 && (
-                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 pt-1 border-t border-slate-100">
-                              {q.options.map((opt, optIdx) => (
-                                <div key={optIdx} className="flex items-center gap-2">
-                                  <span className="font-bold text-slate-600 text-[11px] w-5 shrink-0">
-                                    {String.fromCharCode(65 + optIdx)}:
-                                  </span>
-                                  <input
-                                    type="text"
-                                    value={opt}
-                                    onChange={e => {
-                                      const updatedOpts = [...q.options!];
-                                      updatedOpts[optIdx] = e.target.value;
-                                      updateExtractedQuestion(q.tempId, { options: updatedOpts });
-                                    }}
-                                    className="w-full px-2.5 py-1 rounded bg-slate-50 border border-slate-300 text-slate-900 text-xs"
-                                  />
-                                </div>
-                              ))}
-                            </div>
-                          )}
-
-                          {/* Metadata row */}
-                          <div className="grid grid-cols-1 sm:grid-cols-4 gap-2 pt-1 border-t border-slate-100 text-[11px]">
-                            <div>
-                              <span className="text-slate-500 block">Subject / Topic:</span>
-                              <input
-                                type="text"
-                                value={`${q.subject} - ${q.topic}`}
-                                onChange={e => {
-                                  const parts = e.target.value.split('-');
-                                  updateExtractedQuestion(q.tempId, {
-                                    subject: (parts[0] || '').trim(),
-                                    topic: (parts[1] || '').trim(),
-                                  });
-                                }}
-                                className="w-full px-2 py-0.5 rounded bg-slate-50 border border-slate-300 text-slate-900 font-mono text-[11px]"
-                              />
-                            </div>
-
-                            <div>
-                              <span className="text-slate-500 block">Difficulty:</span>
-                              <select
-                                value={q.difficulty}
-                                onChange={e => updateExtractedQuestion(q.tempId, { difficulty: e.target.value as any })}
-                                className="w-full px-2 py-0.5 rounded bg-slate-50 border border-slate-300 text-slate-900 text-[11px]"
-                              >
-                                <option value="EASY">EASY</option>
-                                <option value="MEDIUM">MEDIUM</option>
-                                <option value="HARD">HARD</option>
-                              </select>
-                            </div>
-
-                            <div>
-                              <span className="text-slate-500 block">Correct Answer:</span>
-                              <input
-                                type="text"
-                                value={q.correct_answer}
-                                onChange={e => updateExtractedQuestion(q.tempId, { correct_answer: e.target.value })}
-                                className="w-full px-2 py-0.5 rounded bg-slate-50 border border-slate-300 text-slate-900 font-bold text-[11px]"
-                              />
-                            </div>
-
-                            <div>
-                              <span className="text-slate-500 block">Marks:</span>
-                              <input
-                                type="number"
-                                value={q.marks}
-                                onChange={e => updateExtractedQuestion(q.tempId, { marks: Number(e.target.value) })}
-                                className="w-full px-2 py-0.5 rounded bg-slate-50 border border-slate-300 text-slate-900 text-[11px]"
-                              />
-                            </div>
-                          </div>
-                        </div>
-                      );
-                    })}
-                  </div>
                 </div>
-              )}
-            </div>
-          )}
-
-          {/* TAB 2: MANUAL SINGLE QUESTION ENTRY */}
-          {questionWorkflowTab === 'manual' && (
-            <div className="p-6 rounded-xl bg-white border border-slate-200 shadow-xs space-y-4">
-              <h3 className="text-base font-bold text-slate-900 border-b pb-2">
-                Add Single Question to Secure Pool
-              </h3>
-
-              <form onSubmit={handleCreateQuestion} className="space-y-4 text-xs">
-                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                  <div>
-                    <label className="block text-slate-700 font-bold mb-1">Subject</label>
-                    <input
-                      type="text"
-                      value={qSubject}
-                      onChange={e => setQSubject(e.target.value)}
-                      placeholder="e.g. Computer Science"
-                      required
-                      className="w-full px-3 py-2 rounded-lg bg-slate-50 border border-slate-300 text-slate-900"
-                    />
-                  </div>
-
-                  <div>
-                    <label className="block text-slate-700 font-bold mb-1">Topic</label>
-                    <input
-                      type="text"
-                      value={qTopic}
-                      onChange={e => setQTopic(e.target.value)}
-                      placeholder="e.g. Cryptography"
-                      required
-                      className="w-full px-3 py-2 rounded-lg bg-slate-50 border border-slate-300 text-slate-900"
-                    />
-                  </div>
-
-                  <div>
-                    <label className="block text-slate-700 font-bold mb-1">Difficulty</label>
-                    <select
-                      value={qDifficulty}
-                      onChange={e => setQDifficulty(e.target.value as any)}
-                      className="w-full px-3 py-2 rounded-lg bg-slate-50 border border-slate-300 text-slate-900"
-                    >
-                      <option value="EASY">EASY</option>
-                      <option value="MEDIUM">MEDIUM</option>
-                      <option value="HARD">HARD</option>
-                    </select>
-                  </div>
-                </div>
-
-                <div>
-                  <label className="block text-slate-700 font-bold mb-1">Question Content Text *</label>
-                  <textarea
-                    rows={3}
-                    value={qContent}
-                    onChange={e => setQContent(e.target.value)}
-                    placeholder="Enter complete question statement with mathematical or theoretical criteria..."
-                    required
-                    className="w-full px-3 py-2 rounded-lg bg-slate-50 border border-slate-300 text-slate-900"
-                  />
-                </div>
-
-                {/* AI Similarity & Duplicate Check Action */}
-                <div className="flex items-center gap-3">
-                  <button
-                    type="button"
-                    onClick={handleCheckAiSimilarity}
-                    disabled={aiChecking || !qContent}
-                    className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-emerald-50 hover:bg-emerald-100 text-emerald-900 border border-emerald-200 rounded-lg font-bold text-xs"
-                  >
-                    <Sparkles className="w-3.5 h-3.5 text-emerald-700" />
-                    <span>{aiChecking ? 'Analyzing Pool...' : 'AI Duplicate & Similarity Check'}</span>
-                  </button>
-
-                  {aiCheckResult && (
-                    <span className="text-[11px] text-emerald-800 font-semibold bg-emerald-50 px-2.5 py-1 rounded border border-emerald-200">
-                      Similarity Score: {aiCheckResult.similarityScore || '0.04'} (No Conflict Detected)
-                    </span>
-                  )}
-                </div>
-
-                {examType === 'MCQ' && (
-                  <div className="grid grid-cols-2 gap-3 pt-2 border-t">
-                    {qOptions.map((opt, i) => (
-                      <div key={i}>
-                        <label className="block text-slate-600 font-bold mb-1">Option {String.fromCharCode(65 + i)}</label>
-                        <input
-                          type="text"
-                          value={opt}
-                          onChange={e => {
-                            const newOpts = [...qOptions];
-                            newOpts[i] = e.target.value;
-                            setQOptions(newOpts);
-                          }}
-                          className="w-full px-3 py-1.5 rounded-lg bg-slate-50 border border-slate-300 text-slate-900"
-                        />
-                      </div>
-                    ))}
-                  </div>
-                )}
-
-                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 pt-2">
-                  <div>
-                    <label className="block text-slate-700 font-bold mb-1">Correct Answer</label>
-                    <input
-                      type="text"
-                      value={qCorrectAnswer}
-                      onChange={e => setQCorrectAnswer(e.target.value)}
-                      placeholder="e.g. B or Derivation"
-                      required
-                      className="w-full px-3 py-2 rounded-lg bg-slate-50 border border-slate-300 text-slate-900"
-                    />
-                  </div>
-
-                  <div>
-                    <label className="block text-slate-700 font-bold mb-1">Marks</label>
-                    <input
-                      type="number"
-                      value={qMarks}
-                      onChange={e => setQMarks(Number(e.target.value))}
-                      className="w-full px-3 py-2 rounded-lg bg-slate-50 border border-slate-300 text-slate-900"
-                    />
-                  </div>
-
-                  <div>
-                    <label className="block text-slate-700 font-bold mb-1">Assign to SME for Verification</label>
-                    <select
-                      value={assignedSmeId}
-                      onChange={e => setAssignedSmeId(e.target.value)}
-                      className="w-full px-3 py-2 rounded-lg bg-slate-50 border border-slate-300 text-slate-900"
-                    >
-                      <option value="">-- Select SME Verifier --</option>
-                      {smes.map(s => (
-                        <option key={s.id} value={s.id}>{s.full_name} ({s.email})</option>
-                      ))}
-                    </select>
-                  </div>
-                </div>
-
-                <button
-                  type="submit"
-                  className="px-5 py-2.5 bg-emerald-900 hover:bg-emerald-800 text-white rounded-lg font-bold text-xs shadow-xs"
-                >
-                  Save & Enqueue for Verification
-                </button>
               </form>
             </div>
           )}
 
           {/* TAB 3: ASSIGNMENT & VERIFICATION MATRIX */}
           {questionWorkflowTab === 'matrix' && (
-            <div className="p-6 rounded-xl bg-white border border-slate-200 shadow-xs space-y-4">
-              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b pb-3">
-                <div>
-                  <h3 className="text-base font-bold text-slate-900">
-                    Live Assignment & Review Matrix
-                  </h3>
-                  <p className="text-xs text-slate-500 mt-0.5">
-                    Real-time verification queue across all assigned SMEs and Linguistic Translators.
-                  </p>
+            <div className="space-y-6">
+              {/* Executive Header & KPI Metrics */}
+              <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+                <div className="p-4 rounded-2xl bg-white border border-slate-200/80 shadow-xs flex items-center gap-3.5">
+                  <div className="w-10 h-10 rounded-xl bg-slate-900 text-white flex items-center justify-center shadow-xs">
+                    <Activity className="w-5 h-5 text-emerald-400" />
+                  </div>
+                  <div>
+                    <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400 block">Total Active Tasks</span>
+                    <span className="text-xl font-black text-slate-900 font-mono">{assignments.length}</span>
+                  </div>
                 </div>
 
-                <span className="text-xs font-mono text-slate-600 bg-slate-100 px-3 py-1 rounded-full border">
-                  {assignments.length} Total Active Tasks
-                </span>
+                <div className="p-4 rounded-2xl bg-white border border-slate-200/80 shadow-xs flex items-center gap-3.5">
+                  <div className="w-10 h-10 rounded-xl bg-blue-50 text-blue-600 border border-blue-200 flex items-center justify-center">
+                    <UserCheck className="w-5 h-5" />
+                  </div>
+                  <div>
+                    <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400 block">SME Reviews</span>
+                    <span className="text-xl font-black text-blue-900 font-mono">
+                      {assignments.filter(a => a.assignment_type === 'SME_REVIEW').length}
+                    </span>
+                  </div>
+                </div>
+
+                <div className="p-4 rounded-2xl bg-white border border-slate-200/80 shadow-xs flex items-center gap-3.5">
+                  <div className="w-10 h-10 rounded-xl bg-purple-50 text-purple-600 border border-purple-200 flex items-center justify-center">
+                    <Languages className="w-5 h-5" />
+                  </div>
+                  <div>
+                    <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400 block">Translations</span>
+                    <span className="text-xl font-black text-purple-900 font-mono">
+                      {assignments.filter(a => a.assignment_type === 'LINGUISTIC_TRANSLATION').length}
+                    </span>
+                  </div>
+                </div>
+
+                <div className="p-4 rounded-2xl bg-white border border-slate-200/80 shadow-xs flex items-center gap-3.5">
+                  <div className="w-10 h-10 rounded-xl bg-emerald-50 text-emerald-600 border border-emerald-200 flex items-center justify-center">
+                    <CheckCircle2 className="w-5 h-5" />
+                  </div>
+                  <div>
+                    <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400 block">Completed & Verified</span>
+                    <span className="text-xl font-black text-emerald-900 font-mono">
+                      {assignments.filter(a => a.status === 'COMPLETED').length}
+                    </span>
+                  </div>
+                </div>
               </div>
 
-              {assignments.length === 0 ? (
-                <p className="text-xs text-slate-400 p-6 text-center bg-slate-50 rounded-lg">
-                  No active assignments found. Extract questions or assign questions from Question Pools.
-                </p>
-              ) : (
-                <div className="overflow-x-auto">
-                  <table className="w-full text-left text-xs">
-                    <thead>
-                      <tr className="border-b bg-slate-50 text-slate-600 font-bold">
-                        <th className="p-3">Question ID</th>
-                        <th className="p-3">Type</th>
-                        <th className="p-3">Assignee</th>
-                        <th className="p-3">Target Language</th>
-                        <th className="p-3">Assigned Date</th>
-                        <th className="p-3">Status</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-slate-100">
-                      {assignments.map(a => (
-                        <tr key={a.id} className="hover:bg-slate-50/80">
-                          <td className="p-3 font-mono text-[11px] font-bold text-slate-800">
-                            {a.question_id.substring(0, 10)}...
-                          </td>
-                          <td className="p-3">
-                            <span
-                              className={`px-2 py-0.5 rounded text-[10px] font-bold ${
-                                a.assignment_type === 'SME_REVIEW'
-                                  ? 'bg-blue-100 text-blue-900'
-                                  : 'bg-purple-100 text-purple-900'
-                              }`}
-                            >
-                              {a.assignment_type === 'SME_REVIEW' ? 'SME Review' : 'Translation'}
-                            </span>
-                          </td>
-                          <td className="p-3 font-medium text-slate-900">
-                            {a.assignee_name || a.assignee_user_id}
-                          </td>
-                          <td className="p-3">
-                            {a.target_language ? (
-                              <span className="px-2 py-0.5 bg-emerald-50 text-emerald-800 border border-emerald-200 rounded font-semibold text-[10px]">
-                                {a.target_language}
-                              </span>
-                            ) : (
-                              <span className="text-slate-400 font-mono text-[11px]">—</span>
-                            )}
-                          </td>
-                          <td className="p-3 text-[11px] text-slate-500 font-mono">
-                            {new Date(a.assigned_at).toLocaleDateString()}
-                          </td>
-                          <td className="p-3">
-                            <span
-                              className={`px-2 py-0.5 rounded text-[10px] font-bold ${
-                                a.status === 'COMPLETED'
-                                  ? 'bg-emerald-100 text-emerald-800'
-                                  : a.status === 'REJECTED'
-                                  ? 'bg-rose-100 text-rose-800'
-                                  : 'bg-amber-100 text-amber-800'
-                              }`}
-                            >
-                              {a.status}
-                            </span>
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
+              {/* Main Matrix Card */}
+              <div className="p-6 rounded-2xl bg-white border border-slate-200/80 shadow-xs space-y-5">
+                {/* Search and Filter Controls */}
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-4 border-b border-slate-100">
+                  <div>
+                    <h3 className="text-base font-bold text-slate-900 flex items-center gap-2">
+                      <span>Live Verification & Audit Matrix</span>
+                      <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-100 text-emerald-800 border border-emerald-200">
+                        Real-Time Synced
+                      </span>
+                    </h3>
+                    <p className="text-xs text-slate-500 mt-0.5">
+                      Cryptographic tracking across all assigned Subject Matter Experts and Linguistic Translators.
+                    </p>
+                  </div>
+
+                  <div className="flex items-center gap-2">
+                    <div className="relative">
+                      <Search className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
+                      <input
+                        type="text"
+                        placeholder="Search question, assignee..."
+                        value={matrixSearch}
+                        onChange={e => setMatrixSearch(e.target.value)}
+                        className="pl-8 pr-3 py-1.5 rounded-xl border border-slate-200 text-xs w-48 focus:w-60 focus:outline-none focus:border-emerald-600 transition-all"
+                      />
+                    </div>
+                  </div>
                 </div>
-              )}
+
+                {/* Filter Pills */}
+                <div className="flex flex-wrap items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setMatrixFilter('ALL')}
+                    className={`px-3 py-1.5 rounded-full text-xs font-bold transition-all cursor-pointer ${
+                      matrixFilter === 'ALL'
+                        ? 'bg-[#00cc5f] text-black shadow-[0_2px_10px_rgba(0,204,95,0.35)]'
+                        : 'bg-white/70 dark:bg-white/[0.04] text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-white/[0.08] border border-slate-200/80 dark:border-white/10'
+                    }`}
+                  >
+                    All Tasks ({assignments.length})
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setMatrixFilter('SME_REVIEW')}
+                    className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                      matrixFilter === 'SME_REVIEW'
+                        ? 'bg-blue-600 text-white shadow-xs'
+                        : 'bg-blue-50 text-blue-700 hover:bg-blue-100 border border-blue-200/50'
+                    }`}
+                  >
+                    SME Reviews ({assignments.filter(a => a.assignment_type === 'SME_REVIEW').length})
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setMatrixFilter('TRANSLATION')}
+                    className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                      matrixFilter === 'TRANSLATION'
+                        ? 'bg-purple-600 text-white shadow-xs'
+                        : 'bg-purple-50 text-purple-700 hover:bg-purple-100 border border-purple-200/50'
+                    }`}
+                  >
+                    Translations ({assignments.filter(a => a.assignment_type === 'LINGUISTIC_TRANSLATION').length})
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setMatrixFilter('COMPLETED')}
+                    className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                      matrixFilter === 'COMPLETED'
+                        ? 'bg-emerald-600 text-white shadow-xs'
+                        : 'bg-emerald-50 text-emerald-700 hover:bg-emerald-100 border border-emerald-200/50'
+                    }`}
+                  >
+                    Completed ({assignments.filter(a => a.status === 'COMPLETED').length})
+                  </button>
+                </div>
+
+                {/* Verification Matrix Table */}
+                {(() => {
+                  const filteredAssignments = assignments.filter(a => {
+                    if (matrixFilter === 'SME_REVIEW' && a.assignment_type !== 'SME_REVIEW') return false;
+                    if (matrixFilter === 'TRANSLATION' && a.assignment_type !== 'LINGUISTIC_TRANSLATION') return false;
+                    if (matrixFilter === 'COMPLETED' && a.status !== 'COMPLETED') return false;
+                    if (matrixSearch.trim()) {
+                      const query = matrixSearch.toLowerCase();
+                      const matchQ = a.question_id?.toLowerCase().includes(query);
+                      const matchUser = (a.assignee_name || a.assignee_user_id || '').toLowerCase().includes(query);
+                      const matchLang = (a.target_language || '').toLowerCase().includes(query);
+                      return matchQ || matchUser || matchLang;
+                    }
+                    return true;
+                  });
+
+                  if (filteredAssignments.length === 0) {
+                    return (
+                      <div className="py-12 text-center bg-slate-50/70 border border-dashed border-slate-200 rounded-2xl space-y-3">
+                        <div className="w-12 h-12 rounded-2xl bg-white shadow-xs border border-slate-200 text-slate-400 mx-auto flex items-center justify-center">
+                          <CheckSquare className="w-6 h-6" />
+                        </div>
+                        <h4 className="text-sm font-bold text-slate-800">No Assignments Match Criteria</h4>
+                        <p className="text-xs text-slate-500 max-w-sm mx-auto">
+                          Extract questions from the PDF Studio or assign items from Question Pools to populate the verification matrix.
+                        </p>
+                      </div>
+                    );
+                  }
+
+                  return (
+                    <div className="overflow-hidden rounded-xl border border-slate-200">
+                      <table className="w-full text-left text-xs">
+                        <thead>
+                          <tr className="bg-slate-50 border-b border-slate-200 text-slate-600 font-bold uppercase text-[10px] tracking-wider">
+                            <th className="py-3 px-4">Question Anchor</th>
+                            <th className="py-3 px-4">Task Type</th>
+                            <th className="py-3 px-4">Assigned Expert</th>
+                            <th className="py-3 px-4">Target Language</th>
+                            <th className="py-3 px-4">Assigned Date</th>
+                            <th className="py-3 px-4">Audit Status</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-slate-100">
+                          {filteredAssignments.map(a => (
+                            <tr key={a.id} className="hover:bg-slate-50/70 transition-colors">
+                              <td className="py-3 px-4 font-mono text-[11px] font-bold text-slate-800">
+                                <span className="px-2 py-1 bg-slate-100 rounded-md border border-slate-200">
+                                  {a.question_id.substring(0, 12)}...
+                                </span>
+                              </td>
+                              <td className="py-3 px-4">
+                                <span
+                                  className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[10px] font-bold ${
+                                    a.assignment_type === 'SME_REVIEW'
+                                      ? 'bg-blue-100 text-blue-900 border border-blue-200'
+                                      : 'bg-purple-100 text-purple-900 border border-purple-200'
+                                  }`}
+                                >
+                                  {a.assignment_type === 'SME_REVIEW' ? (
+                                    <>
+                                      <UserCheck className="w-3 h-3 text-blue-600" />
+                                      <span>SME Review</span>
+                                    </>
+                                  ) : (
+                                    <>
+                                      <Languages className="w-3 h-3 text-purple-600" />
+                                      <span>Translation</span>
+                                    </>
+                                  )}
+                                </span>
+                              </td>
+                              <td className="py-3 px-4 font-semibold text-slate-900">
+                                <div className="flex items-center gap-2">
+                                  <div className="w-6 h-6 rounded-full bg-slate-200 text-slate-700 text-[10px] font-black flex items-center justify-center">
+                                    {(a.assignee_name || a.assignee_user_id || '?').charAt(0).toUpperCase()}
+                                  </div>
+                                  <span>{a.assignee_name || a.assignee_user_id}</span>
+                                </div>
+                              </td>
+                              <td className="py-3 px-4">
+                                {a.target_language ? (
+                                  <span className="px-2.5 py-1 bg-emerald-50 text-emerald-800 border border-emerald-200 rounded-full font-bold text-[10px]">
+                                    {a.target_language}
+                                  </span>
+                                ) : (
+                                  <span className="text-slate-400 font-mono text-[11px]">—</span>
+                                )}
+                              </td>
+                              <td className="py-3 px-4 text-[11px] text-slate-500 font-mono">
+                                {new Date(a.assigned_at).toLocaleDateString(undefined, {
+                                  month: 'short',
+                                  day: 'numeric',
+                                  year: 'numeric',
+                                })}
+                              </td>
+                              <td className="py-3 px-4">
+                                <span
+                                  className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[10px] font-bold ${
+                                    a.status === 'COMPLETED'
+                                      ? 'bg-emerald-100 text-emerald-800 border border-emerald-200'
+                                      : a.status === 'REJECTED'
+                                      ? 'bg-rose-100 text-rose-800 border border-rose-200'
+                                      : 'bg-amber-100 text-amber-800 border border-amber-200'
+                                  }`}
+                                >
+                                  {a.status === 'COMPLETED' && <Check className="w-3 h-3 text-emerald-600" />}
+                                  {a.status === 'PENDING' && <Clock className="w-3 h-3 text-amber-600" />}
+                                  {a.status}
+                                </span>
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  );
+                })()}
+              </div>
             </div>
           )}
         </div>
@@ -2168,6 +2571,14 @@ Marks: 10`}
         </div>
       )}
 
+      {/* DYNAMIC MULTI-PAPER GENERATOR */}
+      {activeSubTab === 'multi_paper_generator' && (
+        <DynamicMultiPaperGenerator
+          examinations={examinations}
+          selectedExamId={selectedGenExamId || (examinations[0]?.id || '')}
+        />
+      )}
+
       {/* PAPER VERSIONS */}
       {activeSubTab === 'paper_versions' && (
         <div className="p-6 rounded-xl bg-white border border-slate-200 shadow-xs space-y-4">
@@ -2269,6 +2680,45 @@ Marks: 10`}
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* AUTHORITY SURVEILLANCE & LEAK PREVENTION DASHBOARD */}
+      {activeSubTab === 'proctor_dashboard' && (
+        <AuthoritySurveillanceDashboard currentUser={currentUser} />
+      )}
+
+      {/* Diagram Zoom Lightbox Modal */}
+      {zoomDiagramUrl && (
+        <div 
+          className="fixed inset-0 z-50 bg-black/80 flex items-center justify-center p-4 backdrop-blur-xs"
+          onClick={() => setZoomDiagramUrl(null)}
+        >
+          <div 
+            className="bg-white rounded-2xl p-4 max-w-3xl max-h-[85vh] flex flex-col shadow-2xl overflow-hidden"
+            onClick={e => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between pb-3 border-b border-slate-100">
+              <span className="font-bold text-slate-800 text-sm flex items-center gap-2">
+                <ImageIcon className="w-4 h-4 text-emerald-700" />
+                High-Resolution Diagram Preview
+              </span>
+              <button
+                type="button"
+                onClick={() => setZoomDiagramUrl(null)}
+                className="p-1 rounded-lg text-slate-400 hover:text-slate-600 hover:bg-slate-100"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+            <div className="p-4 flex items-center justify-center overflow-auto max-h-[70vh]">
+              <img
+                src={zoomDiagramUrl}
+                alt="Full size diagram"
+                className="max-w-full max-h-full object-contain rounded-lg shadow-xs"
+              />
+            </div>
           </div>
         </div>
       )}

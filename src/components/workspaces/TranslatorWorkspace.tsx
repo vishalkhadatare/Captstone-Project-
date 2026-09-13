@@ -24,6 +24,7 @@ import {
 import { User, Question, QuestionTranslation } from '../../types';
 import { api } from '../../api';
 import { NavSubTab } from '../Sidebar';
+import { AuthorityProctorEnclave } from '../proctor/AuthorityProctorEnclave';
 
 interface TranslatorWorkspaceProps {
   currentUser: User | null;
@@ -424,7 +425,12 @@ export const TranslatorWorkspace: React.FC<TranslatorWorkspaceProps> = ({
 
       {/* DASHBOARD & WORKBENCH TAB (Streamlined, No redundant Language Coverage grid) */}
       {activeSubTab !== 'verification_history' && (
-        <div className="space-y-6">
+        <AuthorityProctorEnclave
+          currentUser={currentUser}
+          workspaceType="TRANSLATOR_PORTAL"
+          title="Translator Confidential Translation Enclave"
+        >
+          <div className="space-y-6">
           {/* Top Summary Banner */}
           <div className="p-5 rounded-xl bg-white border border-slate-200 shadow-xs space-y-4">
             <div className="flex flex-wrap justify-between items-center gap-3 border-b border-slate-100 pb-3">
@@ -764,11 +770,26 @@ export const TranslatorWorkspace: React.FC<TranslatorWorkspaceProps> = ({
                         <div>
                           <span className="text-[11px] font-bold text-slate-600 block mb-1">Options:</span>
                           <div className="space-y-1.5">
-                            {JSON.parse(selectedQuestion.options_json).map((opt: string, idx: number) => (
-                              <div key={idx} className="p-2 rounded bg-white border border-slate-200 text-slate-800 text-[11px]">
-                                {opt}
-                              </div>
-                            ))}
+                            {(() => {
+                              try {
+                                const raw = typeof selectedQuestion.options_json === 'string'
+                                  ? JSON.parse(selectedQuestion.options_json)
+                                  : selectedQuestion.options_json;
+                                const opts = Array.isArray(raw) ? raw : [];
+                                return opts.map((opt: any, idx: number) => {
+                                  const text = typeof opt === 'string' ? opt : (opt?.text ?? opt?.value ?? JSON.stringify(opt));
+                                  const label = typeof opt === 'object' && opt?.label ? opt.label : String.fromCharCode(65 + idx);
+                                  return (
+                                    <div key={idx} className="p-2 rounded bg-white border border-slate-200 text-slate-800 text-[11px] flex items-center gap-2">
+                                      <span className="font-bold text-slate-500">({label})</span>
+                                      <span>{text}</span>
+                                    </div>
+                                  );
+                                });
+                              } catch {
+                                return null;
+                              }
+                            })()}
                           </div>
                         </div>
                       )}
@@ -945,7 +966,8 @@ export const TranslatorWorkspace: React.FC<TranslatorWorkspaceProps> = ({
             </div>
           </div>
         </div>
-      )}
+      </AuthorityProctorEnclave>
+    )}
 
       {/* COMPLETED TRANSLATIONS & AUDIT LEDGER TAB */}
       {activeSubTab === 'verification_history' && (

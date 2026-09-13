@@ -43,7 +43,7 @@ export const OrganizationModule: React.FC<OrgModuleProps> = ({ currentUser, onRe
   const [showRegModal, setShowRegModal] = useState(false);
   const [regForm, setRegForm] = useState({
     name: 'National Board of Technical Examinations',
-    type: 'Government Examination Board',
+    type: 'Government Examination Authority',
     reg_number: 'NBTE/2026/REG-9482',
     auth_id: 'AUTH-NBTE-01',
     official_email: 'controller@nbte.edu.in',
@@ -169,13 +169,7 @@ export const OrganizationModule: React.FC<OrgModuleProps> = ({ currentUser, onRe
 
   const handleRegisterDevice = async (e: React.FormEvent) => {
     e.preventDefault();
-    try {
-      const res = await api.registerDevice(deviceForm);
-      setActionMessage({ type: 'success', text: res.message });
-      loadData();
-    } catch (e: any) {
-      setActionMessage({ type: 'error', text: e.message });
-    }
+    setActionMessage({ type: 'error', text: 'Manual device creation is retired. Each user enrolls their device from sign-in using a P-256 challenge response.' });
   };
 
   const handleRevokeDevice = async (id: string) => {
@@ -473,8 +467,6 @@ export const OrganizationModule: React.FC<OrgModuleProps> = ({ currentUser, onRe
                   className="px-3 py-2 rounded-lg bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 text-slate-900 dark:text-white font-medium"
                 >
                   <option value="EXAM_MANAGER">Role 2: Examination Manager</option>
-                  <option value="SME">Role 3: Subject Matter Expert</option>
-                  <option value="CENTRE_OPERATOR">Role 4: Centre Operator</option>
                   <option value="AUDITOR">Role 5: Security Auditor</option>
                 </select>
                 <input
@@ -695,11 +687,15 @@ export const OrganizationModule: React.FC<OrgModuleProps> = ({ currentUser, onRe
                     onChange={e => setRegForm({ ...regForm, type: e.target.value })}
                     className="w-full px-3 py-2 rounded-lg bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-700 text-slate-900 dark:text-white"
                   >
-                    <option value="Government Examination Board">Government Examination Board</option>
-                    <option value="National University / Institute of Eminence">National University / Institute of Eminence</option>
-                    <option value="Competitive Testing Agency">Competitive Testing Agency</option>
-                    <option value="State Entrance Examination Authority">State Entrance Examination Authority</option>
+                    <option value="Government Examination Authority">Government Examination Authority</option>
+                    <option value="University">University</option>
+                    <option value="College / Educational Institution">College / Educational Institution</option>
+                    <option value="Examination Board">Examination Board</option>
+                    <option value="Entrance Examination Authority / Entrance Test Cell">Entrance Examination Authority / Entrance Test Cell</option>
+                    <option value="Company / Private Organization">Company / Private Organization</option>
+                    <option value="Other">Other</option>
                   </select>
+                  <p className="text-[10px] text-slate-500 mt-1">Select the type of organization that conducts or manages your examinations.</p>
                 </div>
 
                 <div>

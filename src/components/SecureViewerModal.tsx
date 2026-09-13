@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
-import { DynamicWatermarkData } from '../types';
+import { DynamicWatermarkData, User } from '../types';
+import { AuthorityProctorEnclave } from './proctor/AuthorityProctorEnclave';
 import {
   ShieldAlert,
   Printer,
@@ -12,6 +13,7 @@ import {
 interface SecureViewerModalProps {
   paper: any;
   watermark: DynamicWatermarkData | null;
+  currentUser?: User | null;
   onClose: () => void;
   onPrintCopy?: () => void;
 }
@@ -19,6 +21,7 @@ interface SecureViewerModalProps {
 export const SecureViewerModal: React.FC<SecureViewerModalProps> = ({
   paper,
   watermark,
+  currentUser,
   onClose,
   onPrintCopy,
 }) => {
@@ -128,9 +131,15 @@ export const SecureViewerModal: React.FC<SecureViewerModalProps> = ({
         </div>
       )}
 
-      {/* Main Examination Sheet Area with 7-Layer Dynamic Watermark */}
-      <div className="flex-1 overflow-y-auto p-6 md:p-12 relative flex justify-center bg-slate-950">
-        <div className="relative w-full max-w-4xl bg-white text-slate-900 rounded-xl shadow-2xl p-8 md:p-14 border border-slate-300 overflow-hidden font-sans">
+      {/* Main Examination Sheet Area with 7-Layer Dynamic Watermark inside Authority Proctor Enclave */}
+      <AuthorityProctorEnclave
+        currentUser={currentUser || null}
+        workspaceType="DECRYPTED_PAPER_VIEWER"
+        examId={paper?.exam_id || paper?.id}
+        title="Decrypted Question Paper Enclave"
+      >
+        <div className="flex-1 overflow-y-auto p-6 md:p-12 relative flex justify-center bg-slate-950">
+          <div className="relative w-full max-w-4xl bg-white text-slate-900 rounded-xl shadow-2xl p-8 md:p-14 border border-slate-300 overflow-hidden font-sans">
           {/* 7-LAYER DYNAMIC WATERMARK OVERLAY */}
           {watermark && (
             <div className="absolute inset-0 pointer-events-none z-10 flex flex-wrap items-center justify-center gap-16 p-8 opacity-[0.12] select-none rotate-[-25deg]">
@@ -220,6 +229,7 @@ export const SecureViewerModal: React.FC<SecureViewerModalProps> = ({
           </div>
         </div>
       </div>
-    </div>
-  );
+    </AuthorityProctorEnclave>
+  </div>
+);
 };

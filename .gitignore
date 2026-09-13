@@ -1,23 +1,30 @@
-# Dependencies
 node_modules/
-
-# Build output
+build/
 dist/
-
-# Local database (sql.js persistence)
-*.sqlite
-zeroleak_data.sqlite
-
-# Environment / secrets
-.env
-.env.local
-
-# Logs
-*.log
-npm-debug.log*
-
-# OS / editor
+coverage/
 .DS_Store
-Thumbs.db
-.vscode/
-.idea/
+*.log
+.env.local
+.env.production
+.env*.local
+!.env
+!.env.example
+__pycache__/
+*.py[cod]
+.vite/
+0leakexam-main/
+
+# Local SQLite database & temp files
+*.sqlite
+*.sqlite*
+*.tmp
+
+# Generated question crops from PDF processing
+public/questions/*
+!public/questions/.gitkeep
+public/papers/*
+!public/papers/.gitkeep
+
+# Scratch and temporary work
+scratch/
+

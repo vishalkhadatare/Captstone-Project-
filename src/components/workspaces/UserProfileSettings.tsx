@@ -61,10 +61,10 @@ export const UserProfileSettings: React.FC<UserProfileSettingsProps> = ({
     <div className="space-y-6">
       {statusMessage && (
         <div
-          className={`p-3 rounded-lg text-xs flex items-center gap-2 ${
+          className={`p-3.5 rounded-xl text-xs flex items-center gap-2.5 border shadow-xs ${
             statusMessage.type === 'success'
-              ? 'bg-emerald-50 text-emerald-800 border border-emerald-200'
-              : 'bg-rose-50 text-rose-800 border border-rose-200'
+              ? 'bg-emerald-50 text-emerald-800 border-emerald-300'
+              : 'bg-rose-50 text-rose-800 border-rose-300'
           }`}
         >
           {statusMessage.type === 'success' ? (
@@ -72,48 +72,86 @@ export const UserProfileSettings: React.FC<UserProfileSettingsProps> = ({
           ) : (
             <AlertTriangle className="w-4 h-4 text-rose-600 shrink-0" />
           )}
-          <span>{statusMessage.text}</span>
+          <span className="font-medium">{statusMessage.text}</span>
         </div>
       )}
 
       {/* USER PROFILE TAB */}
       {activeSubTab === 'profile' && (
-        <div className="p-6 rounded-xl bg-white border border-slate-200 shadow-xs space-y-6">
-          <div className="flex items-center gap-4 border-b border-slate-100 pb-4">
-            <div className="w-14 h-14 rounded-xl bg-emerald-900 text-white flex items-center justify-center font-bold text-lg shadow-xs">
+        <div className="modern-card p-6 rounded-2xl bg-white border border-slate-200 shadow-sm space-y-6">
+          <div className="flex items-center gap-4 border-b border-slate-100 pb-5">
+            <div className="w-14 h-14 rounded-2xl bg-gradient-to-br from-emerald-700 to-teal-800 text-white flex items-center justify-center font-bold text-lg shadow-sm">
               {currentUser?.full_name
                 ? currentUser.full_name.split(' ').map(n => n[0]).join('').substring(0, 2).toUpperCase()
                 : 'OP'}
             </div>
 
             <div>
-              <h2 className="text-lg font-bold text-slate-900">{currentUser?.full_name}</h2>
-              <p className="text-xs text-slate-500">{currentUser?.email}</p>
-              <span className="inline-block mt-1 px-2.5 py-0.5 rounded text-[10px] font-bold bg-emerald-100 text-emerald-900 border border-emerald-200">
-                {currentUser?.role ? roleLabelMap[currentUser.role] || currentUser.role : 'OPERATOR'}
-              </span>
+              <div className="flex items-center gap-2">
+                <h2 className="text-xl font-bold text-slate-900">{currentUser?.full_name}</h2>
+                <span className="px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-emerald-50 text-emerald-800 border border-emerald-200">
+                  {currentUser?.role ? roleLabelMap[currentUser.role] || currentUser.role : 'OPERATOR'}
+                </span>
+              </div>
+              <p className="text-xs text-slate-500 font-mono mt-0.5">{currentUser?.email}</p>
             </div>
           </div>
 
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-xs">
-            <div className="p-3 bg-slate-50 rounded-lg border border-slate-200">
-              <span className="text-slate-500 block">Organization ID</span>
-              <span className="font-mono font-bold text-slate-900">{currentUser?.org_id}</span>
+            <div className="p-3.5 bg-slate-50/80 rounded-xl border border-slate-200/80">
+              <span className="text-slate-500 text-[11px] block">Organization ID</span>
+              <span className="font-mono font-bold text-slate-900 text-sm mt-0.5 block">{currentUser?.org_id}</span>
             </div>
 
-            <div className="p-3 bg-slate-50 rounded-lg border border-slate-200">
-              <span className="text-slate-500 block">Assigned Role (Read-Only)</span>
-              <span className="font-bold text-slate-900">{currentUser?.role}</span>
+            <div className="p-3.5 bg-slate-50/80 rounded-xl border border-slate-200/80">
+              <span className="text-slate-500 text-[11px] block">Assigned Role (Read-Only)</span>
+              <span className="font-bold text-slate-900 text-sm mt-0.5 block">{currentUser?.role}</span>
             </div>
 
-            <div className="p-3 bg-slate-50 rounded-lg border border-slate-200">
-              <span className="text-slate-500 block">Account Authority</span>
-              <span className="font-bold text-emerald-700">ACTIVE & CRYPTOGRAPHICALLY BOUND</span>
+            <div className="p-3.5 bg-slate-50/80 rounded-xl border border-slate-200/80">
+              <span className="text-slate-500 text-[11px] block">Account Authority</span>
+              <span className="font-bold text-emerald-700 text-xs mt-1 inline-flex items-center gap-1.5">
+                <ShieldCheck className="w-3.5 h-3.5 text-emerald-600" />
+                ACTIVE & CRYPTOGRAPHICALLY BOUND
+              </span>
             </div>
 
-            <div className="p-3 bg-slate-50 rounded-lg border border-slate-200">
-              <span className="text-slate-500 block">Bound Hardware Workstation</span>
-              <span className="font-mono text-slate-700">{deviceFp}</span>
+            <div className="p-3.5 bg-slate-50/80 rounded-xl border border-slate-200/80">
+              <span className="text-slate-500 text-[11px] block">Bound Hardware Workstation</span>
+              <span className="font-mono text-slate-700 text-xs mt-0.5 block truncate">{deviceFp}</span>
+            </div>
+          </div>
+
+          <div className="rounded-2xl border border-slate-200/80 bg-slate-50/50 p-5 space-y-3">
+            <div className="flex items-center justify-between border-b border-slate-200/80 pb-3">
+              <h3 className="text-sm font-bold text-slate-900">Enclave Identity Profile</h3>
+              <span className="px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-emerald-50 text-emerald-800 border border-emerald-200">
+                Active Verification
+              </span>
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-xs">
+              <div className="p-3 bg-white rounded-xl border border-slate-200 shadow-2xs">
+                <span className="text-slate-500 text-[11px] block">Full Legal Name</span>
+                <span className="font-bold text-slate-900 mt-0.5 block">{currentUser?.full_name}</span>
+              </div>
+
+              <div className="p-3 bg-white rounded-xl border border-slate-200 shadow-2xs">
+                <span className="text-slate-500 text-[11px] block">Official Email</span>
+                <span className="font-mono font-bold text-slate-900 mt-0.5 block">{currentUser?.email}</span>
+              </div>
+
+              <div className="p-3 bg-white rounded-xl border border-slate-200 shadow-2xs">
+                <span className="text-slate-500 text-[11px] block">Institutional Scope</span>
+                <span className="font-bold text-slate-900 mt-0.5 block">
+                  {currentUser?.role ? roleLabelMap[currentUser.role] || currentUser.role : 'Operator'}
+                </span>
+              </div>
+
+              <div className="p-3 bg-white rounded-xl border border-slate-200 shadow-2xs">
+                <span className="text-slate-500 text-[11px] block">Account Status</span>
+                <span className="font-bold text-emerald-700 mt-0.5 block">Authorized & Chained</span>
+              </div>
             </div>
           </div>
         </div>
@@ -122,65 +160,74 @@ export const UserProfileSettings: React.FC<UserProfileSettingsProps> = ({
       {/* SECURITY SETTINGS & PASSPHRASE TAB */}
       {activeSubTab === 'security_settings' && (
         <div className="space-y-6">
-          <div className="p-6 rounded-xl bg-white border border-slate-200 shadow-xs space-y-4">
-            <h3 className="text-base font-bold text-slate-900 border-b pb-2">
-              Update Enclave Access Passphrase
-            </h3>
+          <div className="modern-card p-6 rounded-2xl bg-white border border-slate-200 shadow-sm space-y-4">
+            <div className="border-b border-slate-100 pb-3">
+              <span className="text-[10px] font-bold uppercase tracking-wider text-emerald-700 bg-emerald-50 px-2.5 py-0.5 rounded-full border border-emerald-200">
+                Passphrase Vault
+              </span>
+              <h3 className="text-lg font-bold text-slate-900 mt-1">
+                Update Enclave Access Passphrase
+              </h3>
+              <p className="text-xs text-slate-500">Update the cryptographic credential used to access your authority enclave.</p>
+            </div>
 
             <form onSubmit={handleUpdatePassword} className="space-y-4 text-xs max-w-md">
               <div>
-                <label className="block text-slate-700 font-bold mb-1">Current Passphrase *</label>
+                <label className="block text-slate-700 font-bold mb-1.5">Current Passphrase *</label>
                 <input
                   type="password"
                   value={currentPassword}
                   onChange={e => setCurrentPassword(e.target.value)}
                   placeholder="••••••••••••"
                   required
-                  className="w-full px-3 py-2 rounded-lg bg-slate-50 border border-slate-300 text-slate-900"
+                  className="w-full px-3.5 py-2.5 rounded-xl bg-slate-50 border border-slate-300 text-slate-900 focus:bg-white focus:outline-none focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 transition-all font-mono"
                 />
               </div>
 
               <div>
-                <label className="block text-slate-700 font-bold mb-1">New Passphrase *</label>
+                <label className="block text-slate-700 font-bold mb-1.5">New Passphrase *</label>
                 <input
                   type="password"
                   value={newPassword}
                   onChange={e => setNewPassword(e.target.value)}
                   placeholder="••••••••••••"
                   required
-                  className="w-full px-3 py-2 rounded-lg bg-slate-50 border border-slate-300 text-slate-900"
+                  className="w-full px-3.5 py-2.5 rounded-xl bg-slate-50 border border-slate-300 text-slate-900 focus:bg-white focus:outline-none focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 transition-all font-mono"
                 />
               </div>
 
               <div>
-                <label className="block text-slate-700 font-bold mb-1">Confirm New Passphrase *</label>
+                <label className="block text-slate-700 font-bold mb-1.5">Confirm New Passphrase *</label>
                 <input
                   type="password"
                   value={confirmPassword}
                   onChange={e => setConfirmPassword(e.target.value)}
                   placeholder="••••••••••••"
                   required
-                  className="w-full px-3 py-2 rounded-lg bg-slate-50 border border-slate-300 text-slate-900"
+                  className="w-full px-3.5 py-2.5 rounded-xl bg-slate-50 border border-slate-300 text-slate-900 focus:bg-white focus:outline-none focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 transition-all font-mono"
                 />
               </div>
 
               <button
                 type="submit"
-                className="px-5 py-2.5 bg-emerald-900 hover:bg-emerald-800 text-white rounded-lg font-bold text-xs shadow-xs"
+                className="px-5 py-2.5 bg-gradient-to-r from-emerald-800 to-teal-800 hover:from-emerald-700 hover:to-teal-700 text-white rounded-xl font-bold text-xs shadow-sm hover:shadow transition-all cursor-pointer"
               >
                 Update Passphrase
               </button>
             </form>
           </div>
 
-          <div className="p-6 rounded-xl bg-white border border-slate-200 shadow-xs space-y-3">
-            <h4 className="text-sm font-bold text-slate-900">Enclave Session Management</h4>
-            <p className="text-xs text-slate-500">
+          <div className="modern-card p-6 rounded-2xl bg-white border border-slate-200 shadow-sm space-y-3">
+            <h4 className="text-sm font-bold text-slate-900 flex items-center gap-2">
+              <LogOut className="w-4 h-4 text-rose-600" />
+              <span>Enclave Session Management</span>
+            </h4>
+            <p className="text-xs text-slate-500 leading-relaxed">
               Terminating your session immediately invalidates your JWT access token on the server and releases hardware memory resources.
             </p>
             <button
               onClick={onLogout}
-              className="px-4 py-2 bg-rose-700 hover:bg-rose-600 text-white font-bold rounded-lg text-xs shadow-xs flex items-center gap-1.5"
+              className="px-4 py-2.5 bg-rose-700 hover:bg-rose-800 text-white font-bold rounded-xl text-xs shadow-sm transition-all flex items-center gap-2 cursor-pointer"
             >
               <LogOut className="w-4 h-4" />
               <span>Terminate Active Session</span>
