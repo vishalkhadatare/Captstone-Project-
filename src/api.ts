@@ -303,14 +303,20 @@ export const api = {
   deviceBindingChallenge: (payload: { public_key: string; device_name?: string }, bindingToken: string) =>
     request<{ challengeId: string; challenge: string }>(
       '/api/registration/device-binding/challenge',
-      { method: 'POST', body: JSON.stringify(payload) },
-      bindingToken,
+      {
+        method: 'POST',
+        body: JSON.stringify(payload),
+        headers: { Authorization: `Bearer ${bindingToken}` },
+      },
     ),
   deviceBindingVerify: (payload: { challengeId: string; signature: string }, bindingToken: string) =>
     request<{ message: string; token: string; user: User; device: TrustedDevice }>(
       '/api/registration/device-binding/verify',
-      { method: 'POST', body: JSON.stringify(payload) },
-      bindingToken,
+      {
+        method: 'POST',
+        body: JSON.stringify(payload),
+        headers: { Authorization: `Bearer ${bindingToken}` },
+      },
     ),
 
   // Organizations
