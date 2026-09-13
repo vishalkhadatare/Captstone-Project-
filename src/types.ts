@@ -198,6 +198,9 @@ export interface Examination {
   isTimeUnlocked?: boolean;
   serverCurrentTime?: string;
   unlockDateTime?: string;
+  simulation_status?: 'NOT_STARTED' | 'IN_PROGRESS' | 'COMPLETED';
+  simulated_at?: string;
+  simulated_by?: string;
 }
 
 export type QuestionStatus =
@@ -732,6 +735,124 @@ export interface CandidateAssignmentItem {
   paper_fingerprint: string;
   assigned_at: string;
 }
+
+// Examination Manager One-Time Proctored Simulation
+export interface ExamSimulationQuestion {
+  orderIndex: number;
+  questionId: string;
+  subject: string;
+  topic: string;
+  difficulty: string;
+  marks: number;
+  negativeMarks?: number;
+  type: string;
+  content: string;
+  options?: string[] | null;
+  correctAnswerEncryptedNotice?: string;
+}
+
+export interface ExamSimulationPaper {
+  examinationId: string;
+  examinationName: string;
+  subject: string;
+  category: string;
+  examType: string;
+  versionCode: string;
+  setLabel: string;
+  isUniversity3PaperFormat?: boolean;
+  isMultiSubjectMCQFormat?: boolean;
+  subjectBreakdown?: Array<{ subject: string; count: number; totalMarks: number }>;
+  generatedAt: string;
+  durationMinutes: number;
+  totalMarks: number;
+  instructions: string[];
+  questions: ExamSimulationQuestion[];
+}
+
+export interface ExamSimulationStartResponse {
+  sessionToken: string;
+  paper: ExamSimulationPaper;
+  durationMinutes: number;
+  durationSeconds: number;
+  startedAt: string;
+  expiresAt: string;
+  simulationStatus: 'IN_PROGRESS' | 'COMPLETED';
+}
+
+// Examination Centre & Copy Control
+export interface ExaminationCentre {
+  id: string;
+  exam_id: string;
+  org_id?: string;
+  centre_code: string;
+  centre_name: string;
+  address: string;
+  city: string;
+  state: string;
+  contact_person?: string;
+  contact_number?: string;
+  email?: string;
+  operator_user_id?: string;
+  max_copies: number;
+  status: string;
+  created_by?: string;
+  created_at: string;
+  updated_at?: string;
+  exam_name?: string;
+  exam_subject?: string;
+  managerAuthorized?: number;
+  centreAuthorized?: number;
+  finalAllowed?: number;
+  hasMismatch?: boolean;
+  totalPrinted?: number;
+}
+
+export interface AddCentrePayload {
+  centre_name: string;
+  centre_code: string;
+  address: string;
+  city: string;
+  state: string;
+  contact_person: string;
+  contact_number: string;
+  email: string;
+  max_copies: number;
+  operator_user_id?: string;
+}
+
+export interface AddCentreResponse {
+  message: string;
+  centre: ExaminationCentre;
+  copyControl: {
+    managerAuthorized: number;
+    centreAuthorized: number;
+    finalAllowed: number;
+    hasMismatch: boolean;
+  };
+}
+
+export interface EmergencyRegeneratePayload {
+  reason: string;
+  quarantine_suspect_questions?: boolean;
+  compromised_question_ids?: string[];
+}
+
+export interface EmergencyRegenerateResponse {
+  message: string;
+  invalidatedVersion?: string;
+  newVersionCode: string;
+  paperVersionId: string;
+  checksumSHA256: string;
+  keyFingerprint: string;
+  quarantinedCount: number;
+  shamirSharesCreated: number;
+  shamirQuorumThreshold: number;
+  status: string;
+  generatedSets?: any[];
+  subjectBreakdown?: Array<{ subject: string; count: number; totalMarks: number }>;
+}
+
+
 
 
 

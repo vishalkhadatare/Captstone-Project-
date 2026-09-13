@@ -3089,23 +3089,299 @@ async function startServer() {
     }
   });
 
-  // Configure Centres for Examination
+  // Configure Centres for Examination (Section: Add Examination Centre)
   app.post('/api/examinations/:id/centres', authenticateToken, requireApprovedDevice, requireRole(['EXAM_MANAGER', 'ORG_OWNER']), async (req: Request, res: Response) => {
     try {
-      const { centre_code, centre_name, city, address, operator_user_id, max_copies } = req.body;
+      const {
+        centre_name,
+        centre_code,
+        address,
+        city,
+        state,
+        contact_person,
+        contact_number,
+        email,
+        max_copies,
+        operator_user_id
+      } = req.body || {};
+
       const db = await getDb();
-      const exam = executeQuery(db, 'SELECT id FROM examinations WHERE id = ? AND org_id = ?', [req.params.id, req.user!.org_id])[0];
+      const exam = executeQuery(
+        db,
+        'SELECT * FROM examinations WHERE id = ? AND org_id = ?',
+        [req.params.id, req.user!.org_id]
+      )[0];
       if (!exam) return res.status(404).json({ error: 'Examination not found.' });
+
+      // 1. Validation: Required fields
+      if (
+        !centre_name?.trim() ||
+        !centre_code?.trim() ||
+        !address?.trim() ||
+        !city?.trim() ||
+        !state?.trim() ||
+        !contact_person?.trim() ||
+        !contact_number?.trim() ||
+        !email?.trim() ||
+        max_copies === undefined ||
+        max_copies === null ||
+        max_copies === ''
+      ) {
+        return res.status(422).json({
+          error: 'All fields are required: Centre Name, Centre Code, Address, City, State, Contact Person, Contact Number, Email, and Required / Maximum Copies.'
+        });
+      }
+
+      const trimmedName = centre_name.trim();
+      const trimmedCode = centre_code.trim().toUpperCase();
+      const trimmedAddress = address.trim();
+      const trimmedCity = city.trim();
+      const trimmedState = state.trim();
+      const trimmedPerson = contact_person.trim();
+      const trimmedPhone = contact_number.trim();
+      const trimmedEmail = email.trim().toLowerCase();
+
+      // 2. Email format validation
+      const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+      if (!emailRegex.test(trimmedEmail)) {
+        return res.status(422).json({ error: 'Invalid email address format.' });
+      }
+
+      // 3. Contact Number format validation
+      const phoneDigits = trimmedPhone.replace(/[^0-9]/g, '');
+      if (phoneDigits.length < 7 || phoneDigits.length > 15) {
+        return res.status(422).json({ error: 'Invalid contact number format. Must contain 7 to 15 digits.' });
+      }
+
+      // 4. Required / Maximum Copies: positive integer validation
+      const parsedCopies = Number(max_copies);
+      if (!Number.isInteger(parsedCopies) || parsedCopies <= 0) {
+        return res.status(422).json({ error: 'Required / Maximum Copies must be a positive integer.' });
+      }
+
+      // 5. Uniqueness validation:
+      // (a) Prevent assigning the same centre twice to the same examination
+      const duplicateInExam = executeQuery(
+        db,
+        'SELECT id, centre_code, centre_name FROM examination_centres WHERE exam_id = ? AND UPPER(centre_code) = ?',
+        [exam.id, trimmedCode]
+      );
+      if (duplicateInExam.length > 0) {
+        return res.status(409).json({
+          error: `Centre with code "${trimmedCode}" is already assigned to this examination.`
+        });
+      }
+
+      // (b) Centre Code must be unique within the organization
+      const duplicateInOrg = executeQuery(
+        db,
+        'SELECT id, exam_id, centre_name FROM examination_centres WHERE org_id = ? AND UPPER(centre_code) = ?',
+        [req.user!.org_id, trimmedCode]
+      );
+      if (duplicateInOrg.length > 0) {
+        return res.status(409).json({
+          error: `Centre Code "${trimmedCode}" is already in use by another centre in this organization. Centre codes must be unique within your organization.`
+        });
+      }
+
+      // 6. Copy Control Calculation:
+      // Final Authorized Copies = MIN(Manager Authorized Copies, Centre Authorized Copies)
+      const managerAuthorized = Number(exam.max_copies || 500);
+      const centreAuthorized = parsedCopies;
+      const finalAllowed = Math.min(managerAuthorized, centreAuthorized);
+      const hasMismatch = managerAuthorized !== centreAuthorized;
+
+      const now = new Date().toISOString();
       const centreId = uuidv4();
 
+      // 7. Insert centre record linked to examination and org
       executeRun(
         db,
-        `INSERT INTO examination_centres (id, exam_id, centre_code, centre_name, city, address, operator_user_id, max_copies, created_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-        [centreId, req.params.id, centre_code || `CTR-${Math.floor(100 + Math.random() * 900)}`, centre_name, city, address, operator_user_id || null, max_copies || 100, new Date().toISOString()]
+        `INSERT INTO examination_centres (
+          id, exam_id, org_id, centre_code, centre_name, address, city, state,
+          contact_person, contact_number, email, operator_user_id, max_copies,
+          status, created_by, created_at, updated_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'ACTIVE', ?, ?, ?)`,
+        [
+          centreId,
+          exam.id,
+          req.user!.org_id,
+          trimmedCode,
+          trimmedName,
+          trimmedAddress,
+          trimmedCity,
+          trimmedState,
+          trimmedPerson,
+          trimmedPhone,
+          trimmedEmail,
+          operator_user_id || null,
+          centreAuthorized,
+          req.user!.id,
+          now,
+          now
+        ]
       );
 
-      return res.json({ message: 'Examination centre registered.', centreId });
+      // 8. If mismatch between manager-authorized copies and centre-requested copies:
+      if (hasMismatch) {
+        // Log security/audit event: CENTRE_COPY_QUANTITY_MISMATCH
+        await logSecurityEvent({
+          event_type: 'CENTRE_COPY_QUANTITY_MISMATCH',
+          severity: 'HIGH',
+          user_id: req.user!.id,
+          org_id: req.user!.org_id,
+          details: {
+            risk_score: 40,
+            examId: exam.id,
+            examName: exam.name,
+            centreId,
+            centreCode: trimmedCode,
+            centreName: trimmedName,
+            managerAuthorizedCopies: managerAuthorized,
+            centreRequestedCopies: centreAuthorized,
+            finalAuthorizedCopies: finalAllowed,
+            difference: centreAuthorized - managerAuthorized,
+            enforcedRule: 'Final Authorized Copies = MIN(Manager Authorized Copies, Centre Authorized Copies)',
+            alert: `Quantity discrepancy: Centre requested ${centreAuthorized} copies while Manager quota is ${managerAuthorized}. Enforcing final limit ${finalAllowed}.`
+          }
+        });
+
+        // Notify Chief Vigilance & Security Auditor (AUDITOR role)
+        executeRun(
+          db,
+          `INSERT INTO notifications (id, user_id, role, org_id, title, message, category, is_read, created_at)
+           VALUES (?, NULL, 'AUDITOR', ?, ?, ?, 'SECURITY', 0, ?)`,
+          [
+            uuidv4(),
+            req.user!.org_id,
+            `SECURITY ALERT: Copy Quota Mismatch at Centre ${trimmedCode}`,
+            `Examination "${exam.name}": Centre "${trimmedName}" requested ${centreAuthorized} copies, but Examination Manager authorized quota is ${managerAuthorized}. Hard limit locked at ${finalAllowed}.`,
+            now
+          ]
+        );
+      }
+
+      // Log regular audit event for centre addition
+      await logAuditEvent({
+        event_type: 'EXAMINATION_CENTRE_ADDED',
+        user_id: req.user!.id,
+        org_id: req.user!.org_id,
+        exam_id: exam.id,
+        details: {
+          centreId,
+          centreCode: trimmedCode,
+          centreName: trimmedName,
+          city: trimmedCity,
+          state: trimmedState,
+          managerAuthorized,
+          centreAuthorized,
+          finalAllowed,
+          hasMismatch
+        }
+      });
+
+      const newCentre = executeQuery(db, 'SELECT * FROM examination_centres WHERE id = ?', [centreId])[0];
+
+      return res.status(201).json({
+        message: 'Examination centre registered successfully.',
+        centre: {
+          ...newCentre,
+          managerAuthorized,
+          centreAuthorized,
+          finalAllowed,
+          hasMismatch,
+          totalPrinted: 0
+        },
+        copyControl: {
+          managerAuthorized,
+          centreAuthorized,
+          finalAllowed,
+          hasMismatch
+        }
+      });
+    } catch (e: any) {
+      console.error('Add centre error:', e);
+      return res.status(500).json({ error: e.message });
+    }
+  });
+
+  // Get Centres for a specific Examination
+  app.get('/api/examinations/:id/centres', authenticateToken, requireApprovedDevice, requireRole(['EXAM_MANAGER', 'ORG_OWNER', 'AUDITOR', 'CENTRE_OPERATOR']), async (req: Request, res: Response) => {
+    try {
+      const db = await getDb();
+      const exam = executeQuery(db, 'SELECT * FROM examinations WHERE id = ? AND org_id = ?', [req.params.id, req.user!.org_id])[0];
+      if (!exam) return res.status(404).json({ error: 'Examination not found.' });
+
+      const centres = executeQuery(
+        db,
+        'SELECT * FROM examination_centres WHERE exam_id = ? ORDER BY created_at DESC',
+        [exam.id]
+      );
+
+      const managerAuthorized = Number(exam.max_copies || 500);
+
+      const enriched = centres.map(c => {
+        const centreAuthorized = Number(c.max_copies || 100);
+        const finalAllowed = Math.min(managerAuthorized, centreAuthorized);
+        const hasMismatch = managerAuthorized !== centreAuthorized;
+        const totalPrinted = executeQuery(
+          db,
+          'SELECT COUNT(*) as cnt FROM print_copies WHERE exam_id = ? AND (centre_id = ? OR centre_id = ?)',
+          [exam.id, c.id, c.centre_code]
+        )[0]?.cnt || 0;
+
+        return {
+          ...c,
+          managerAuthorized,
+          centreAuthorized,
+          finalAllowed,
+          hasMismatch,
+          totalPrinted: Number(totalPrinted),
+        };
+      });
+
+      return res.json({ centres: enriched, managerAuthorized });
+    } catch (e: any) {
+      return res.status(500).json({ error: e.message });
+    }
+  });
+
+  // Get All Centres for the Organization
+  app.get('/api/centres', authenticateToken, requireApprovedDevice, requireRole(['EXAM_MANAGER', 'ORG_OWNER', 'AUDITOR']), async (req: Request, res: Response) => {
+    try {
+      const db = await getDb();
+      const centres = executeQuery(
+        db,
+        `SELECT ec.*, e.name as exam_name, e.subject as exam_subject, e.max_copies as exam_manager_copies
+         FROM examination_centres ec
+         LEFT JOIN examinations e ON ec.exam_id = e.id
+         WHERE ec.org_id = ?
+         ORDER BY ec.created_at DESC`,
+        [req.user!.org_id]
+      );
+
+      const enriched = centres.map(c => {
+        const managerAuthorized = Number(c.exam_manager_copies || 500);
+        const centreAuthorized = Number(c.max_copies || 100);
+        const finalAllowed = Math.min(managerAuthorized, centreAuthorized);
+        const hasMismatch = managerAuthorized !== centreAuthorized;
+        const totalPrinted = executeQuery(
+          db,
+          'SELECT COUNT(*) as cnt FROM print_copies WHERE exam_id = ? AND (centre_id = ? OR centre_id = ?)',
+          [c.exam_id, c.id, c.centre_code]
+        )[0]?.cnt || 0;
+
+        return {
+          ...c,
+          managerAuthorized,
+          centreAuthorized,
+          finalAllowed,
+          hasMismatch,
+          totalPrinted: Number(totalPrinted),
+        };
+      });
+
+      return res.json({ centres: enriched });
     } catch (e: any) {
       return res.status(500).json({ error: e.message });
     }
@@ -4899,6 +5175,493 @@ async function startServer() {
     }
   });
 
+  // Helper: Compile deterministic question paper payload for examination
+  function compilePaperPayloadForExam(db: any, exam: any, orgId: string, body: any = {}) {
+    const isUniversityExam =
+      body.exam_mode === 'UNIVERSITY_3_PAPERS' ||
+      exam.category === 'University Exam' ||
+      exam.category === 'Autonomous University' ||
+      exam.category === 'State Examination Authority' ||
+      (exam.name && exam.name.toLowerCase().includes('university')) ||
+      (exam.exam_type === 'THEORY' && body.num_sets !== 1);
+
+    const isNeetOrMultiSubjectMCQ =
+      body.exam_mode === 'MULTI_SUBJECT_MCQ' ||
+      exam.category === 'NEET' ||
+      exam.category === 'JEE' ||
+      exam.category === 'Competitive Exam' ||
+      exam.category === 'TCET / CET-type Exam' ||
+      (exam.name && (exam.name.toUpperCase().includes('NEET') || exam.name.toUpperCase().includes('JEE'))) ||
+      (exam.exam_type === 'MCQ' && (body.subject_pool || exam.subject.includes('PCB') || exam.subject.includes('PCM') || exam.subject.includes('All') || exam.subject.includes('&')));
+
+    // 1. Determine Question Pool Strategy
+    let eligibleQuestions: any[] = [];
+    let subjectBreakdown: Array<{ subject: string; count: number; totalMarks: number }> = [];
+
+    if (isNeetOrMultiSubjectMCQ) {
+      let targetSubjects: string[] = [];
+      if (Array.isArray(body.subject_pool) && body.subject_pool.length > 0) {
+        targetSubjects = body.subject_pool;
+      } else if (exam.category === 'NEET' || (exam.name && exam.name.toUpperCase().includes('NEET'))) {
+        targetSubjects = ['Physics', 'Chemistry', 'Biology', 'Botany', 'Zoology'];
+      } else if (exam.category === 'JEE' || (exam.name && exam.name.toUpperCase().includes('JEE'))) {
+        targetSubjects = ['Physics', 'Chemistry', 'Mathematics'];
+      } else {
+        const orgSubjects = executeQuery(db, 'SELECT DISTINCT subject FROM questions WHERE org_id = ? AND status = "ELIGIBLE_FOR_PAPER"', [orgId]);
+        targetSubjects = orgSubjects.map(s => s.subject);
+        if (!targetSubjects.includes(exam.subject)) {
+          targetSubjects.push(exam.subject);
+        }
+      }
+
+      const placeholders = targetSubjects.map(() => '?').join(',');
+      eligibleQuestions = executeQuery(
+        db,
+        `SELECT * FROM questions
+         WHERE org_id = ? AND status = 'ELIGIBLE_FOR_PAPER' AND subject IN (${placeholders})
+         ORDER BY subject ASC, difficulty ASC`,
+        [orgId, ...targetSubjects]
+      );
+
+      if (eligibleQuestions.length === 0) {
+        eligibleQuestions = executeQuery(
+          db,
+          `SELECT * FROM questions
+           WHERE org_id = ? AND status = 'ELIGIBLE_FOR_PAPER'
+           ORDER BY subject ASC, difficulty ASC`,
+          [orgId]
+        );
+      }
+
+      const subjectMap: Record<string, { count: number; totalMarks: number }> = {};
+      eligibleQuestions.forEach(q => {
+        if (!subjectMap[q.subject]) subjectMap[q.subject] = { count: 0, totalMarks: 0 };
+        subjectMap[q.subject].count += 1;
+        subjectMap[q.subject].totalMarks += (q.marks || 4);
+      });
+      subjectBreakdown = Object.entries(subjectMap).map(([subject, stats]) => ({
+        subject,
+        count: stats.count,
+        totalMarks: stats.totalMarks,
+      }));
+    } else {
+      eligibleQuestions = executeQuery(
+        db,
+        `SELECT * FROM questions
+         WHERE org_id = ? AND (subject = ? OR subject LIKE ?) AND status = 'ELIGIBLE_FOR_PAPER'
+         ORDER BY difficulty ASC`,
+        [orgId, exam.subject, `%${exam.subject.split(' ')[0]}%`]
+      );
+
+      if (eligibleQuestions.length < (exam.total_questions || 4)) {
+        eligibleQuestions = executeQuery(
+          db,
+          `SELECT * FROM questions
+           WHERE org_id = ? AND status = 'ELIGIBLE_FOR_PAPER'
+           ORDER BY difficulty ASC`,
+          [orgId]
+        );
+      }
+
+      subjectBreakdown = [{ subject: exam.subject, count: eligibleQuestions.length, totalMarks: eligibleQuestions.reduce((acc, q) => acc + (q.marks || 4), 0) }];
+    }
+
+    const validationErrors: string[] = [];
+    const requiredMinQuestions = isUniversityExam ? Math.min(exam.total_questions || 4, 3) : Math.min(exam.total_questions || 5, 4);
+
+    if (eligibleQuestions.length < requiredMinQuestions) {
+      validationErrors.push(
+        `Insufficient verified questions in pool: Required at least ${requiredMinQuestions}, but only ${eligibleQuestions.length} verified questions are available in the question pool.`
+      );
+    }
+
+    const now = new Date().toISOString();
+    const numSetsToGenerate = isUniversityExam ? 3 : 1;
+    const generatedSets: any[] = [];
+
+    for (let setIdx = 1; setIdx <= numSetsToGenerate; setIdx++) {
+      const setLabel = isUniversityExam ? `SET-${setIdx}` : `SET-A`;
+      const categorySlug = (exam.category || 'EXAM').replace(/[^A-Z0-9]/gi, '').toUpperCase().substring(0, 8);
+      const versionCode = `EXAM-${categorySlug}-${setLabel}-${String(Math.floor(100 + Math.random() * 900))}`;
+
+      let setQuestions: any[] = [];
+      if (isUniversityExam) {
+        const shuffledPool = [...eligibleQuestions].sort((a, b) => {
+          const hashA = (a.id + setIdx).split('').reduce((acc, c) => acc + c.charCodeAt(0), 0);
+          const hashB = (b.id + setIdx).split('').reduce((acc, c) => acc + c.charCodeAt(0), 0);
+          return (hashA % 17) - (hashB % 17);
+        });
+        const targetQCount = exam.total_questions || Math.min(shuffledPool.length, 6);
+        setQuestions = shuffledPool.slice(0, targetQCount);
+      } else if (isNeetOrMultiSubjectMCQ) {
+        const subjects = Array.from(new Set(eligibleQuestions.map(q => q.subject)));
+        const qPerSubject = Math.max(1, Math.floor((exam.total_questions || eligibleQuestions.length) / Math.max(1, subjects.length)));
+
+        subjects.forEach(subj => {
+          const subjQs = eligibleQuestions.filter(q => q.subject === subj);
+          setQuestions.push(...subjQs.slice(0, qPerSubject));
+        });
+
+        if (setQuestions.length < (exam.total_questions || 5)) {
+          const remaining = eligibleQuestions.filter(q => !setQuestions.some(sq => sq.id === q.id));
+          setQuestions.push(...remaining.slice(0, (exam.total_questions || 5) - setQuestions.length));
+        }
+      } else {
+        setQuestions = eligibleQuestions.slice(0, exam.total_questions || 10);
+      }
+
+      const totalPaperMarks = setQuestions.reduce((acc, q) => acc + (q.marks || 4), 0);
+
+      const paperPayloadObject = {
+        examinationId: exam.id,
+        examinationName: exam.name,
+        subject: exam.subject,
+        category: exam.category,
+        examType: exam.exam_type,
+        versionCode,
+        setLabel: isUniversityExam ? `Master Paper Set ${setIdx}` : 'Master Set A',
+        isUniversity3PaperFormat: isUniversityExam,
+        isMultiSubjectMCQFormat: isNeetOrMultiSubjectMCQ,
+        subjectBreakdown,
+        generatedAt: now,
+        durationMinutes: exam.duration_minutes,
+        totalMarks: totalPaperMarks,
+        instructions: isUniversityExam
+          ? [
+              `University Examination Master Paper Set ${setIdx} (Sealed Enclave).`,
+              'Section A: All short-answer compulsory questions (2 marks each).',
+              'Section B: Medium analytical questions (5 marks each).',
+              'Section C: Long subjective essay questions with internal choice (10/15 marks each).',
+              'Each page is dynamically watermarked with Centre ID, Station Fingerprint, and Operator Hash.',
+            ]
+          : [
+              'All questions are compulsory. Multiple Choice Questions (MCQ) format.',
+              'Negative Marking: +4.0 Marks for correct response, -1.0 Mark for incorrect response.',
+              'Question pool drawn proportionately from multiple constituent subjects (Physics, Chemistry, Biology/Maths).',
+              'Options and question sequence are cryptographically randomized for OMR evaluation.',
+            ],
+        questions: setQuestions.map((q, idx) => ({
+          orderIndex: idx + 1,
+          questionId: q.id,
+          subject: q.subject,
+          topic: q.topic,
+          difficulty: q.difficulty,
+          marks: q.marks,
+          negativeMarks: q.negative_marks,
+          type: q.question_type,
+          content: q.content_text,
+          options: q.options_json ? (typeof q.options_json === 'string' ? JSON.parse(q.options_json) : q.options_json) : null,
+          correctAnswerEncryptedNotice: '[PROTECTED BY ZEROLEAK CRYPTOGRAPHIC VAULT]',
+        })),
+      };
+
+      generatedSets.push({
+        setIndex: setIdx,
+        setLabel: isUniversityExam ? `Master Paper Set ${setIdx}` : 'Master Set A',
+        versionCode,
+        setQuestions,
+        totalPaperMarks,
+        paperPayloadObject,
+      });
+    }
+
+    return {
+      isUniversityExam,
+      isNeetOrMultiSubjectMCQ,
+      eligibleQuestions,
+      subjectBreakdown,
+      validationErrors,
+      generatedSets,
+    };
+  }
+
+  // =========================================================================
+  // SIMULATE EXAM (Section: Strictly One-Time Proctored Manager Preview)
+  // =========================================================================
+
+  // 1. Start Simulation: Strict one-time check, hardware verify gateway, return paper
+  app.post('/api/examinations/:id/simulate/start', authenticateToken, requireApprovedDevice, requireRole(['EXAM_MANAGER', 'ORG_OWNER']), async (req: Request, res: Response) => {
+    try {
+      const db = await getDb();
+      const exam = executeQuery(db, 'SELECT * FROM examinations WHERE id = ? AND org_id = ?', [req.params.id, req.user!.org_id])[0];
+      if (!exam) return res.status(404).json({ error: 'Examination not found.' });
+
+      // ONE-TIME ENFORCEMENT: If already completed, strictly forbid previewing again!
+      if (exam.simulation_status === 'COMPLETED') {
+        return res.status(403).json({
+          error: 'Simulation already completed. The final question paper cannot be viewed again in simulation mode.',
+          simulation_status: 'COMPLETED',
+        });
+      }
+
+      // Check if any completed session exists in exam_simulation_sessions
+      const completedSessions = executeQuery(
+        db,
+        'SELECT * FROM exam_simulation_sessions WHERE exam_id = ? AND status = "COMPLETED"',
+        [exam.id]
+      );
+      if (completedSessions.length > 0) {
+        executeRun(db, 'UPDATE examinations SET simulation_status = "COMPLETED" WHERE id = ?', [exam.id]);
+        return res.status(403).json({
+          error: 'Simulation already completed. The final question paper cannot be viewed again in simulation mode.',
+          simulation_status: 'COMPLETED',
+        });
+      }
+
+      const now = new Date();
+
+      // Check for existing in-progress session
+      const existingSessions = executeQuery(
+        db,
+        'SELECT * FROM exam_simulation_sessions WHERE exam_id = ? AND status = "IN_PROGRESS" ORDER BY created_at DESC',
+        [exam.id]
+      );
+
+      const activeSession = existingSessions[0];
+      if (activeSession) {
+        const expiresAt = new Date(activeSession.expires_at);
+        if (now > expiresAt) {
+          // Timer expired -> Mark completed and deny
+          executeRun(db, 'UPDATE exam_simulation_sessions SET status = "COMPLETED", completed_at = ? WHERE id = ?', [now.toISOString(), activeSession.id]);
+          executeRun(db, 'UPDATE examinations SET simulation_status = "COMPLETED", simulated_at = ? WHERE id = ?', [now.toISOString(), exam.id]);
+          return res.status(403).json({
+            error: 'Simulation already completed. The final question paper cannot be viewed again in simulation mode.',
+            simulation_status: 'COMPLETED',
+          });
+        }
+
+        // Active session still valid, return remaining seconds
+        const remainingSeconds = Math.max(0, Math.floor((expiresAt.getTime() - now.getTime()) / 1000));
+        let paper = null;
+        try {
+          paper = JSON.parse(activeSession.paper_snapshot_json);
+        } catch {
+          paper = null;
+        }
+
+        return res.json({
+          sessionToken: activeSession.session_token,
+          paper,
+          durationMinutes: 15,
+          durationSeconds: remainingSeconds,
+          startedAt: activeSession.started_at,
+          expiresAt: activeSession.expires_at,
+          simulationStatus: 'IN_PROGRESS',
+        });
+      }
+
+      // Generate / Load Paper Snapshot
+      let paperPayload: any = null;
+
+      // If an encrypted paper version already exists, decrypt it
+      const currentVersion = executeQuery(db, 'SELECT * FROM paper_versions WHERE exam_id = ? AND is_current = 1', [exam.id])[0];
+      if (currentVersion) {
+        const encryptedData = executeQuery(db, 'SELECT * FROM encrypted_papers WHERE paper_version_id = ?', [currentVersion.id])[0];
+        if (encryptedData) {
+          try {
+            const decryptedString = decryptExamPaper({
+              cipherText: encryptedData.aes_cipher_text,
+              iv: encryptedData.iv_hex,
+              authTag: encryptedData.auth_tag_hex,
+              encryptedKeyRSA: encryptedData.encrypted_aes_key_rsa,
+              keyFingerprint: encryptedData.key_fingerprint,
+              checksumSHA256: encryptedData.checksum_sha256,
+              timestamp: encryptedData.encrypted_at,
+            });
+            paperPayload = JSON.parse(decryptedString);
+          } catch (decErr) {
+            console.warn('Could not decrypt existing paper for simulation, compiling from pool:', decErr);
+          }
+        }
+      }
+
+      if (!paperPayload) {
+        const compilation = compilePaperPayloadForExam(db, exam, req.user!.org_id, req.body || {});
+        if (compilation.validationErrors.length > 0) {
+          return res.status(422).json({
+            error: 'Cannot simulate examination: Question pool validation failed.',
+            validationErrors: compilation.validationErrors,
+            eligibleQuestionsCount: compilation.eligibleQuestions.length,
+          });
+        }
+        paperPayload = compilation.generatedSets[0].paperPayloadObject;
+      }
+
+      const durationSeconds = 900; // 15 minutes preview
+      const expiresAt = new Date(Date.now() + durationSeconds * 1000).toISOString();
+      const sessionId = uuidv4();
+      const sessionToken = `SIM-${uuidv4().replace(/-/g, '')}`;
+
+      executeRun(
+        db,
+        `INSERT INTO exam_simulation_sessions (id, exam_id, user_id, session_token, status, paper_snapshot_json, events_json, duration_seconds, started_at, expires_at, created_at)
+         VALUES (?, ?, ?, ?, 'IN_PROGRESS', ?, '[]', ?, ?, ?, ?)`,
+        [sessionId, exam.id, req.user!.id, sessionToken, JSON.stringify(paperPayload), durationSeconds, now.toISOString(), expiresAt, now.toISOString()]
+      );
+
+      executeRun(
+        db,
+        'UPDATE examinations SET simulation_status = "IN_PROGRESS", simulated_by = ?, simulated_at = ? WHERE id = ?',
+        [req.user!.id, now.toISOString(), exam.id]
+      );
+
+      await logAuditEvent({
+        event_type: 'EXAM_SIMULATION_STARTED',
+        user_id: req.user!.id,
+        org_id: req.user!.org_id,
+        exam_id: exam.id,
+        details: {
+          sessionId,
+          sessionToken,
+          durationSeconds,
+          expiresAt,
+          questionsCount: paperPayload.questions?.length || 0,
+          totalMarks: paperPayload.totalMarks || 0,
+        },
+      });
+
+      return res.json({
+        sessionToken,
+        paper: paperPayload,
+        durationMinutes: 15,
+        durationSeconds,
+        startedAt: now.toISOString(),
+        expiresAt,
+        simulationStatus: 'IN_PROGRESS',
+      });
+    } catch (e: any) {
+      console.error('Simulate start error:', e);
+      return res.status(500).json({ error: e.message });
+    }
+  });
+
+  // 2. Log Simulation Security Event (Tab switch, window blur, hardware disconnect, unauthorized keypress)
+  app.post('/api/examinations/:id/simulate/event', authenticateToken, requireApprovedDevice, requireRole(['EXAM_MANAGER', 'ORG_OWNER']), async (req: Request, res: Response) => {
+    try {
+      const db = await getDb();
+      const { sessionToken, eventType, details } = req.body || {};
+      if (!sessionToken || !eventType) {
+        return res.status(400).json({ error: 'sessionToken and eventType are required.' });
+      }
+
+      const session = executeQuery(
+        db,
+        'SELECT * FROM exam_simulation_sessions WHERE session_token = ? AND exam_id = ?',
+        [sessionToken, req.params.id]
+      )[0];
+
+      if (!session) {
+        return res.status(404).json({ error: 'Simulation session not found.' });
+      }
+
+      if (session.status === 'COMPLETED') {
+        return res.status(403).json({ error: 'Simulation session is already completed.' });
+      }
+
+      const now = new Date();
+      if (now > new Date(session.expires_at)) {
+        executeRun(db, 'UPDATE exam_simulation_sessions SET status = "COMPLETED", completed_at = ? WHERE id = ?', [now.toISOString(), session.id]);
+        executeRun(db, 'UPDATE examinations SET simulation_status = "COMPLETED", simulated_at = ? WHERE id = ?', [now.toISOString(), session.exam_id]);
+        return res.status(403).json({ error: 'Simulation session expired and marked completed.' });
+      }
+
+      let events: any[] = [];
+      try {
+        events = session.events_json ? JSON.parse(session.events_json) : [];
+      } catch {
+        events = [];
+      }
+
+      const newEvent = {
+        eventType,
+        details: details || {},
+        timestamp: now.toISOString(),
+      };
+      events.push(newEvent);
+
+      executeRun(
+        db,
+        'UPDATE exam_simulation_sessions SET events_json = ? WHERE id = ?',
+        [JSON.stringify(events), session.id]
+      );
+
+      await logAuditEvent({
+        event_type: 'EXAM_SIMULATION_SECURITY_EVENT',
+        user_id: req.user!.id,
+        org_id: req.user!.org_id,
+        exam_id: session.exam_id,
+        details: {
+          sessionId: session.id,
+          eventType,
+          details,
+        },
+      });
+
+      return res.json({ success: true, recordedEvent: newEvent });
+    } catch (e: any) {
+      console.error('Simulate event error:', e);
+      return res.status(500).json({ error: e.message });
+    }
+  });
+
+  // 3. Complete Simulation: Locks session permanently, marks exam COMPLETED, enables final encryption
+  app.post('/api/examinations/:id/simulate/complete', authenticateToken, requireApprovedDevice, requireRole(['EXAM_MANAGER', 'ORG_OWNER']), async (req: Request, res: Response) => {
+    try {
+      const db = await getDb();
+      const { sessionToken, reason } = req.body || {};
+
+      const exam = executeQuery(
+        db,
+        'SELECT * FROM examinations WHERE id = ? AND org_id = ?',
+        [req.params.id, req.user!.org_id]
+      )[0];
+      if (!exam) return res.status(404).json({ error: 'Examination not found.' });
+
+      const now = new Date().toISOString();
+
+      if (sessionToken) {
+        executeRun(
+          db,
+          'UPDATE exam_simulation_sessions SET status = "COMPLETED", completed_at = ? WHERE session_token = ? AND exam_id = ?',
+          [now, sessionToken, exam.id]
+        );
+      } else {
+        executeRun(
+          db,
+          'UPDATE exam_simulation_sessions SET status = "COMPLETED", completed_at = ? WHERE exam_id = ? AND status = "IN_PROGRESS"',
+          [now, exam.id]
+        );
+      }
+
+      executeRun(
+        db,
+        'UPDATE examinations SET simulation_status = "COMPLETED", simulated_at = ?, simulated_by = ? WHERE id = ?',
+        [now, req.user!.id, exam.id]
+      );
+
+      await logAuditEvent({
+        event_type: 'EXAM_SIMULATION_COMPLETED',
+        user_id: req.user!.id,
+        org_id: req.user!.org_id,
+        exam_id: exam.id,
+        details: {
+          sessionToken,
+          reason: reason || 'MANAGER_COMPLETED',
+          completedAt: now,
+        },
+      });
+
+      return res.json({
+        message: 'Simulation session successfully completed. You may now proceed to Generate Encrypted Paper.',
+        simulation_status: 'COMPLETED',
+        completedAt: now,
+      });
+    } catch (e: any) {
+      console.error('Simulate complete error:', e);
+      return res.status(500).json({ error: e.message });
+    }
+  });
+
   // Generate & Encrypt Final Paper (Section 28-33)
   // Supports:
   // 1. University Examinations -> Max 3 Paper Sets (Set 1, Set 2, Set 3) with distinct question selections & cryptographic envelopes
@@ -4910,210 +5673,26 @@ async function startServer() {
       if (!exam) return res.status(404).json({ error: 'Examination not found.' });
 
       const body = req.body || {};
-      const isUniversityExam =
-        body.exam_mode === 'UNIVERSITY_3_PAPERS' ||
-        exam.category === 'University Exam' ||
-        exam.category === 'Autonomous University' ||
-        exam.category === 'State Examination Authority' ||
-        (exam.name && exam.name.toLowerCase().includes('university')) ||
-        (exam.exam_type === 'THEORY' && body.num_sets !== 1);
+      const compilation = compilePaperPayloadForExam(db, exam, req.user!.org_id, body);
 
-      const isNeetOrMultiSubjectMCQ =
-        body.exam_mode === 'MULTI_SUBJECT_MCQ' ||
-        exam.category === 'NEET' ||
-        exam.category === 'JEE' ||
-        exam.category === 'Competitive Exam' ||
-        exam.category === 'TCET / CET-type Exam' ||
-        (exam.name && (exam.name.toUpperCase().includes('NEET') || exam.name.toUpperCase().includes('JEE'))) ||
-        (exam.exam_type === 'MCQ' && (body.subject_pool || exam.subject.includes('PCB') || exam.subject.includes('PCM') || exam.subject.includes('All') || exam.subject.includes('&')));
-
-      // 1. Determine Question Pool Strategy
-      let eligibleQuestions: any[] = [];
-      let subjectBreakdown: Array<{ subject: string; count: number; totalMarks: number }> = [];
-
-      if (isNeetOrMultiSubjectMCQ) {
-        // Multi-Subject Question Pool for NEET, JEE & MCQ Examinations
-        let targetSubjects: string[] = [];
-        if (Array.isArray(body.subject_pool) && body.subject_pool.length > 0) {
-          targetSubjects = body.subject_pool;
-        } else if (exam.category === 'NEET' || (exam.name && exam.name.toUpperCase().includes('NEET'))) {
-          targetSubjects = ['Physics', 'Chemistry', 'Biology', 'Botany', 'Zoology'];
-        } else if (exam.category === 'JEE' || (exam.name && exam.name.toUpperCase().includes('JEE'))) {
-          targetSubjects = ['Physics', 'Chemistry', 'Mathematics'];
-        } else {
-          // Fetch all distinct subjects available in this organization
-          const orgSubjects = executeQuery(db, 'SELECT DISTINCT subject FROM questions WHERE org_id = ? AND status = "ELIGIBLE_FOR_PAPER"', [req.user!.org_id]);
-          targetSubjects = orgSubjects.map(s => s.subject);
-          if (!targetSubjects.includes(exam.subject)) {
-            targetSubjects.push(exam.subject);
-          }
-        }
-
-        // Query eligible questions across all target subjects
-        const placeholders = targetSubjects.map(() => '?').join(',');
-        eligibleQuestions = executeQuery(
-          db,
-          `SELECT * FROM questions
-           WHERE org_id = ? AND status = 'ELIGIBLE_FOR_PAPER' AND subject IN (${placeholders})
-           ORDER BY subject ASC, difficulty ASC`,
-          [req.user!.org_id, ...targetSubjects]
-        );
-
-        // If subject-specific query returned 0, fallback to all eligible in org
-        if (eligibleQuestions.length === 0) {
-          eligibleQuestions = executeQuery(
-            db,
-            `SELECT * FROM questions
-             WHERE org_id = ? AND status = 'ELIGIBLE_FOR_PAPER'
-             ORDER BY subject ASC, difficulty ASC`,
-            [req.user!.org_id]
-          );
-        }
-
-        // Compute subject breakdown
-        const subjectMap: Record<string, { count: number; totalMarks: number }> = {};
-        eligibleQuestions.forEach(q => {
-          if (!subjectMap[q.subject]) subjectMap[q.subject] = { count: 0, totalMarks: 0 };
-          subjectMap[q.subject].count += 1;
-          subjectMap[q.subject].totalMarks += (q.marks || 4);
-        });
-        subjectBreakdown = Object.entries(subjectMap).map(([subject, stats]) => ({
-          subject,
-          count: stats.count,
-          totalMarks: stats.totalMarks,
-        }));
-      } else {
-        // Single or Domain Subject Question Pool (e.g. Standard University Subject)
-        eligibleQuestions = executeQuery(
-          db,
-          `SELECT * FROM questions
-           WHERE org_id = ? AND (subject = ? OR subject LIKE ?) AND status = 'ELIGIBLE_FOR_PAPER'
-           ORDER BY difficulty ASC`,
-          [req.user!.org_id, exam.subject, `%${exam.subject.split(' ')[0]}%`]
-        );
-
-        // Fallback to org pool if exact subject match is small
-        if (eligibleQuestions.length < (exam.total_questions || 4)) {
-          eligibleQuestions = executeQuery(
-            db,
-            `SELECT * FROM questions
-             WHERE org_id = ? AND status = 'ELIGIBLE_FOR_PAPER'
-             ORDER BY difficulty ASC`,
-            [req.user!.org_id]
-          );
-        }
-
-        subjectBreakdown = [{ subject: exam.subject, count: eligibleQuestions.length, totalMarks: eligibleQuestions.reduce((acc, q) => acc + (q.marks || 4), 0) }];
-      }
-
-      // Section 29: Deterministic Paper Validation Rules
-      const validationErrors: string[] = [];
-      const requiredMinQuestions = isUniversityExam ? Math.min(exam.total_questions || 4, 3) : Math.min(exam.total_questions || 5, 4);
-
-      if (eligibleQuestions.length < requiredMinQuestions) {
-        validationErrors.push(
-          `Insufficient verified questions in pool: Required at least ${requiredMinQuestions}, but only ${eligibleQuestions.length} verified questions are available in the question pool.`
-        );
-      }
-
-      if (validationErrors.length > 0) {
+      if (compilation.validationErrors.length > 0) {
         return res.status(422).json({
           error: 'Deterministic Paper Validation Failed. Paper generation halted before encryption.',
-          validationErrors,
-          eligibleQuestionsCount: eligibleQuestions.length,
+          validationErrors: compilation.validationErrors,
+          eligibleQuestionsCount: compilation.eligibleQuestions.length,
         });
       }
 
+      const { isUniversityExam, isNeetOrMultiSubjectMCQ, subjectBreakdown, generatedSets } = compilation;
       const now = new Date().toISOString();
-      const numSetsToGenerate = isUniversityExam ? 3 : 1; // University -> Max 3 Paper Sets
-      const generatedSets: any[] = [];
+      const resultingSets: any[] = [];
 
       // Mark any prior versions as not current before generating new batch
       executeRun(db, 'UPDATE paper_versions SET is_current = 0 WHERE exam_id = ?', [exam.id]);
 
-      for (let setIdx = 1; setIdx <= numSetsToGenerate; setIdx++) {
+      for (const setItem of generatedSets) {
+        const { setIndex, setLabel, versionCode, setQuestions, totalPaperMarks, paperPayloadObject } = setItem;
         const paperVersionId = uuidv4();
-        const setLabel = isUniversityExam ? `SET-${setIdx}` : `SET-A`;
-        const categorySlug = exam.category.replace(/[^A-Z0-9]/gi, '').toUpperCase().substring(0, 8);
-        const versionCode = `EXAM-${categorySlug}-${setLabel}-${String(Math.floor(100 + Math.random() * 900))}`;
-
-        // Select questions with distinct distribution/permutation for each University set
-        let setQuestions: any[] = [];
-        if (isUniversityExam) {
-          // Permute / balance questions across the 3 University Sets
-          const shuffledPool = [...eligibleQuestions].sort((a, b) => {
-            const hashA = (a.id + setIdx).split('').reduce((acc, c) => acc + c.charCodeAt(0), 0);
-            const hashB = (b.id + setIdx).split('').reduce((acc, c) => acc + c.charCodeAt(0), 0);
-            return (hashA % 17) - (hashB % 17);
-          });
-          const targetQCount = exam.total_questions || Math.min(shuffledPool.length, 6);
-          setQuestions = shuffledPool.slice(0, targetQCount);
-        } else if (isNeetOrMultiSubjectMCQ) {
-          // Multi-Subject Question Partitioning (Group by Subject Sections)
-          const subjects = Array.from(new Set(eligibleQuestions.map(q => q.subject)));
-          const qPerSubject = Math.max(1, Math.floor((exam.total_questions || eligibleQuestions.length) / Math.max(1, subjects.length)));
-
-          subjects.forEach(subj => {
-            const subjQs = eligibleQuestions.filter(q => q.subject === subj);
-            setQuestions.push(...subjQs.slice(0, qPerSubject));
-          });
-
-          // If still under total, backfill with remaining
-          if (setQuestions.length < (exam.total_questions || 5)) {
-            const remaining = eligibleQuestions.filter(q => !setQuestions.some(sq => sq.id === q.id));
-            setQuestions.push(...remaining.slice(0, (exam.total_questions || 5) - setQuestions.length));
-          }
-        } else {
-          setQuestions = eligibleQuestions.slice(0, exam.total_questions || 10);
-        }
-
-        // Calculate marks
-        const totalPaperMarks = setQuestions.reduce((acc, q) => acc + (q.marks || 4), 0);
-
-        // Build Payload Object
-        const paperPayloadObject = {
-          examinationId: exam.id,
-          examinationName: exam.name,
-          subject: exam.subject,
-          category: exam.category,
-          examType: exam.exam_type,
-          versionCode,
-          setLabel: isUniversityExam ? `Master Paper Set ${setIdx}` : 'Master Set A',
-          isUniversity3PaperFormat: isUniversityExam,
-          isMultiSubjectMCQFormat: isNeetOrMultiSubjectMCQ,
-          subjectBreakdown,
-          generatedAt: now,
-          durationMinutes: exam.duration_minutes,
-          totalMarks: totalPaperMarks,
-          instructions: isUniversityExam
-            ? [
-                `University Examination Master Paper Set ${setIdx} (Sealed Enclave).`,
-                'Section A: All short-answer compulsory questions (2 marks each).',
-                'Section B: Medium analytical questions (5 marks each).',
-                'Section C: Long subjective essay questions with internal choice (10/15 marks each).',
-                'Each page is dynamically watermarked with Centre ID, Station Fingerprint, and Operator Hash.',
-              ]
-            : [
-                'All questions are compulsory. Multiple Choice Questions (MCQ) format.',
-                'Negative Marking: +4.0 Marks for correct response, -1.0 Mark for incorrect response.',
-                'Question pool drawn proportionately from multiple constituent subjects (Physics, Chemistry, Biology/Maths).',
-                'Options and question sequence are cryptographically randomized for OMR evaluation.',
-              ],
-          questions: setQuestions.map((q, idx) => ({
-            orderIndex: idx + 1,
-            questionId: q.id,
-            subject: q.subject,
-            topic: q.topic,
-            difficulty: q.difficulty,
-            marks: q.marks,
-            negativeMarks: q.negative_marks,
-            type: q.question_type,
-            content: q.content_text,
-            options: q.options_json ? JSON.parse(q.options_json) : null,
-            correctAnswerEncryptedNotice: '[PROTECTED BY ZEROLEAK CRYPTOGRAPHIC VAULT]',
-          })),
-        };
-
         const rawPaperString = JSON.stringify(paperPayloadObject);
 
         // Section 31-32: AES-256-GCM + RSA-2048 Encryption
@@ -5123,7 +5702,7 @@ async function startServer() {
         const keyShares = splitSecret(rawAesKey, 5, 3);
 
         // Set Set 1 as current active by default
-        const isCurrent = setIdx === 1 ? 1 : 0;
+        const isCurrent = setIndex === 1 ? 1 : 0;
 
         // Record Paper Version
         executeRun(
@@ -5184,9 +5763,9 @@ async function startServer() {
           [uuidv4(), paperVersionId, now]
         );
 
-        generatedSets.push({
-          setIndex: setIdx,
-          setLabel: isUniversityExam ? `Master Paper Set ${setIdx}` : 'Master Set A',
+        resultingSets.push({
+          setIndex,
+          setLabel,
           paperVersionId,
           versionCode,
           checksumSHA256: encryptedPayload.checksumSHA256,
@@ -5208,15 +5787,15 @@ async function startServer() {
         details: {
           isUniversityExam,
           isNeetOrMultiSubjectMCQ,
-          setsCount: generatedSets.length,
-          activeVersionCode: generatedSets[0]?.versionCode,
+          setsCount: resultingSets.length,
+          activeVersionCode: resultingSets[0]?.versionCode,
           subjectBreakdown,
           encryption: 'FIPS 140-2 AES-256-GCM + RSA-2048',
           shamirThreshold: '3-of-5',
         },
       });
 
-      const primarySet = generatedSets[0];
+      const primarySet = resultingSets[0];
       return res.json({
         message: isUniversityExam
           ? `Successfully generated & encrypted MAX 3 UNIVERSITY MASTER PAPER SETS (Set 1, Set 2, Set 3) with independent cryptographic vaults.`
@@ -5232,7 +5811,7 @@ async function startServer() {
         status: 'ENCRYPTED_TIME_LOCKED',
         isUniversity3PaperFormat: isUniversityExam,
         isNeetOrMultiSubjectMCQ: isNeetOrMultiSubjectMCQ,
-        generatedSets,
+        generatedSets: resultingSets,
         subjectBreakdown,
       });
     } catch (e: any) {
@@ -5241,66 +5820,272 @@ async function startServer() {
     }
   });
 
-  // Emergency Paper Regeneration (Section 41)
-  app.post('/api/examinations/:id/emergency-regenerate', authenticateToken, requireApprovedDevice, requireRole(['EXAM_MANAGER']), async (req: Request, res: Response) => {
+  // Emergency Paper Regeneration (Section 41 - Complete End-to-End Cryptographic Replacement Pipeline)
+  app.post('/api/examinations/:id/emergency-regenerate', authenticateToken, requireApprovedDevice, requireRole(['EXAM_MANAGER', 'ORG_OWNER']), async (req: Request, res: Response) => {
     try {
-      const { compromised_question_ids, reason } = req.body;
+      const { compromised_question_ids, reason, quarantine_suspect_questions } = req.body || {};
       const db = await getDb();
       const exam = executeQuery(db, 'SELECT * FROM examinations WHERE id = ? AND org_id = ?', [req.params.id, req.user!.org_id])[0];
-      if (!exam) return res.status(404).json({ error: 'Exam not found.' });
+      if (!exam) return res.status(404).json({ error: 'Examination not found.' });
 
-      const currentVersion = executeQuery(
+      // Verify that a paper was previously generated
+      const allVersions = executeQuery(
         db,
-        'SELECT * FROM paper_versions WHERE exam_id = ? AND is_current = 1',
+        'SELECT * FROM paper_versions WHERE exam_id = ? ORDER BY generated_at DESC',
         [exam.id]
-      )[0];
+      );
+      const currentVersion = allVersions.find((v: any) => v.is_current === 1) || allVersions[0];
+
+      if (!currentVersion && allVersions.length === 0) {
+        return res.status(400).json({
+          error: 'No question paper has been generated yet for this examination. Please use "Generate Paper" first before requesting emergency regeneration.'
+        });
+      }
+
+      // Reason must be validated (minimum 5 characters)
+      const trimmedReason = (reason || '').trim();
+      if (!trimmedReason || trimmedReason.length < 5) {
+        return res.status(422).json({
+          error: 'A valid reason for emergency regeneration is required (minimum 5 characters).'
+        });
+      }
 
       const now = new Date().toISOString();
 
-      // 1. Invalidate current paper version
-      if (currentVersion) {
-        executeRun(
-          db,
-          'UPDATE paper_versions SET is_current = 0, status = "INVALIDATED", invalidated_at = ?, invalidation_reason = ? WHERE id = ?',
-          [now, reason || 'Emergency compromise remediation', currentVersion.id]
-        );
+      // 1. Mark current paper version as SUPERSEDED / COMPROMISED (never delete/destroy history)
+      executeRun(
+        db,
+        'UPDATE paper_versions SET is_current = 0, status = "SUPERSEDED", invalidation_reason = ?, invalidated_at = ? WHERE exam_id = ? AND is_current = 1',
+        [trimmedReason, now, exam.id]
+      );
+
+      // 2. Quarantine suspect/compromised questions from pool
+      const shouldQuarantine = quarantine_suspect_questions !== false;
+      let questionsToQuarantine: string[] = [];
+
+      if (shouldQuarantine) {
+        if (Array.isArray(compromised_question_ids) && compromised_question_ids.length > 0) {
+          questionsToQuarantine = compromised_question_ids;
+        } else if (currentVersion) {
+          // Find all questions belonging to currentVersion
+          const versionQuestions = executeQuery(
+            db,
+            'SELECT question_id FROM paper_questions WHERE paper_version_id = ?',
+            [currentVersion.id]
+          );
+          questionsToQuarantine = versionQuestions.map((q: any) => q.question_id);
+        }
+
+        for (const qId of questionsToQuarantine) {
+          executeRun(db, 'UPDATE questions SET status = "QUARANTINED", updated_at = ? WHERE id = ?', [now, qId]);
+          executeRun(
+            db,
+            `INSERT INTO question_quarantine (id, question_id, reason, reported_by, status, quarantined_at, notes)
+             VALUES (?, ?, ?, ?, 'COMPROMISED', ?, 'Compromised during emergency paper invalidation and regeneration')`,
+            [uuidv4(), qId, trimmedReason, req.user!.id, now]
+          );
+        }
       }
 
-      // 2. Quarantine compromised questions
-      const compromisedList = Array.isArray(compromised_question_ids) ? compromised_question_ids : [];
-      for (const qId of compromisedList) {
-        executeRun(db, 'UPDATE questions SET status = "QUARANTINED", updated_at = ? WHERE id = ?', [now, qId]);
-        executeRun(
-          db,
-          `INSERT INTO question_quarantine (id, question_id, reason, reported_by, status, quarantined_at, notes)
-           VALUES (?, ?, ?, ?, 'COMPROMISED', ?, 'Compromised in security incident')`,
-          [uuidv4(), qId, reason || 'Security Incident Leak Remediation', req.user!.id, now]
-        );
+      // 3. Re-compile replacement paper from remaining verified/eligible questions
+      const compilation = compilePaperPayloadForExam(db, exam, req.user!.org_id, {});
+      if (compilation.validationErrors.length > 0) {
+        return res.status(422).json({
+          error: 'Deterministic Paper Validation Failed during Emergency Regeneration: Insufficient verified clean questions remaining in pool.',
+          validationErrors: compilation.validationErrors,
+          quarantinedCount: questionsToQuarantine.length,
+          invalidatedVersion: currentVersion?.version_code
+        });
       }
 
-      // 3. Log security and regeneration event
+      // 4. Generate new paper version code (e.g. V2, V3)
+      const newVersionNum = allVersions.length + 1;
+      const { isUniversityExam, isNeetOrMultiSubjectMCQ, subjectBreakdown, generatedSets } = compilation;
+      const resultingSets: any[] = [];
+
+      for (const setItem of generatedSets) {
+        const { setIndex, setLabel, setQuestions, totalPaperMarks, paperPayloadObject } = setItem;
+        const paperVersionId = uuidv4();
+
+        // Calculate clear replacement version code: e.g. EXAM-...-V2 or SET-A-V2
+        const categorySlug = (exam.category || 'EXAM').replace(/[^A-Z0-9]/gi, '').toUpperCase().substring(0, 8);
+        const versionCode = `EXAM-${categorySlug}-${setLabel}-V${newVersionNum}`;
+        paperPayloadObject.versionCode = versionCode;
+        paperPayloadObject.setLabel = `${setLabel} (Emergency Re-Gen V${newVersionNum})`;
+
+        const rawPaperString = JSON.stringify(paperPayloadObject);
+
+        // Section 31-32: AES-256-GCM + RSA-2048 Cryptographic Pipeline
+        const { payload: encryptedPayload, rawAesKey } = encryptExamPaper(rawPaperString);
+
+        // Section 33: 3-of-5 Shamir Secret Sharing
+        const keyShares = splitSecret(rawAesKey, 5, 3);
+
+        const isCurrent = setIndex === 1 ? 1 : 0;
+
+        // Record Paper Version (Status: ENCRYPTED, is_current: 1 for primary)
+        executeRun(
+          db,
+          `INSERT INTO paper_versions (id, exam_id, version_code, status, is_current, generated_by, generated_at)
+           VALUES (?, ?, ?, 'ENCRYPTED', ?, ?, ?)`,
+          [paperVersionId, exam.id, versionCode, isCurrent, req.user!.id, now]
+        );
+
+        // Record Paper Questions Mapping
+        setQuestions.forEach((q: any, idx: number) => {
+          const sectionName = isUniversityExam
+            ? (idx < 2 ? 'Section A: Short Compulsory' : idx < 4 ? 'Section B: Medium Analytical' : 'Section C: Long Subjective')
+            : `Section: ${q.subject}`;
+
+          executeRun(
+            db,
+            `INSERT INTO paper_questions (id, paper_version_id, question_id, section_name, order_index, marks)
+             VALUES (?, ?, ?, ?, ?, ?)`,
+            [uuidv4(), paperVersionId, q.id, sectionName, idx + 1, q.marks || 4]
+          );
+        });
+
+        // Record Encrypted Paper Payload
+        executeRun(
+          db,
+          `INSERT INTO encrypted_papers (id, paper_version_id, exam_id, aes_cipher_text, iv_hex, auth_tag_hex, encrypted_aes_key_rsa, key_fingerprint, checksum_sha256, encrypted_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          [
+            uuidv4(),
+            paperVersionId,
+            exam.id,
+            encryptedPayload.cipherText,
+            encryptedPayload.iv,
+            encryptedPayload.authTag,
+            encryptedPayload.encryptedKeyRSA,
+            encryptedPayload.keyFingerprint,
+            encryptedPayload.checksumSHA256,
+            now,
+          ]
+        );
+
+        // Record Shamir Key Shares
+        keyShares.forEach(share => {
+          executeRun(
+            db,
+            `INSERT INTO key_shares (id, paper_version_id, share_index, threshold, total_shares, share_hash, created_at)
+             VALUES (?, ?, ?, 3, 5, ?, ?)`,
+            [uuidv4(), paperVersionId, share.index, share.hash, now]
+          );
+        });
+
+        // Record Validation Success
+        executeRun(
+          db,
+          `INSERT INTO paper_validation_results (id, paper_version_id, is_valid, validation_errors_json, validated_at)
+           VALUES (?, ?, 1, '[]', ?)`,
+          [uuidv4(), paperVersionId, now]
+        );
+
+        resultingSets.push({
+          setIndex,
+          setLabel,
+          paperVersionId,
+          versionCode,
+          checksumSHA256: encryptedPayload.checksumSHA256,
+          keyFingerprint: encryptedPayload.keyFingerprint,
+          questionsCount: setQuestions.length,
+          totalMarks: totalPaperMarks,
+          isCurrent: isCurrent === 1,
+        });
+      }
+
+      const primarySet = resultingSets[0];
+
+      // 5. Update Examination Status to REGENERATED
+      executeRun(
+        db,
+        'UPDATE examinations SET status = "REGENERATED", updated_at = ? WHERE id = ?',
+        [now, exam.id]
+      );
+
+      // 6. Record in regeneration_events
       const regenEventId = uuidv4();
       executeRun(
         db,
         `INSERT INTO regeneration_events (id, exam_id, old_paper_version_id, new_paper_version_id, triggered_by, reason, quarantined_questions_count, timestamp)
-         VALUES (?, ?, ?, 'PENDING_NEW_VERSION', ?, ?, ?, ?)`,
-        [regenEventId, exam.id, currentVersion ? currentVersion.id : 'NONE', req.user!.id, reason || 'Compromise triggered emergency regeneration', compromisedList.length, now]
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+        [
+          regenEventId,
+          exam.id,
+          currentVersion ? currentVersion.id : 'NONE',
+          primarySet.paperVersionId,
+          req.user!.id,
+          trimmedReason,
+          questionsToQuarantine.length,
+          now,
+        ]
       );
 
+      // 7. Security Event & Audit Log
       await logSecurityEvent({
-        event_type: 'EMERGENCY_REGENERATION_TRIGGERED',
+        event_type: 'EMERGENCY_PAPER_REGENERATION',
         severity: 'CRITICAL',
         user_id: req.user!.id,
         org_id: req.user!.org_id,
-        details: { exam_id: exam.id, invalidatedVersion: currentVersion?.version_code, quarantinedCount: compromisedList.length, reason },
+        details: {
+          risk_score: 95,
+          examId: exam.id,
+          examName: exam.name,
+          invalidatedVersion: currentVersion?.version_code,
+          newVersionCode: primarySet.versionCode,
+          newPaperVersionId: primarySet.paperVersionId,
+          quarantinedCount: questionsToQuarantine.length,
+          reason: trimmedReason,
+          checksumSHA256: primarySet.checksumSHA256,
+          keyFingerprint: primarySet.keyFingerprint,
+          shamirQuorum: '3-of-5',
+        },
       });
 
+      await logAuditEvent({
+        event_type: 'EMERGENCY_REGENERATION_COMPLETED',
+        user_id: req.user!.id,
+        org_id: req.user!.org_id,
+        exam_id: exam.id,
+        details: {
+          invalidatedVersion: currentVersion?.version_code,
+          newVersionCode: primarySet.versionCode,
+          quarantinedCount: questionsToQuarantine.length,
+          reason: trimmedReason,
+        },
+      });
+
+      // 8. Alert / Notify Chief Vigilance & Security Auditor (AUDITOR role)
+      executeRun(
+        db,
+        `INSERT INTO notifications (id, user_id, role, org_id, title, message, category, is_read, created_at)
+         VALUES (?, NULL, 'AUDITOR', ?, ?, ?, 'SECURITY', 0, ?)`,
+        [
+          uuidv4(),
+          req.user!.org_id,
+          `CRITICAL: Emergency Paper Regeneration Triggered (${exam.name})`,
+          `Exam "${exam.name}": Previous paper version "${currentVersion?.version_code || 'N/A'}" was permanently invalidated (Reason: "${trimmedReason}"). ${questionsToQuarantine.length} suspect questions quarantined. Replacement version "${primarySet.versionCode}" encrypted and deployed.`,
+          now,
+        ]
+      );
+
       return res.json({
-        message: 'Current version permanently invalidated. Compromised questions quarantined. Ready to generate replacement version.',
+        message: `Emergency question paper regeneration completed. Previous version invalidated. New encrypted paper ${primarySet.versionCode} generated with 3-of-5 Shamir Secret Sharing.`,
         invalidatedVersion: currentVersion?.version_code,
-        quarantinedCount: compromisedList.length,
+        newVersionCode: primarySet.versionCode,
+        paperVersionId: primarySet.paperVersionId,
+        checksumSHA256: primarySet.checksumSHA256,
+        keyFingerprint: primarySet.keyFingerprint,
+        quarantinedCount: questionsToQuarantine.length,
+        shamirSharesCreated: 5,
+        shamirQuorumThreshold: 3,
+        status: 'REGENERATED',
+        generatedSets: resultingSets,
+        subjectBreakdown,
       });
     } catch (e: any) {
+      console.error('Emergency regeneration error:', e);
       return res.status(500).json({ error: e.message });
     }
   });
@@ -5990,8 +6775,29 @@ async function startServer() {
       const paperVersion = executeQuery(db, 'SELECT * FROM paper_versions WHERE id = ? AND exam_id = ? AND status NOT IN (\'INVALIDATED\', \'COMPROMISED\')', [paper_version_id, exam.id])[0];
       if (!paperVersion) return res.status(404).json({ error: 'Approved paper version not found for this examination.' });
 
+      // Enforce Copy Control Rule: Final Authorized Copies = MIN(Manager Authorized Copies, Centre Authorized Copies)
+      const centre = executeQuery(
+        db,
+        'SELECT * FROM examination_centres WHERE exam_id = ? AND (id = ? OR centre_code = ? OR operator_user_id = ?)',
+        [exam.id, req.user!.centre_id || '', req.user!.centre_id || '', req.user!.id]
+      )[0] || executeQuery(db, 'SELECT * FROM examination_centres WHERE exam_id = ? LIMIT 1', [exam.id])[0];
+
+      const managerAuthorized = Number(exam.max_copies || 500);
+      const centreAuthorized = centre ? Number(centre.max_copies || 100) : 100;
+      const finalAllowedCopies = Math.min(managerAuthorized, centreAuthorized);
+
       // Check printed total
-      const totalPrinted = executeQuery(db, 'SELECT COUNT(*) as cnt FROM print_copies WHERE exam_id = ?', [exam_id])[0]?.cnt || 0;
+      const totalPrinted = Number(executeQuery(db, 'SELECT COUNT(*) as cnt FROM print_copies WHERE exam_id = ?', [exam_id])[0]?.cnt || 0);
+
+      if (totalPrinted + count > finalAllowedCopies) {
+        return res.status(403).json({
+          error: `Print quota exceeded. Maximum authorized copies for this centre is ${finalAllowedCopies} (Manager Cap: ${managerAuthorized}, Centre Quota: ${centreAuthorized}). Already printed: ${totalPrinted}, requested: ${count}. Centre can never print above authorized quantity.`,
+          totalPrinted,
+          finalAllowedCopies,
+          managerAuthorized,
+          centreAuthorized,
+        });
+      }
 
       const generatedCopies: Array<{ copyId: string; txHash: string; printedAt: string }> = [];
       const now = new Date().toISOString();

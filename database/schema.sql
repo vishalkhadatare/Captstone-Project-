@@ -233,7 +233,11 @@ CREATE TABLE IF NOT EXISTS examinations (
     total_questions INTEGER NOT NULL DEFAULT 0,
     duration_minutes INTEGER NOT NULL DEFAULT 180,
     status TEXT NOT NULL DEFAULT 'CONFIGURING',
+    max_copies INTEGER DEFAULT 500,
     proctor_enabled INTEGER DEFAULT 1,
+    simulation_status TEXT DEFAULT 'NOT_STARTED',
+    simulated_at TEXT,
+    simulated_by TEXT,
     created_by TEXT NOT NULL,
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL
@@ -255,13 +259,21 @@ CREATE TABLE IF NOT EXISTS examination_configurations (
 CREATE TABLE IF NOT EXISTS examination_centres (
     id TEXT PRIMARY KEY,
     exam_id TEXT NOT NULL,
+    org_id TEXT,
     centre_code TEXT NOT NULL,
     centre_name TEXT NOT NULL,
     city TEXT NOT NULL,
     address TEXT NOT NULL,
+    state TEXT,
+    contact_person TEXT,
+    contact_number TEXT,
+    email TEXT,
     operator_user_id TEXT,
     max_copies INTEGER NOT NULL DEFAULT 100,
-    created_at TEXT NOT NULL
+    status TEXT NOT NULL DEFAULT 'ACTIVE',
+    created_by TEXT,
+    created_at TEXT NOT NULL,
+    updated_at TEXT
 );
 
 -- 17. Questions

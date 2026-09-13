@@ -38,13 +38,22 @@ import {
   Image as ImageIcon,
   ZoomIn,
   Eye,
+  Camera,
+  MapPin,
+  Phone,
+  Mail,
+  ShieldAlert,
+  User as UserIcon,
 } from 'lucide-react';
-import { User, Examination, Question, Organization, ExamType, ExtractedQuestion, QuestionAssignment } from '../../types';
+import { User, Examination, Question, Organization, ExamType, ExtractedQuestion, QuestionAssignment, ExaminationCentre, AddCentreResponse, EmergencyRegenerateResponse } from '../../types';
 import { api } from '../../api';
 import { NavSubTab } from '../Sidebar';
 import { ExamManagerQuestionExtractor } from './ExamManagerQuestionExtractor';
 import { AuthoritySurveillanceDashboard } from '../proctor/AuthoritySurveillanceDashboard';
 import { DynamicMultiPaperGenerator } from './DynamicMultiPaperGenerator';
+import { ExamSimulationModal } from './ExamSimulationModal';
+import { AddCentreModal } from './AddCentreModal';
+import { EmergencyRegenModal } from './EmergencyRegenModal';
 
 interface ExamManagerWorkspaceProps {
   currentUser: User | null;
@@ -222,6 +231,52 @@ export const ExamManagerWorkspace: React.FC<ExamManagerWorkspaceProps> = ({
   const [loading, setLoading] = useState(true);
   const [statusMessage, setStatusMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
   const [dashboardCardFilter, setDashboardCardFilter] = useState<'ALL' | 'VERIFIED' | 'QUARANTINED' | 'READY'>('ALL');
+  const [simulationExam, setSimulationExam] = useState<Examination | null>(null);
+  const [addCentreModalExam, setAddCentreModalExam] = useState<Examination | null>(null);
+  const [emergencyRegenModalExam, setEmergencyRegenModalExam] = useState<Examination | null>(null);
+  const [allCentresList, setAllCentresList] = useState<ExaminationCentre[]>([]);
+  const [centresFilterExamId, setCentresFilterExamId] = useState<string>('ALL');
+
+  const handleSimulateExam = (ex: Examination) => {
+    if (ex.simulation_status === 'COMPLETED') {
+      setStatusMessage({
+        type: 'error',
+        text: 'Simulation already completed. The final question paper cannot be viewed again in simulation mode.',
+      });
+      return;
+    }
+    setSimulationExam(ex);
+  };
+
+  const handleSimulationCompleted = (statusText?: string) => {
+    setSimulationExam(null);
+    setStatusMessage({
+      type: 'success',
+      text: statusText || 'Simulation completed. You may now proceed to Generate Encrypted Paper.',
+    });
+    loadData();
+    onRefresh();
+  };
+
+  const handleCentreAdded = (result: AddCentreResponse) => {
+    setStatusMessage({
+      type: 'success',
+      text: result.copyControl.hasMismatch
+        ? `Centre "${result.centre.centre_name}" registered with quota mismatch: Requested ${result.copyControl.centreAuthorized}, capped at ${result.copyControl.finalAllowed}. Security alert sent to Auditor.`
+        : `Centre "${result.centre.centre_name}" registered successfully. Final authorized copies: ${result.copyControl.finalAllowed}.`,
+    });
+    loadData();
+    onRefresh();
+  };
+
+  const handleEmergencyRegenCompleted = (result: EmergencyRegenerateResponse) => {
+    setStatusMessage({
+      type: 'success',
+      text: `Emergency regeneration complete: Replacement paper ${result.newVersionCode} generated & encrypted. ${result.quarantinedCount} suspect questions quarantined.`,
+    });
+    loadData();
+    onRefresh();
+  };
 
   // Workflow Sub-Navigation
   const [questionWorkflowTab, setQuestionWorkflowTab] = useState<'extraction' | 'manual' | 'matrix'>('extraction');
@@ -322,12 +377,13 @@ export const ExamManagerWorkspace: React.FC<ExamManagerWorkspaceProps> = ({
   const loadData = async () => {
     setLoading(true);
     try {
-      const [orgRes, examRes, qRes, membersRes, assignRes] = await Promise.all([
+      const [orgRes, examRes, qRes, membersRes, assignRes, centresRes] = await Promise.all([
         api.getCurrentOrg().catch(() => ({ organization: null, documents: [], history: [], representatives: [] })),
         api.getExaminations().catch(() => ({ examinations: [] })),
         api.getQuestions().catch(() => ({ questions: [] })),
         api.getOrgMembers().catch(() => ({ members: [] })),
         api.getAssignments().catch(() => ({ assignments: [] })),
+        api.getAllCentres().catch(() => ({ centres: [] })),
       ]);
 
       setOrg(orgRes.organization);
@@ -341,6 +397,7 @@ export const ExamManagerWorkspace: React.FC<ExamManagerWorkspaceProps> = ({
       setSmes(members.filter(m => m.role === 'SME'));
       setTranslators(members.filter(m => m.role === 'TRANSLATOR'));
       setAssignments(assignRes.assignments || []);
+      setAllCentresList(centresRes.centres || []);
     } catch (err: any) {
       console.error('Exam Manager load error:', err);
     } finally {
@@ -711,37 +768,20 @@ export const ExamManagerWorkspace: React.FC<ExamManagerWorkspaceProps> = ({
     }
   };
 
-  const handleEmergencyRegenerate = async (examId: string) => {
-    const reason = prompt('Specify security reason for emergency invalidation & regeneration:');
-    if (!reason) return;
-    try {
-      const res = await api.emergencyRegenerate(examId, { reason, quarantine_suspect_questions: true });
-      setStatusMessage({ type: 'success', text: res.message });
-      loadData();
-    } catch (err: any) {
-      setStatusMessage({ type: 'error', text: err.message });
+  const handleEmergencyRegenerate = (examId: string) => {
+    const target = examinations.find(e => e.id === examId);
+    if (target) {
+      setEmergencyRegenModalExam(target);
     }
   };
 
-  const handleAddCentre = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!selectedExamId) return;
-    try {
-      const res = await api.addCentre(selectedExamId, {
-        centre_code: centreCode,
-        centre_name: centreName,
-        city: centreCity,
-        address: centreAddress,
-        max_copies: centreMaxCopies,
-      });
-      setStatusMessage({ type: 'success', text: res.message });
-      setCentreCode('');
-      setCentreName('');
-      setCentreCity('');
-      setCentreAddress('');
-      loadData();
-    } catch (err: any) {
-      setStatusMessage({ type: 'error', text: err.message });
+  const handleOpenAddCentreModal = (examId?: string) => {
+    const idToUse = examId || selectedExamId || examinations[0]?.id;
+    const target = examinations.find(e => e.id === idToUse);
+    if (target) {
+      setAddCentreModalExam(target);
+    } else if (examinations.length > 0) {
+      setAddCentreModalExam(examinations[0]);
     }
   };
 
@@ -924,10 +964,35 @@ export const ExamManagerWorkspace: React.FC<ExamManagerWorkspaceProps> = ({
                         <span className="px-2.5 py-1 rounded text-[10px] font-bold bg-emerald-100 text-emerald-900">
                           {ex.status}
                         </span>
+
+                        {ex.simulation_status === 'COMPLETED' ? (
+                          <span
+                            className="px-2.5 py-1 bg-emerald-50 text-emerald-800 border border-emerald-300 rounded-lg font-bold text-xs flex items-center gap-1 shadow-2xs"
+                            title="Simulation already completed. The final question paper cannot be viewed again in simulation mode."
+                          >
+                            <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
+                            <span>Simulation Completed ✓</span>
+                          </span>
+                        ) : (
+                          <button
+                            type="button"
+                            onClick={() => handleSimulateExam(ex)}
+                            className="px-3 py-1.5 bg-emerald-700 hover:bg-emerald-600 text-white rounded-lg font-bold text-xs shadow-xs flex items-center gap-1 cursor-pointer transition-all"
+                            title="Start Proctored Final Paper Simulation"
+                          >
+                            <Camera className="w-3.5 h-3.5" />
+                            <span>Simulate Exam</span>
+                          </button>
+                        )}
+
                         <button
                           onClick={() => handleGeneratePaper(ex.id)}
                           disabled={generating || org?.status !== 'VERIFIED'}
-                          className="px-3 py-1.5 bg-emerald-900 hover:bg-emerald-800 disabled:opacity-40 text-white rounded-lg font-bold text-xs shadow-xs cursor-pointer"
+                          className={`px-3 py-1.5 rounded-lg font-bold text-xs shadow-xs cursor-pointer ${
+                            ex.simulation_status === 'COMPLETED'
+                              ? 'bg-emerald-900 hover:bg-emerald-800 text-white ring-2 ring-emerald-500/30'
+                              : 'bg-slate-900 hover:bg-slate-800 text-white disabled:opacity-40'
+                          }`}
                         >
                           Generate Paper
                         </button>
@@ -1148,14 +1213,81 @@ export const ExamManagerWorkspace: React.FC<ExamManagerWorkspaceProps> = ({
                       </div>
                     </div>
 
+                    {/* Delivery Centres & Copy Control Summary */}
+                    {(() => {
+                      const examCentres = allCentresList.filter(c => c.exam_id === ex.id);
+                      const hasAnyMismatch = examCentres.some(c => c.hasMismatch);
+                      const managerCap = ex.max_copies || 500;
+
+                      return (
+                        <div className="flex flex-wrap items-center justify-between gap-2 py-2 px-3 rounded-xl bg-slate-50 border border-slate-200/80 text-xs">
+                          <div className="flex items-center gap-2">
+                            <Building2 className="w-3.5 h-3.5 text-slate-500" />
+                            <span className="font-semibold text-slate-700">
+                              {examCentres.length === 0
+                                ? 'No delivery centres assigned'
+                                : `${examCentres.length} Centre${examCentres.length > 1 ? 's' : ''} Assigned`}
+                            </span>
+                            <span className="text-slate-400 font-mono text-[11px]">
+                              • Manager Cap: <strong className="text-slate-800">{managerCap}</strong>
+                            </span>
+                          </div>
+
+                          <div className="flex items-center gap-2">
+                            {hasAnyMismatch && (
+                              <span
+                                className="px-2 py-0.5 rounded-md bg-amber-100 text-amber-900 border border-amber-300 font-bold text-[10px] flex items-center gap-1"
+                                title="Quota Mismatch: A centre requested more copies than the Manager Authorized Cap. Final copies are restricted."
+                              >
+                                <AlertTriangle className="w-3 h-3 text-amber-600" />
+                                <span>Quota Mismatch</span>
+                              </span>
+                            )}
+                            {examCentres.length > 0 && (
+                              <span className="text-[11px] font-mono text-slate-600 font-medium">
+                                Enforced Copies:{' '}
+                                <strong className="text-emerald-800">
+                                  {Math.min(...examCentres.map(c => c.finalAllowed ?? Math.min(managerCap, c.max_copies)))}
+                                </strong>
+                              </span>
+                            )}
+                          </div>
+                        </div>
+                      );
+                    })()}
+
                     {/* Action Bar */}
                     <div className="flex flex-wrap items-center justify-between gap-2 pt-1 border-t border-slate-100">
                       <div className="flex items-center gap-2">
+                        {ex.simulation_status === 'COMPLETED' ? (
+                          <span
+                            className="px-3.5 py-1.5 rounded-xl bg-emerald-50 text-emerald-800 border border-emerald-300 font-bold text-xs flex items-center gap-1.5 shadow-2xs"
+                            title="Simulation already completed. The final question paper cannot be viewed again in simulation mode."
+                          >
+                            <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
+                            <span>Simulation Completed ✓</span>
+                          </span>
+                        ) : (
+                          <button
+                            type="button"
+                            onClick={() => handleSimulateExam(ex)}
+                            className="px-3.5 py-1.5 rounded-xl bg-emerald-700 hover:bg-emerald-600 text-white font-bold text-xs flex items-center gap-1.5 shadow-xs cursor-pointer transition-all"
+                            title="Start Proctored Final Paper Simulation"
+                          >
+                            <Camera className="w-3.5 h-3.5" />
+                            <span>Simulate Exam</span>
+                          </button>
+                        )}
+
                         <button
                           type="button"
                           onClick={() => handleGeneratePaper(ex.id)}
                           disabled={generating || org?.status !== 'VERIFIED'}
-                          className="px-3.5 py-1.5 rounded-xl bg-slate-900 hover:bg-slate-800 text-white font-bold text-xs flex items-center gap-1.5 shadow-xs disabled:opacity-50 cursor-pointer"
+                          className={`px-3.5 py-1.5 rounded-xl font-bold text-xs flex items-center gap-1.5 shadow-xs disabled:opacity-50 cursor-pointer ${
+                            ex.simulation_status === 'COMPLETED'
+                              ? 'bg-slate-900 hover:bg-slate-800 text-white ring-2 ring-emerald-500/30'
+                              : 'bg-slate-900 hover:bg-slate-800 text-white'
+                          }`}
                         >
                           <Sparkles className="w-3.5 h-3.5 text-amber-400" />
                           <span>{ex.status === 'GENERATED' ? 'Re-Generate & Encrypt' : 'Generate Encrypted Paper'}</span>
@@ -1165,10 +1297,11 @@ export const ExamManagerWorkspace: React.FC<ExamManagerWorkspaceProps> = ({
                           <button
                             type="button"
                             onClick={() => onLaunchCandidateSimulator(ex.id)}
-                            className="px-3.5 py-1.5 rounded-xl bg-emerald-50 hover:bg-emerald-100 text-emerald-900 border border-emerald-200 font-bold text-xs flex items-center gap-1.5 cursor-pointer"
+                            className="px-3 py-1.5 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 border border-slate-200 font-medium text-xs flex items-center gap-1.5 cursor-pointer"
+                            title="Open candidate portal testing simulator"
                           >
-                            <Play className="w-3.5 h-3.5 text-emerald-700 fill-current" />
-                            <span>Simulate Exam &rarr;</span>
+                            <Play className="w-3 h-3 text-slate-500 fill-current" />
+                            <span>Candidate Simulator</span>
                           </button>
                         )}
                       </div>
@@ -1176,21 +1309,20 @@ export const ExamManagerWorkspace: React.FC<ExamManagerWorkspaceProps> = ({
                       <div className="flex items-center gap-2">
                         <button
                           type="button"
-                          onClick={() => {
-                            setSelectedExamId(ex.id);
-                            setStatusMessage({ type: 'success', text: `Selected exam "${ex.name}" for delivery centres.` });
-                          }}
-                          className="text-slate-600 hover:text-slate-900 text-xs font-semibold px-2 py-1 rounded hover:bg-slate-100 cursor-pointer"
+                          onClick={() => setAddCentreModalExam(ex)}
+                          className="text-slate-600 hover:text-slate-900 text-xs font-semibold px-2 py-1 rounded hover:bg-slate-100 cursor-pointer flex items-center gap-1"
                         >
-                          Add Centre
+                          <Building2 className="w-3 h-3 text-slate-500" />
+                          <span>Add Centre</span>
                         </button>
 
                         <button
                           type="button"
-                          onClick={() => handleEmergencyRegenerate(ex.id)}
-                          className="text-rose-600 hover:text-rose-800 text-xs font-semibold px-2 py-1 rounded hover:bg-rose-50 cursor-pointer"
+                          onClick={() => setEmergencyRegenModalExam(ex)}
+                          className="text-rose-600 hover:text-rose-800 text-xs font-semibold px-2 py-1 rounded hover:bg-rose-50 cursor-pointer flex items-center gap-1"
                         >
-                          Emergency Re-Gen
+                          <RotateCcw className="w-3 h-3 text-rose-500" />
+                          <span>Emergency Re-Gen</span>
                         </button>
                       </div>
                     </div>
@@ -2385,13 +2517,40 @@ export const ExamManagerWorkspace: React.FC<ExamManagerWorkspaceProps> = ({
                         </div>
 
                         <div className="flex items-center gap-2">
+                          {ex.simulation_status === 'COMPLETED' ? (
+                            <span
+                              className="px-3 py-2 bg-emerald-50 text-emerald-800 border border-emerald-300 rounded-lg font-bold text-xs flex items-center gap-1.5 shadow-2xs"
+                              title="Simulation already completed. The final question paper cannot be viewed again in simulation mode."
+                            >
+                              <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
+                              <span>Simulation Completed ✓</span>
+                            </span>
+                          ) : (
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                handleSimulateExam(ex);
+                              }}
+                              className="px-3.5 py-2 bg-emerald-700 hover:bg-emerald-600 text-white rounded-lg font-bold text-xs shadow-xs flex items-center gap-1.5 cursor-pointer transition-all"
+                              title="Start Proctored Final Paper Simulation"
+                            >
+                              <Camera className="w-3.5 h-3.5" />
+                              <span>Simulate Exam</span>
+                            </button>
+                          )}
+
                           <button
                             onClick={(e) => {
                               e.stopPropagation();
                               handleGeneratePaper(ex.id);
                             }}
                             disabled={generating || org?.status !== 'VERIFIED'}
-                            className="px-4 py-2 bg-emerald-900 hover:bg-emerald-800 disabled:opacity-40 text-white rounded-lg font-bold text-xs shadow-xs flex items-center gap-1.5"
+                            className={`px-4 py-2 rounded-lg font-bold text-xs shadow-xs flex items-center gap-1.5 ${
+                              ex.simulation_status === 'COMPLETED'
+                                ? 'bg-emerald-900 hover:bg-emerald-800 text-white ring-2 ring-emerald-500/30'
+                                : 'bg-slate-900 hover:bg-slate-800 text-white disabled:opacity-40'
+                            }`}
                           >
                             <Lock className="w-3.5 h-3.5" />
                             <span>{generating ? 'Encrypting...' : `Generate ${type} Paper`}</span>
@@ -2402,10 +2561,11 @@ export const ExamManagerWorkspace: React.FC<ExamManagerWorkspaceProps> = ({
                               e.stopPropagation();
                               handleEmergencyRegenerate(ex.id);
                             }}
-                            className="px-3 py-2 bg-rose-50 hover:bg-rose-100 text-rose-800 border border-rose-200 rounded-lg font-bold text-xs flex items-center gap-1.5"
+                            className="px-3 py-2 bg-rose-50 hover:bg-rose-100 text-rose-800 border border-rose-200 rounded-lg font-bold text-xs flex items-center gap-1.5 cursor-pointer"
+                            title="Emergency Question Paper Regeneration"
                           >
                             <RotateCcw className="w-3.5 h-3.5" />
-                            <span>Invalidate</span>
+                            <span>Emergency Re-Gen</span>
                           </button>
                         </div>
                       </div>
@@ -2441,14 +2601,36 @@ export const ExamManagerWorkspace: React.FC<ExamManagerWorkspaceProps> = ({
                     </p>
                   </div>
 
-                  <button
-                    onClick={() => handleGeneratePaper(currentExam.id)}
-                    disabled={generating || org?.status !== 'VERIFIED'}
-                    className="px-5 py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg font-bold text-xs shadow-md transition-all flex items-center gap-2 disabled:opacity-40"
-                  >
-                    <Lock className="w-4 h-4" />
-                    <span>{generating ? 'Processing Cryptographic Pipeline...' : `Execute ${currentType} Paper Generation`}</span>
-                  </button>
+                  <div className="flex items-center gap-2">
+                    {currentExam.simulation_status === 'COMPLETED' ? (
+                      <span
+                        className="px-4 py-2.5 bg-emerald-500/20 text-emerald-400 border border-emerald-500/40 rounded-lg font-bold text-xs flex items-center gap-1.5"
+                        title="Simulation already completed. The final question paper cannot be viewed again in simulation mode."
+                      >
+                        <CheckCircle2 className="w-4 h-4 text-emerald-400" />
+                        <span>Simulation Completed ✓</span>
+                      </span>
+                    ) : (
+                      <button
+                        type="button"
+                        onClick={() => handleSimulateExam(currentExam)}
+                        className="px-4 py-2.5 bg-emerald-700 hover:bg-emerald-600 text-white rounded-lg font-bold text-xs shadow-md transition-all flex items-center gap-2 cursor-pointer"
+                        title="Start Proctored Final Paper Simulation"
+                      >
+                        <Camera className="w-4 h-4" />
+                        <span>Simulate Exam</span>
+                      </button>
+                    )}
+
+                    <button
+                      onClick={() => handleGeneratePaper(currentExam.id)}
+                      disabled={generating || org?.status !== 'VERIFIED'}
+                      className="px-5 py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg font-bold text-xs shadow-md transition-all flex items-center gap-2 disabled:opacity-40"
+                    >
+                      <Lock className="w-4 h-4" />
+                      <span>{generating ? 'Processing Cryptographic Pipeline...' : `Execute ${currentType} Paper Generation`}</span>
+                    </button>
+                  </div>
                 </div>
 
                 {/* TYPE-SPECIFIC ENGINE ARCHITECTURE */}
@@ -2608,79 +2790,199 @@ export const ExamManagerWorkspace: React.FC<ExamManagerWorkspaceProps> = ({
       {/* EXAMINATION CENTRES */}
       {activeSubTab === 'examination_centres' && (
         <div className="space-y-6">
-          <div className="p-6 rounded-xl bg-white border border-slate-200 shadow-xs space-y-4">
-            <h3 className="text-base font-bold text-slate-900">Add Examination Delivery Centre</h3>
-            <form onSubmit={handleAddCentre} className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
+          {/* Header Card */}
+          <div className="p-6 rounded-2xl bg-white border border-slate-200/90 shadow-xs flex flex-wrap items-center justify-between gap-4">
+            <div className="flex items-center gap-3">
+              <div className="p-2.5 rounded-xl bg-emerald-50 text-emerald-900 border border-emerald-200">
+                <Building2 className="w-5 h-5" />
+              </div>
               <div>
-                <label className="block text-slate-700 font-bold mb-1">Target Examination</label>
-                <select
-                  value={selectedExamId}
-                  onChange={e => setSelectedExamId(e.target.value)}
-                  className="w-full px-3 py-2 rounded-lg bg-slate-50 border border-slate-300 text-slate-900"
-                >
-                  {examinations.map(ex => (
-                    <option key={ex.id} value={ex.id}>{ex.name}</option>
-                  ))}
-                </select>
+                <h3 className="text-base font-bold text-slate-900">Examination Delivery Centres</h3>
+                <p className="text-xs text-slate-500">
+                  Manage authorized test centres, copy control quotas (MIN rule), and real-time mismatch alerts.
+                </p>
               </div>
+            </div>
 
-              <div>
-                <label className="block text-slate-700 font-bold mb-1">Centre Code</label>
-                <input
-                  type="text"
-                  value={centreCode}
-                  onChange={e => setCentreCode(e.target.value)}
-                  placeholder="e.g. CTR-DELHI-101"
-                  required
-                  className="w-full px-3 py-2 rounded-lg bg-slate-50 border border-slate-300 text-slate-900"
-                />
-              </div>
+            <div className="flex items-center gap-2.5">
+              <select
+                value={centresFilterExamId}
+                onChange={e => setCentresFilterExamId(e.target.value)}
+                className="px-3 py-2 rounded-xl bg-slate-50 border border-slate-200 text-xs font-medium text-slate-700 focus:bg-white"
+              >
+                <option value="ALL">All Examinations ({allCentresList.length} centres)</option>
+                {examinations.map(ex => {
+                  const count = allCentresList.filter(c => c.exam_id === ex.id).length;
+                  return (
+                    <option key={ex.id} value={ex.id}>
+                      {ex.name} ({count})
+                    </option>
+                  );
+                })}
+              </select>
 
-              <div>
-                <label className="block text-slate-700 font-bold mb-1">Centre Name</label>
-                <input
-                  type="text"
-                  value={centreName}
-                  onChange={e => setCentreName(e.target.value)}
-                  placeholder="e.g. National Institute of Technology Centre 1"
-                  required
-                  className="w-full px-3 py-2 rounded-lg bg-slate-50 border border-slate-300 text-slate-900"
-                />
-              </div>
-
-              <div>
-                <label className="block text-slate-700 font-bold mb-1">City</label>
-                <input
-                  type="text"
-                  value={centreCity}
-                  onChange={e => setCentreCity(e.target.value)}
-                  placeholder="e.g. New Delhi"
-                  required
-                  className="w-full px-3 py-2 rounded-lg bg-slate-50 border border-slate-300 text-slate-900"
-                />
-              </div>
-
-              <div>
-                <label className="block text-slate-700 font-bold mb-1">Max Authorized Copies</label>
-                <input
-                  type="number"
-                  value={centreMaxCopies}
-                  onChange={e => setCentreMaxCopies(Number(e.target.value))}
-                  required
-                  className="w-full px-3 py-2 rounded-lg bg-slate-50 border border-slate-300 text-slate-900"
-                />
-              </div>
-
-              <div className="flex items-end">
-                <button
-                  type="submit"
-                  className="w-full py-2 bg-emerald-900 hover:bg-emerald-800 text-white rounded-lg font-bold text-xs shadow-xs"
-                >
-                  Register Examination Centre
-                </button>
-              </div>
-            </form>
+              <button
+                type="button"
+                onClick={() => handleOpenAddCentreModal(centresFilterExamId !== 'ALL' ? centresFilterExamId : undefined)}
+                className="px-4 py-2 bg-emerald-900 hover:bg-emerald-800 text-white rounded-xl font-bold text-xs shadow-xs flex items-center gap-1.5 transition-all cursor-pointer"
+              >
+                <PlusCircle className="w-4 h-4" />
+                <span>Add Centre</span>
+              </button>
+            </div>
           </div>
+
+          {/* Centres Grid */}
+          {(() => {
+            const filteredCentres = centresFilterExamId === 'ALL'
+              ? allCentresList
+              : allCentresList.filter(c => c.exam_id === centresFilterExamId);
+
+            if (filteredCentres.length === 0) {
+              return (
+                <div className="p-12 text-center rounded-2xl bg-white border border-slate-200 shadow-xs space-y-4">
+                  <div className="w-12 h-12 rounded-2xl bg-slate-100 text-slate-400 mx-auto flex items-center justify-center">
+                    <Building2 className="w-6 h-6" />
+                  </div>
+                  <div className="space-y-1">
+                    <h4 className="font-bold text-sm text-slate-800">No Examination Centres Registered</h4>
+                    <p className="text-xs text-slate-500 max-w-md mx-auto">
+                      Add delivery centres to assign examinations, configure authorized printing quotas, and enforce tamper-proof copy control limits.
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => handleOpenAddCentreModal()}
+                    className="px-4 py-2 bg-emerald-900 hover:bg-emerald-800 text-white rounded-xl font-bold text-xs shadow-xs inline-flex items-center gap-1.5 cursor-pointer"
+                  >
+                    <PlusCircle className="w-4 h-4" />
+                    <span>Add Examination Centre</span>
+                  </button>
+                </div>
+              );
+            }
+
+            return (
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                {filteredCentres.map(centre => {
+                  const exam = examinations.find(e => e.id === centre.exam_id);
+                  const managerCap = Number(exam?.max_copies || centre.managerAuthorized || 500);
+                  const centreQuota = Number(centre.max_copies || centre.centreAuthorized || 100);
+                  const finalAllowed = Math.min(managerCap, centreQuota);
+                  const hasMismatch = centre.hasMismatch || managerCap !== centreQuota;
+
+                  return (
+                    <div
+                      key={centre.id}
+                      className={`p-5 rounded-2xl bg-white border shadow-xs space-y-3.5 transition-all ${
+                        hasMismatch ? 'border-amber-300 ring-1 ring-amber-300/50' : 'border-slate-200'
+                      }`}
+                    >
+                      {/* Top row */}
+                      <div className="flex items-start justify-between gap-3">
+                        <div>
+                          <div className="flex items-center gap-2">
+                            <span className="font-mono text-xs font-bold px-2 py-0.5 rounded-md bg-slate-900 text-white">
+                              {centre.centre_code}
+                            </span>
+                            <span className="inline-flex items-center px-2 py-0.5 rounded-md text-[10px] font-bold bg-emerald-50 text-emerald-800 border border-emerald-200">
+                              {centre.status || 'ACTIVE'}
+                            </span>
+                          </div>
+                          <h4 className="font-bold text-sm text-slate-900 mt-1.5">{centre.centre_name}</h4>
+                          <p className="text-xs text-slate-500 flex items-center gap-1 mt-0.5">
+                            <MapPin className="w-3 h-3 text-slate-400 shrink-0" />
+                            <span>{centre.address ? `${centre.address}, ` : ''}{centre.city}{centre.state ? `, ${centre.state}` : ''}</span>
+                          </p>
+                        </div>
+
+                        {hasMismatch && (
+                          <span
+                            className="px-2.5 py-1 rounded-lg bg-amber-100 text-amber-900 border border-amber-300 font-bold text-[10px] flex items-center gap-1 shrink-0"
+                            title="Quota Mismatch: Requested copies exceed Manager Authorized Cap. Backend hard limit enforced."
+                          >
+                            <AlertTriangle className="w-3.5 h-3.5 text-amber-600" />
+                            <span>Quota Mismatch</span>
+                          </span>
+                        )}
+                      </div>
+
+                      {/* Examination info */}
+                      {exam && (
+                        <div className="p-2.5 rounded-xl bg-slate-50 border border-slate-200/80 text-xs">
+                          <span className="text-[10px] text-slate-400 block uppercase font-bold">Assigned Examination</span>
+                          <span className="font-bold text-slate-800">{exam.name}</span>
+                          <span className="text-slate-500 font-medium"> ({exam.subject})</span>
+                        </div>
+                      )}
+
+                      {/* Contact details */}
+                      {(centre.contact_person || centre.contact_number || centre.email) && (
+                        <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 text-xs py-1 border-t border-slate-100">
+                          {centre.contact_person && (
+                            <div className="flex items-center gap-1 text-slate-600 truncate" title={centre.contact_person}>
+                              <UserIcon className="w-3 h-3 text-slate-400 shrink-0" />
+                              <span className="truncate">{centre.contact_person}</span>
+                            </div>
+                          )}
+                          {centre.contact_number && (
+                            <div className="flex items-center gap-1 text-slate-600 truncate" title={centre.contact_number}>
+                              <Phone className="w-3 h-3 text-slate-400 shrink-0" />
+                              <span className="truncate font-mono">{centre.contact_number}</span>
+                            </div>
+                          )}
+                          {centre.email && (
+                            <div className="flex items-center gap-1 text-slate-600 truncate" title={centre.email}>
+                              <Mail className="w-3 h-3 text-slate-400 shrink-0" />
+                              <span className="truncate">{centre.email}</span>
+                            </div>
+                          )}
+                        </div>
+                      )}
+
+                      {/* Copy Control Breakdown */}
+                      <div className="p-3 rounded-xl bg-slate-50 border border-slate-200 space-y-2">
+                        <div className="flex items-center justify-between text-[11px]">
+                          <span className="font-bold text-slate-700 flex items-center gap-1">
+                            <ShieldAlert className="w-3 h-3 text-emerald-700" />
+                            Copy Control Rule: MIN(Manager Cap, Centre Quota)
+                          </span>
+                          <span className="text-slate-500">
+                            Printed: <strong className="text-slate-800">{centre.totalPrinted || 0}</strong>
+                          </span>
+                        </div>
+
+                        <div className="grid grid-cols-3 gap-2 text-center text-xs">
+                          <div className="p-1.5 rounded-lg bg-white border border-slate-200">
+                            <span className="block text-[10px] text-slate-500">Manager Cap</span>
+                            <span className="font-bold text-slate-800">{managerCap}</span>
+                          </div>
+                          <div className="p-1.5 rounded-lg bg-white border border-slate-200">
+                            <span className="block text-[10px] text-slate-500">Centre Quota</span>
+                            <span className="font-bold text-slate-800">{centreQuota}</span>
+                          </div>
+                          <div className={`p-1.5 rounded-lg border ${
+                            hasMismatch
+                              ? 'bg-amber-50 border-amber-300 text-amber-900'
+                              : 'bg-emerald-50 border-emerald-300 text-emerald-900'
+                          }`}>
+                            <span className="block text-[10px] font-medium opacity-80">Final Authorized</span>
+                            <span className="font-black">{finalAllowed}</span>
+                          </div>
+                        </div>
+
+                        {hasMismatch && (
+                          <p className="text-[10px] text-amber-800 font-medium leading-tight">
+                            Alert logged: Centre requested {centreQuota} copies, but Manager cap is {managerCap}. Hard limit restricted to {finalAllowed}.
+                          </p>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            );
+          })()}
         </div>
       )}
 
@@ -2721,6 +3023,37 @@ export const ExamManagerWorkspace: React.FC<ExamManagerWorkspaceProps> = ({
             </div>
           </div>
         </div>
+      )}
+
+      {/* Strictly One-Time Proctored Exam Simulation Modal */}
+      {simulationExam && currentUser && (
+        <ExamSimulationModal
+          exam={simulationExam}
+          currentUser={currentUser}
+          onClose={() => setSimulationExam(null)}
+          onCompleted={handleSimulationCompleted}
+        />
+      )}
+
+      {/* Add Examination Centre Modal */}
+      {addCentreModalExam && (
+        <AddCentreModal
+          exam={addCentreModalExam}
+          isOpen={Boolean(addCentreModalExam)}
+          onClose={() => setAddCentreModalExam(null)}
+          onSuccess={handleCentreAdded}
+        />
+      )}
+
+      {/* Emergency Paper Regeneration Modal */}
+      {emergencyRegenModalExam && (
+        <EmergencyRegenModal
+          exam={emergencyRegenModalExam}
+          currentVersionCode={emergencyRegenModalExam.version_code}
+          isOpen={Boolean(emergencyRegenModalExam)}
+          onClose={() => setEmergencyRegenModalExam(null)}
+          onSuccess={handleEmergencyRegenCompleted}
+        />
       )}
     </div>
   );

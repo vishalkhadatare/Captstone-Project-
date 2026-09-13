@@ -25,6 +25,12 @@ import {
   GeneratedPaper,
   GeneratedPaperQuestion,
   CandidateAssignmentItem,
+  ExamSimulationStartResponse,
+  ExaminationCentre,
+  AddCentrePayload,
+  AddCentreResponse,
+  EmergencyRegeneratePayload,
+  EmergencyRegenerateResponse,
 } from './types';
 
 export const DEVICE_APPROVAL_EVENT = 'zeroleak:device-approval-needed';
@@ -347,8 +353,10 @@ export const api = {
   // Examinations
   getExaminations: () => request<{ examinations: Examination[] }>('/api/examinations'),
   createExamination: (payload: any) => request<{ message: string; examId: string }>('/api/examinations', { method: 'POST', body: JSON.stringify(payload) }),
-  getExaminationDetails: (id: string) => request<{ examination: Examination; configuration: any; centres: any[]; versions: any[] }>(`/api/examinations/${id}`),
-  addCentre: (examId: string, payload: any) => request<{ message: string; centreId: string }>(`/api/examinations/${examId}/centres`, { method: 'POST', body: JSON.stringify(payload) }),
+  getExaminationDetails: (id: string) => request<{ examination: Examination; configuration: any; centres: ExaminationCentre[]; versions: any[] }>(`/api/examinations/${id}`),
+  addCentre: (examId: string, payload: AddCentrePayload) => request<AddCentreResponse>(`/api/examinations/${examId}/centres`, { method: 'POST', body: JSON.stringify(payload) }),
+  getCentresForExam: (examId: string) => request<{ centres: ExaminationCentre[]; managerAuthorized: number }>(`/api/examinations/${examId}/centres`),
+  getAllCentres: () => request<{ centres: ExaminationCentre[] }>('/api/centres'),
   analyzeTheoryPattern: (examId: string, reference_text: string) => request<{ message: string; pattern: any }>(`/api/examinations/${examId}/analyze-pattern`, { method: 'POST', body: JSON.stringify({ reference_text }) }),
   confirmPattern: (examId: string, payload: any) => request<{ message: string }>(`/api/examinations/${examId}/confirm-pattern`, { method: 'POST', body: JSON.stringify(payload) }),
 
@@ -443,7 +451,24 @@ export const api = {
       method: 'POST',
       body: JSON.stringify({ versionId }),
     }),
-  emergencyRegenerate: (examId: string, payload: any) => request<{ message: string; invalidatedVersion?: string; quarantinedCount: number }>(`/api/examinations/${examId}/emergency-regenerate`, { method: 'POST', body: JSON.stringify(payload) }),
+  emergencyRegenerate: (examId: string, payload: EmergencyRegeneratePayload) => request<EmergencyRegenerateResponse>(`/api/examinations/${examId}/emergency-regenerate`, { method: 'POST', body: JSON.stringify(payload) }),
+  
+  // Exam Simulation (Manager strictly one-time proctored preview)
+  startExamSimulation: (examId: string, payload?: any) =>
+    request<ExamSimulationStartResponse>(`/api/examinations/${examId}/simulate/start`, {
+      method: 'POST',
+      body: payload ? JSON.stringify(payload) : undefined,
+    }),
+  logSimulationEvent: (examId: string, payload: { sessionToken: string; eventType: string; details?: any }) =>
+    request<{ success: boolean; recordedEvent?: any }>(`/api/examinations/${examId}/simulate/event`, {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    }),
+  completeExamSimulation: (examId: string, payload: { sessionToken?: string; reason?: string }) =>
+    request<{ message: string; simulation_status: string; completedAt: string }>(`/api/examinations/${examId}/simulate/complete`, {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    }),
 
   // Secure Delivery & Printing
   getReleasedExams: () => request<{ examinations: Examination[] }>('/api/delivery/released-exams'),
