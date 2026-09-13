@@ -221,3 +221,46 @@ export function generateCopyId(counter: number): string {
 export function generateTxHash(content: string): string {
   return `0x${crypto.createHash('sha256').update(content + Date.now().toString()).digest('hex')}`;
 }
+
+/**
+ * Verify an ECDSA P-256 IEEE-P1363 signature produced by a browser WebCrypto
+ * key pair against an SPKI public key (base64) and challenge (base64).
+ */
+export function verifyDeviceSignature(
+  publicKeySpkiB64: string,
+  challengeB64: string,
+  signatureB64: string,
+): boolean {
+  try {
+    if (!publicKeySpkiB64 || !challengeB64 || !signatureB64) return false;
+
+    const publicKey = crypto.createPublicKey({
+      key: Buffer.from(publicKeySpkiB64, 'base64'),
+      format: 'der',
+      type: 'spki',
+    });
+
+    const challenge = Buffer.from(challengeB64, 'base64');
+    const signature = Buffer.from(signatureB64, 'base64');
+
+    return crypto.verify(
+      'sha256',
+      challenge,
+      { key: publicKey, dsaEncoding: 'ieee-p1363' },
+      signature,
+    );
+  } catch {
+    return false;
+  }
+}
+
+/** Cryptographically strong random challenge (base64) for device-binding. */
+export function generateDeviceChallenge(byteLength: number = 32): string {
+  return crypto.randomBytes(byteLength).toString('base64');
+}
+
+/** Stable device fingerprint derived from the device's public key. */
+export function deviceFingerprintFromPublicKey(publicKeyB64: string): string {
+  return 'KEY-' + crypto.createHash('sha256').update(publicKeyB64 || '').digest('hex').substring(0, 24);
+}
+

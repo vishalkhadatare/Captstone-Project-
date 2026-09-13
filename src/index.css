@@ -2,6 +2,7 @@
 
 :root {
   color-scheme: light;
+  --header-height: 4rem;
   --strands-green: #00cc5f;
   --strands-green-hover: #00e069;
   --strands-green-glow: rgba(0, 204, 95, 0.35);
@@ -24,6 +25,7 @@
 
 html.dark {
   color-scheme: dark;
+  --header-height: 4rem;
   --strands-green: #00cc5f;
   --strands-green-hover: #00ff77;
   --strands-green-glow: rgba(0, 204, 95, 0.45);

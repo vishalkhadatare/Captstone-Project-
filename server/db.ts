@@ -442,12 +442,29 @@ function initializeSchema(db: Database) {
       setting_value TEXT NOT NULL
     );
 
+    CREATE TABLE IF NOT EXISTS exam_simulation_sessions (
+      id TEXT PRIMARY KEY,
+      exam_id TEXT NOT NULL,
+      user_id TEXT NOT NULL,
+      session_token TEXT NOT NULL UNIQUE,
+      status TEXT NOT NULL DEFAULT 'ACTIVE',
+      paper_snapshot_json TEXT,
+      events_json TEXT,
+      duration_seconds INTEGER DEFAULT 900,
+      started_at TEXT NOT NULL,
+      expires_at TEXT NOT NULL,
+      completed_at TEXT,
+      created_at TEXT NOT NULL
+    );
+
     CREATE INDEX IF NOT EXISTS idx_trusted_devices_user ON trusted_devices(user_id);
     CREATE INDEX IF NOT EXISTS idx_trusted_devices_org ON trusted_devices(org_id);
     CREATE INDEX IF NOT EXISTS idx_trusted_devices_uuid ON trusted_devices(device_uuid);
     CREATE INDEX IF NOT EXISTS idx_trusted_devices_status ON trusted_devices(status);
     CREATE INDEX IF NOT EXISTS idx_device_challenges_user ON device_challenges(user_id, purpose);
     CREATE INDEX IF NOT EXISTS idx_device_replacement_user ON device_replacement_requests(user_id, status);
+    CREATE INDEX IF NOT EXISTS idx_exam_simulations_exam ON exam_simulation_sessions(exam_id);
+    CREATE INDEX IF NOT EXISTS idx_exam_simulations_token ON exam_simulation_sessions(session_token);
 
     -- Device Events
     CREATE TABLE IF NOT EXISTS device_events (
@@ -496,13 +513,21 @@ function initializeSchema(db: Database) {
     CREATE TABLE IF NOT EXISTS examination_centres (
       id TEXT PRIMARY KEY,
       exam_id TEXT NOT NULL,
+      org_id TEXT,
       centre_code TEXT NOT NULL,
       centre_name TEXT NOT NULL,
       city TEXT NOT NULL,
+      state TEXT,
       address TEXT NOT NULL,
+      contact_person TEXT,
+      contact_number TEXT,
+      email TEXT,
       operator_user_id TEXT,
       max_copies INTEGER NOT NULL DEFAULT 100,
-      created_at TEXT NOT NULL
+      status TEXT NOT NULL DEFAULT 'ACTIVE',
+      created_by TEXT,
+      created_at TEXT NOT NULL,
+      updated_at TEXT
     );
 
     -- Questions
@@ -988,7 +1013,22 @@ function initializeSchema(db: Database) {
   safeAddColumn('trusted_devices', 'disabled_at TEXT');
   safeAddColumn('trusted_devices', 'replacement_of_device_id TEXT');
 
+  safeAddColumn('organizations', 'state TEXT');
+
   safeAddColumn('examinations', 'proctor_enabled INTEGER DEFAULT 1');
+  safeAddColumn('examinations', 'simulation_status TEXT DEFAULT "NOT_STARTED"');
+  safeAddColumn('examinations', 'simulated_at TEXT');
+  safeAddColumn('examinations', 'simulated_by TEXT');
+  safeAddColumn('examinations', 'max_copies INTEGER DEFAULT 500');
+
+  safeAddColumn('examination_centres', 'org_id TEXT');
+  safeAddColumn('examination_centres', 'state TEXT');
+  safeAddColumn('examination_centres', 'contact_person TEXT');
+  safeAddColumn('examination_centres', 'contact_number TEXT');
+  safeAddColumn('examination_centres', 'email TEXT');
+  safeAddColumn('examination_centres', 'status TEXT DEFAULT "ACTIVE"');
+  safeAddColumn('examination_centres', 'created_by TEXT');
+  safeAddColumn('examination_centres', 'updated_at TEXT');
 
   safeAddColumn('proctor_events', 'session_id TEXT');
   safeAddColumn('proctor_events', 'user_id TEXT');
