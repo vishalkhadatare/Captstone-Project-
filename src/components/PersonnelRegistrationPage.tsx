@@ -285,28 +285,38 @@ export const PersonnelRegistrationPage: React.FC<PersonnelRegistrationPageProps>
   const currentRoleMeta = ROLES.find(r => r.role === selectedRole)!;
 
   return (
-    <div className="min-h-screen cyber-mesh-bg relative flex flex-col justify-center py-10 px-4 sm:px-6 lg:px-8 font-sans overflow-hidden selection:bg-emerald-800 selection:text-white">
-      {/* Background Ambient Decorative Lights */}
-      <div className="cyber-grid pointer-events-none absolute inset-0 opacity-40" />
-      <div className="absolute -top-32 -left-32 w-96 h-96 bg-emerald-500/10 rounded-full blur-3xl pointer-events-none" />
-      <div className="absolute top-1/3 -right-32 w-96 h-96 bg-teal-500/10 rounded-full blur-3xl pointer-events-none" />
-      <div className="absolute -bottom-32 left-1/3 w-96 h-96 bg-blue-500/10 rounded-full blur-3xl pointer-events-none" />
+    <div className="min-h-screen bg-slate-50 dark:bg-[#080B11] relative flex flex-col justify-center py-10 px-4 sm:px-6 lg:px-8 font-['Figtree',sans-serif] overflow-hidden selection:bg-[#00cc5f] selection:text-white transition-colors duration-300">
+      {/* Ambient Glowing Wave Curves Background */}
+      <div className="absolute inset-0 pointer-events-none overflow-hidden select-none z-0">
+        <img
+          src="/curve-primary.svg"
+          alt=""
+          className="absolute -top-32 -left-20 w-[950px] max-w-none opacity-40 dark:opacity-30 mix-blend-screen filter blur-[8px] animate-pulse"
+          style={{ animationDuration: '9s' }}
+        />
+        <img
+          src="/curve-secondary.svg"
+          alt=""
+          className="absolute -bottom-40 -right-20 w-[900px] max-w-none opacity-40 dark:opacity-25 mix-blend-screen filter blur-[10px]"
+        />
+        <div className="absolute inset-0 bg-[radial-gradient(circle_at_top,_rgba(0,204,95,0.06),transparent_65%)]" />
+      </div>
 
       <div className="max-w-4xl mx-auto w-full relative z-10">
         {/* Top Enclave Bar */}
         <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 mb-6">
           <button
             onClick={onBackToLanding}
-            className="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-full bg-white/90 border border-slate-200/90 text-xs font-semibold text-slate-600 hover:text-emerald-800 hover:border-emerald-300 shadow-xs backdrop-blur-sm transition-all group cursor-pointer"
+            className="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-full bg-white/80 dark:bg-[#0B0F17]/65 border border-slate-200/90 dark:border-white/10 text-xs font-semibold text-slate-600 dark:text-slate-300 hover:text-emerald-800 dark:hover:text-[#00cc5f] hover:border-emerald-300 dark:hover:border-[#00cc5f]/30 shadow-xs backdrop-blur-xl transition-all group cursor-pointer"
           >
             <ArrowLeft className="w-4 h-4 transition-transform group-hover:-translate-x-1" />
             <span>Back to Portal Overview</span>
           </button>
 
-          <div className="inline-flex items-center gap-2.5 px-3.5 py-1 rounded-full bg-emerald-50/90 border border-emerald-200 text-[11px] font-bold text-emerald-900 shadow-2xs backdrop-blur-sm">
+          <div className="inline-flex items-center gap-2.5 px-3.5 py-1 rounded-full bg-emerald-50/90 dark:bg-[#00cc5f]/10 border border-emerald-200 dark:border-[#00cc5f]/20 text-[11px] font-bold text-emerald-900 dark:text-[#00cc5f] shadow-2xs backdrop-blur-xl">
             <span className="relative flex h-2 w-2">
               <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
-              <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-600"></span>
+              <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-600 dark:bg-[#00cc5f]"></span>
             </span>
             <span className="tracking-wide">OPERATIONAL PERSONNEL ACCREDITATION PORTAL</span>
           </div>
@@ -314,7 +324,7 @@ export const PersonnelRegistrationPage: React.FC<PersonnelRegistrationPageProps>
 
         {/* Success Modal / Card */}
         {registrationComplete ? (
-          <div className="stat-card-luxury p-8 sm:p-10 rounded-3xl bg-white/95 backdrop-blur-xl border border-slate-200/90 shadow-[0_20px_50px_-10px_rgba(15,23,42,0.08)] space-y-6 relative overflow-hidden">
+          <div className="stat-card-luxury p-8 sm:p-10 rounded-3xl bg-white/80 dark:bg-[#0B0F17]/65 backdrop-blur-2xl border border-slate-200/90 dark:border-white/15 shadow-2xl space-y-6 relative overflow-hidden">
             <div className="absolute top-0 left-0 right-0 h-2 bg-gradient-to-r from-emerald-600 via-teal-500 to-cyan-500" />
 
             <div className="flex items-center gap-4">
@@ -393,19 +403,19 @@ export const PersonnelRegistrationPage: React.FC<PersonnelRegistrationPageProps>
           </div>
         ) : (
           /* Registration Form Shell */
-          <div className="stat-card-luxury p-6 sm:p-9 rounded-3xl bg-white/95 backdrop-blur-xl border border-slate-200/90 shadow-[0_20px_50px_-10px_rgba(15,23,42,0.08)] space-y-7 relative overflow-hidden">
+          <div className="stat-card-luxury p-6 sm:p-9 rounded-3xl bg-white/80 dark:bg-[#0B0F17]/65 backdrop-blur-2xl border border-slate-200/90 dark:border-white/15 shadow-2xl space-y-7 relative overflow-hidden">
             <div className="absolute top-0 left-0 right-0 h-2 bg-gradient-to-r from-blue-600 via-purple-600 to-teal-600" />
 
             {/* Header Lockup */}
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-slate-100 pb-5">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-slate-100 dark:border-white/10 pb-5">
               <div className="space-y-1.5">
                 <div className="flex items-center gap-3">
                   <ZeroLeakLogo variant="icon" size="sm" imgHeightClass="h-10 w-10" />
                   <div>
-                    <h1 className="text-2xl font-black text-slate-950 tracking-tight leading-tight">
+                    <h1 className="text-2xl font-black text-slate-950 dark:text-white tracking-tight leading-tight">
                       Examination Personnel Registration
                     </h1>
-                    <p className="text-[11px] text-slate-500 font-medium">
+                    <p className="text-[11px] text-slate-500 dark:text-slate-400 font-medium">
                       Accreditation for Subject Matter Experts, Linguistic Translators & Centre Superintendents
                     </p>
                   </div>

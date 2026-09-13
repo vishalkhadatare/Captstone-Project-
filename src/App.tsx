@@ -14,6 +14,7 @@ import { AuditorWorkspace } from './components/workspaces/AuditorWorkspace';
 import { UserProfileSettings } from './components/workspaces/UserProfileSettings';
 import { DeviceApprovalModal } from './components/DeviceApprovalModal';
 import { CandidateExamPortal } from './components/proctor/CandidateExamPortal';
+import { ErrorBoundary } from './components/ErrorBoundary';
 import { User } from './types';
 import { api, getStoredUser, clearStoredAuth, setStoredAuth, DEVICE_APPROVAL_EVENT } from './api';
 
@@ -51,6 +52,7 @@ export function App() {
     question_pools: 'question-pools',
     blueprint_pattern: 'blueprint-pattern',
     paper_generation: 'paper-generation',
+    multi_paper_generator: 'multi-paper-generator',
     paper_versions: 'paper-versions',
     examination_centres: 'examination-centres',
     assigned_questions: 'assigned-questions',
@@ -235,7 +237,48 @@ export function App() {
 
   // Logged-in User Dashboard Workspace
   return (
-    <div className="min-h-screen cyber-mesh-bg text-slate-900 flex flex-col font-sans selection:bg-emerald-800 selection:text-white">
+    <div className="min-h-screen bg-[#FAFCFA] dark:bg-[#080B11] text-slate-900 dark:text-slate-100 flex flex-col font-['Figtree',sans-serif] selection:bg-[#00cc5f] selection:text-black relative overflow-x-hidden transition-colors duration-300">
+      {/* Background Ambient Glowing Wave Curves & Aurora */}
+      <div
+        className="fixed inset-0 pointer-events-none overflow-hidden z-0"
+        style={{
+          top: '56px',
+          filter: 'blur(10px) drop-shadow(0 0 25px rgba(0,255,119,0.3))',
+          opacity: 0.32,
+        }}
+      >
+        <div
+          className="absolute inset-0 w-full h-full"
+          style={{
+            backgroundImage: 'url(/curve-secondary.svg)',
+            backgroundRepeat: 'repeat',
+            backgroundPosition: '0 0',
+          }}
+        />
+        <div
+          className="absolute inset-0 w-full h-full"
+          style={{
+            backgroundImage: 'url(/curve-primary.svg)',
+            backgroundRepeat: 'repeat',
+            backgroundPosition: '0 0',
+          }}
+        />
+      </div>
+
+      {/* Radiant Mint Ambient Halos (strandsagents.com style) */}
+      <div
+        className="fixed top-0 left-1/4 -translate-x-1/2 w-[900px] h-[500px] pointer-events-none z-0 opacity-40 dark:opacity-20 blur-[130px]"
+        style={{
+          background: 'radial-gradient(circle, rgba(0, 204, 95, 0.28) 0%, rgba(0, 220, 130, 0.12) 50%, transparent 75%)',
+        }}
+      />
+      <div
+        className="fixed bottom-0 right-10 w-[700px] h-[450px] pointer-events-none z-0 opacity-30 dark:opacity-15 blur-[120px]"
+        style={{
+          background: 'radial-gradient(circle, rgba(0, 204, 95, 0.22) 0%, transparent 70%)',
+        }}
+      />
+
       {/* Device Approval Modal */}
       <DeviceApprovalModal
         isOpen={pendingDeviceApprovalModal.isOpen}
@@ -250,10 +293,11 @@ export function App() {
         currentUser={currentUser}
         onLogout={handleLogout}
         onNavigateProfile={navigateToProfileEntry}
+        onNavigateTab={(tab) => routeToTab(tab)}
       />
 
       {/* Main Two-Column Layout */}
-      <div className="flex-1 flex flex-col lg:flex-row w-full">
+      <div className="flex-1 flex flex-col lg:flex-row w-full relative z-10">
         {/* Role-Specific Light Academic Sidebar */}
         <Sidebar
           activeSubTab={activeSubTab}
@@ -265,78 +309,80 @@ export function App() {
         {/* Dynamic Operational Content View */}
         <main className="flex-1 p-6 lg:p-8 overflow-y-auto">
           <div className="max-w-6xl mx-auto space-y-6">
-            {/* User Profile & Security Settings */}
-            {(activeSubTab === 'profile' || activeSubTab === 'security_settings') ? (
-              <UserProfileSettings
-                key={`profile-${refreshTrigger}`}
-                currentUser={currentUser}
-                activeSubTab={activeSubTab}
-                onLogout={handleLogout}
-              />
-            ) : currentUser.role === 'ORG_OWNER' ? (
-              <OrgOwnerWorkspace
-                key={`owner-${refreshTrigger}`}
-                currentUser={currentUser}
-                activeSubTab={activeSubTab}
-                onRefresh={handleRefreshData}
-                onSwitchUser={handleLoginSuccess}
-              />
-            ) : currentUser.role === 'EXAM_MANAGER' ? (
-              <ExamManagerWorkspace
-                key={`manager-${refreshTrigger}`}
-                currentUser={currentUser}
-                activeSubTab={activeSubTab}
-                onRefresh={handleRefreshData}
-                onLaunchCandidateSimulator={(examId) => {
-                  setCandidateSimulatorExamId(examId);
-                  setActiveCandidateSimulator(true);
-                }}
-              />
-            ) : currentUser.role === 'SME' ? (
-              <SmeWorkspace
-                key={`sme-${refreshTrigger}`}
-                currentUser={currentUser}
-                activeSubTab={activeSubTab}
-                onRefresh={handleRefreshData}
-              />
-            ) : currentUser.role === 'TRANSLATOR' ? (
-              <TranslatorWorkspace
-                key={`translator-${refreshTrigger}`}
-                currentUser={currentUser}
-                activeSubTab={activeSubTab}
-                onRefresh={handleRefreshData}
-              />
-            ) : currentUser.role === 'CENTRE_OPERATOR' ? (
-              <CentreOperatorWorkspace
-                key={`operator-${refreshTrigger}`}
-                currentUser={currentUser}
-                activeSubTab={activeSubTab}
-                onRefresh={handleRefreshData}
-              />
-            ) : currentUser.role === 'AUDITOR' ? (
-              <AuditorWorkspace
-                key={`auditor-${refreshTrigger}`}
-                currentUser={currentUser}
-                activeSubTab={activeSubTab}
-                onRefresh={handleRefreshData}
-              />
-            ) : null}
+            <ErrorBoundary fallbackTitle="Workspace Interface Interrupted">
+              {/* User Profile & Security Settings */}
+              {(activeSubTab === 'profile' || activeSubTab === 'security_settings') ? (
+                <UserProfileSettings
+                  key={`profile-${refreshTrigger}`}
+                  currentUser={currentUser}
+                  activeSubTab={activeSubTab}
+                  onLogout={handleLogout}
+                />
+              ) : currentUser.role === 'ORG_OWNER' ? (
+                <OrgOwnerWorkspace
+                  key={`owner-${refreshTrigger}`}
+                  currentUser={currentUser}
+                  activeSubTab={activeSubTab}
+                  onRefresh={handleRefreshData}
+                  onSwitchUser={handleLoginSuccess}
+                />
+              ) : currentUser.role === 'EXAM_MANAGER' ? (
+                <ExamManagerWorkspace
+                  key={`manager-${refreshTrigger}`}
+                  currentUser={currentUser}
+                  activeSubTab={activeSubTab}
+                  onRefresh={handleRefreshData}
+                  onLaunchCandidateSimulator={(examId) => {
+                    setCandidateSimulatorExamId(examId);
+                    setActiveCandidateSimulator(true);
+                  }}
+                />
+              ) : currentUser.role === 'SME' ? (
+                <SmeWorkspace
+                  key={`sme-${refreshTrigger}`}
+                  currentUser={currentUser}
+                  activeSubTab={activeSubTab}
+                  onRefresh={handleRefreshData}
+                />
+              ) : currentUser.role === 'TRANSLATOR' ? (
+                <TranslatorWorkspace
+                  key={`translator-${refreshTrigger}`}
+                  currentUser={currentUser}
+                  activeSubTab={activeSubTab}
+                  onRefresh={handleRefreshData}
+                />
+              ) : currentUser.role === 'CENTRE_OPERATOR' ? (
+                <CentreOperatorWorkspace
+                  key={`operator-${refreshTrigger}`}
+                  currentUser={currentUser}
+                  activeSubTab={activeSubTab}
+                  onRefresh={handleRefreshData}
+                />
+              ) : currentUser.role === 'AUDITOR' ? (
+                <AuditorWorkspace
+                  key={`auditor-${refreshTrigger}`}
+                  currentUser={currentUser}
+                  activeSubTab={activeSubTab}
+                  onRefresh={handleRefreshData}
+                />
+              ) : null}
+            </ErrorBoundary>
           </div>
         </main>
       </div>
 
-      {/* Geometric Balance Light Footer */}
-      <footer className="h-9 bg-white border-t border-[#E2E8F0] flex items-center justify-between px-6 lg:px-8 text-[11px] text-[#64748B] font-medium">
+      {/* Geometric Balance Frosted Glass Footer */}
+      <footer className="h-10 bg-white/50 dark:bg-[#080B11]/50 backdrop-blur-2xl border-t border-slate-200/80 dark:border-white/10 flex items-center justify-between px-6 lg:px-8 text-[11px] text-[#64748B] dark:text-slate-400 font-medium relative z-10">
         <div className="flex items-center gap-4">
-          <span className="font-bold text-[#0F172A] uppercase tracking-wider">
+          <span className="font-bold text-[#0F172A] dark:text-white uppercase tracking-wider">
             Security: FIPS 140-2 AES-256-GCM / RSA-2048
           </span>
-          <span className="text-[#CBD5E1]">|</span>
-          <span className="font-mono text-[#475569]">
+          <span className="text-slate-300 dark:text-white/20">|</span>
+          <span className="font-mono text-[#475569] dark:text-slate-300">
             Immutable Audit Ledger Hash: SHA-256
           </span>
         </div>
-        <p className="text-[#64748B]">ZeroLeak © 2026 Educational Integrity Assurance System</p>
+        <p className="text-[#64748B] dark:text-slate-400">ZeroLeak © 2026 Educational Integrity Assurance System</p>
       </footer>
     </div>
   );

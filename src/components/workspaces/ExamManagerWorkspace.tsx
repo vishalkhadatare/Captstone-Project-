@@ -35,12 +35,25 @@ import {
   Calendar,
   Play,
   GraduationCap,
+  Image as ImageIcon,
+  ZoomIn,
+  Eye,
+  Camera,
+  MapPin,
+  Phone,
+  Mail,
+  ShieldAlert,
+  User as UserIcon,
 } from 'lucide-react';
-import { User, Examination, Question, Organization, ExamType, ExtractedQuestion, QuestionAssignment } from '../../types';
+import { User, Examination, Question, Organization, ExamType, ExtractedQuestion, QuestionAssignment, ExaminationCentre, AddCentreResponse, EmergencyRegenerateResponse } from '../../types';
 import { api } from '../../api';
 import { NavSubTab } from '../Sidebar';
 import { ExamManagerQuestionExtractor } from './ExamManagerQuestionExtractor';
 import { AuthoritySurveillanceDashboard } from '../proctor/AuthoritySurveillanceDashboard';
+import { DynamicMultiPaperGenerator } from './DynamicMultiPaperGenerator';
+import { ExamSimulationModal } from './ExamSimulationModal';
+import { AddCentreModal } from './AddCentreModal';
+import { EmergencyRegenModal } from './EmergencyRegenModal';
 
 interface ExamManagerWorkspaceProps {
   currentUser: User | null;
@@ -218,9 +231,57 @@ export const ExamManagerWorkspace: React.FC<ExamManagerWorkspaceProps> = ({
   const [loading, setLoading] = useState(true);
   const [statusMessage, setStatusMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
   const [dashboardCardFilter, setDashboardCardFilter] = useState<'ALL' | 'VERIFIED' | 'QUARANTINED' | 'READY'>('ALL');
+  const [simulationExam, setSimulationExam] = useState<Examination | null>(null);
+  const [addCentreModalExam, setAddCentreModalExam] = useState<Examination | null>(null);
+  const [emergencyRegenModalExam, setEmergencyRegenModalExam] = useState<Examination | null>(null);
+  const [allCentresList, setAllCentresList] = useState<ExaminationCentre[]>([]);
+  const [centresFilterExamId, setCentresFilterExamId] = useState<string>('ALL');
+
+  const handleSimulateExam = (ex: Examination) => {
+    if (ex.simulation_status === 'COMPLETED') {
+      setStatusMessage({
+        type: 'error',
+        text: 'Simulation already completed. The final question paper cannot be viewed again in simulation mode.',
+      });
+      return;
+    }
+    setSimulationExam(ex);
+  };
+
+  const handleSimulationCompleted = (statusText?: string) => {
+    setSimulationExam(null);
+    setStatusMessage({
+      type: 'success',
+      text: statusText || 'Simulation completed. You may now proceed to Generate Encrypted Paper.',
+    });
+    loadData();
+    onRefresh();
+  };
+
+  const handleCentreAdded = (result: AddCentreResponse) => {
+    setStatusMessage({
+      type: 'success',
+      text: result.copyControl.hasMismatch
+        ? `Centre "${result.centre.centre_name}" registered with quota mismatch: Requested ${result.copyControl.centreAuthorized}, capped at ${result.copyControl.finalAllowed}. Security alert sent to Auditor.`
+        : `Centre "${result.centre.centre_name}" registered successfully. Final authorized copies: ${result.copyControl.finalAllowed}.`,
+    });
+    loadData();
+    onRefresh();
+  };
+
+  const handleEmergencyRegenCompleted = (result: EmergencyRegenerateResponse) => {
+    setStatusMessage({
+      type: 'success',
+      text: `Emergency regeneration complete: Replacement paper ${result.newVersionCode} generated & encrypted. ${result.quarantinedCount} suspect questions quarantined.`,
+    });
+    loadData();
+    onRefresh();
+  };
 
   // Workflow Sub-Navigation
   const [questionWorkflowTab, setQuestionWorkflowTab] = useState<'extraction' | 'manual' | 'matrix'>('extraction');
+  const [matrixFilter, setMatrixFilter] = useState<'ALL' | 'SME_REVIEW' | 'TRANSLATION' | 'COMPLETED'>('ALL');
+  const [matrixSearch, setMatrixSearch] = useState('');
 
   // PDF / Paper Extraction State
   const [pdfFileName, setPdfFileName] = useState('');
@@ -301,6 +362,7 @@ export const ExamManagerWorkspace: React.FC<ExamManagerWorkspaceProps> = ({
 
   // Generation status
   const [generating, setGenerating] = useState(false);
+  const [zoomDiagramUrl, setZoomDiagramUrl] = useState<string | null>(null);
 
   useEffect(() => {
     loadData();
@@ -315,12 +377,13 @@ export const ExamManagerWorkspace: React.FC<ExamManagerWorkspaceProps> = ({
   const loadData = async () => {
     setLoading(true);
     try {
-      const [orgRes, examRes, qRes, membersRes, assignRes] = await Promise.all([
+      const [orgRes, examRes, qRes, membersRes, assignRes, centresRes] = await Promise.all([
         api.getCurrentOrg().catch(() => ({ organization: null, documents: [], history: [], representatives: [] })),
         api.getExaminations().catch(() => ({ examinations: [] })),
         api.getQuestions().catch(() => ({ questions: [] })),
         api.getOrgMembers().catch(() => ({ members: [] })),
         api.getAssignments().catch(() => ({ assignments: [] })),
+        api.getAllCentres().catch(() => ({ centres: [] })),
       ]);
 
       setOrg(orgRes.organization);
@@ -334,6 +397,7 @@ export const ExamManagerWorkspace: React.FC<ExamManagerWorkspaceProps> = ({
       setSmes(members.filter(m => m.role === 'SME'));
       setTranslators(members.filter(m => m.role === 'TRANSLATOR'));
       setAssignments(assignRes.assignments || []);
+      setAllCentresList(centresRes.centres || []);
     } catch (err: any) {
       console.error('Exam Manager load error:', err);
     } finally {
@@ -704,37 +768,20 @@ export const ExamManagerWorkspace: React.FC<ExamManagerWorkspaceProps> = ({
     }
   };
 
-  const handleEmergencyRegenerate = async (examId: string) => {
-    const reason = prompt('Specify security reason for emergency invalidation & regeneration:');
-    if (!reason) return;
-    try {
-      const res = await api.emergencyRegenerate(examId, { reason, quarantine_suspect_questions: true });
-      setStatusMessage({ type: 'success', text: res.message });
-      loadData();
-    } catch (err: any) {
-      setStatusMessage({ type: 'error', text: err.message });
+  const handleEmergencyRegenerate = (examId: string) => {
+    const target = examinations.find(e => e.id === examId);
+    if (target) {
+      setEmergencyRegenModalExam(target);
     }
   };
 
-  const handleAddCentre = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!selectedExamId) return;
-    try {
-      const res = await api.addCentre(selectedExamId, {
-        centre_code: centreCode,
-        centre_name: centreName,
-        city: centreCity,
-        address: centreAddress,
-        max_copies: centreMaxCopies,
-      });
-      setStatusMessage({ type: 'success', text: res.message });
-      setCentreCode('');
-      setCentreName('');
-      setCentreCity('');
-      setCentreAddress('');
-      loadData();
-    } catch (err: any) {
-      setStatusMessage({ type: 'error', text: err.message });
+  const handleOpenAddCentreModal = (examId?: string) => {
+    const idToUse = examId || selectedExamId || examinations[0]?.id;
+    const target = examinations.find(e => e.id === idToUse);
+    if (target) {
+      setAddCentreModalExam(target);
+    } else if (examinations.length > 0) {
+      setAddCentreModalExam(examinations[0]);
     }
   };
 
@@ -794,15 +841,15 @@ export const ExamManagerWorkspace: React.FC<ExamManagerWorkspaceProps> = ({
                 onClick={() => setDashboardCardFilter('ALL')}
                 className={`p-4 rounded-xl border text-left transition-all cursor-pointer shadow-xs hover:-translate-y-0.5 ${
                   dashboardCardFilter === 'ALL'
-                    ? 'bg-slate-900 text-white border-slate-900 ring-2 ring-slate-900/20 shadow-sm'
-                    : 'bg-slate-50/70 border-slate-200/80 text-slate-900 hover:bg-slate-50 hover:border-slate-300'
+                    ? 'bg-[#00cc5f] text-black border-[#00cc5f] ring-2 ring-[#00cc5f]/30 shadow-md'
+                    : 'bg-white/80 dark:bg-white/[0.04] border-slate-200/90 dark:border-white/10 text-slate-900 dark:text-white hover:border-[#00cc5f]/40'
                 }`}
               >
-                <span className={`text-[11px] block font-medium ${dashboardCardFilter === 'ALL' ? 'text-slate-300' : 'text-slate-500'}`}>
+                <span className={`text-[11px] block font-medium ${dashboardCardFilter === 'ALL' ? 'text-black/70 font-bold' : 'text-slate-500 dark:text-slate-400'}`}>
                   Total Examinations
                 </span>
                 <span className="text-2xl font-black block mt-0.5">{examinations.length}</span>
-                <span className={`text-[10px] font-semibold block mt-1 ${dashboardCardFilter === 'ALL' ? 'text-emerald-300' : 'text-emerald-700'}`}>
+                <span className={`text-[10px] font-semibold block mt-1 ${dashboardCardFilter === 'ALL' ? 'text-black/80 font-bold' : 'text-[#00873d] dark:text-[#00cc5f]'}`}>
                   Active Enclaves
                 </span>
               </button>
@@ -812,15 +859,15 @@ export const ExamManagerWorkspace: React.FC<ExamManagerWorkspaceProps> = ({
                 onClick={() => setDashboardCardFilter('READY')}
                 className={`p-4 rounded-xl border text-left transition-all cursor-pointer shadow-xs hover:-translate-y-0.5 ${
                   dashboardCardFilter === 'READY'
-                    ? 'bg-slate-900 text-white border-slate-900 ring-2 ring-slate-900/20 shadow-sm'
-                    : 'bg-slate-50/70 border-slate-200/80 text-slate-900 hover:bg-slate-50 hover:border-slate-300'
+                    ? 'bg-[#00cc5f] text-black border-[#00cc5f] ring-2 ring-[#00cc5f]/30 shadow-md'
+                    : 'bg-white/80 dark:bg-white/[0.04] border-slate-200/90 dark:border-white/10 text-slate-900 dark:text-white hover:border-[#00cc5f]/40'
                 }`}
               >
-                <span className={`text-[11px] block font-medium ${dashboardCardFilter === 'READY' ? 'text-slate-300' : 'text-slate-500'}`}>
+                <span className={`text-[11px] block font-medium ${dashboardCardFilter === 'READY' ? 'text-black/70 font-bold' : 'text-slate-500 dark:text-slate-400'}`}>
                   Pool Questions
                 </span>
                 <span className="text-2xl font-black block mt-0.5">{questions.length}</span>
-                <span className={`text-[10px] font-semibold block mt-1 ${dashboardCardFilter === 'READY' ? 'text-emerald-300' : 'text-slate-500'}`}>
+                <span className={`text-[10px] font-semibold block mt-1 ${dashboardCardFilter === 'READY' ? 'text-black/80 font-bold' : 'text-slate-500 dark:text-slate-400'}`}>
                   Total In Repository
                 </span>
               </button>
@@ -830,17 +877,17 @@ export const ExamManagerWorkspace: React.FC<ExamManagerWorkspaceProps> = ({
                 onClick={() => setDashboardCardFilter('VERIFIED')}
                 className={`p-4 rounded-xl border text-left transition-all cursor-pointer shadow-xs hover:-translate-y-0.5 ${
                   dashboardCardFilter === 'VERIFIED'
-                    ? 'bg-emerald-950 text-white border-emerald-900 ring-2 ring-emerald-600/30 shadow-sm'
-                    : 'bg-emerald-50/60 border-emerald-200 text-emerald-950 hover:bg-emerald-50 hover:border-emerald-300'
+                    ? 'bg-[#00cc5f] text-black border-[#00cc5f] ring-2 ring-[#00cc5f]/30 shadow-md'
+                    : 'bg-[#00cc5f]/10 dark:bg-[#00cc5f]/15 border-[#00cc5f]/30 text-[#00873d] dark:text-[#00cc5f] hover:border-[#00cc5f]/50'
                 }`}
               >
-                <span className={`text-[11px] block font-medium ${dashboardCardFilter === 'VERIFIED' ? 'text-emerald-300' : 'text-emerald-700'}`}>
+                <span className={`text-[11px] block font-medium ${dashboardCardFilter === 'VERIFIED' ? 'text-black/70 font-bold' : 'text-[#00873d] dark:text-[#00cc5f]'}`}>
                   Verified & Eligible
                 </span>
-                <span className={`text-2xl font-black block mt-0.5 ${dashboardCardFilter === 'VERIFIED' ? 'text-emerald-300' : 'text-emerald-800'}`}>
+                <span className={`text-2xl font-black block mt-0.5 ${dashboardCardFilter === 'VERIFIED' ? 'text-black' : 'text-[#00873d] dark:text-[#00cc5f]'}`}>
                   {verifiedCount}
                 </span>
-                <span className={`text-[10px] block mt-1 ${dashboardCardFilter === 'VERIFIED' ? 'text-emerald-300' : 'text-emerald-700 font-bold'}`}>
+                <span className={`text-[10px] block mt-1 ${dashboardCardFilter === 'VERIFIED' ? 'text-black/80 font-bold' : 'text-[#00873d] dark:text-[#00cc5f] font-bold'}`}>
                   Ready for Generation
                 </span>
               </button>
@@ -917,10 +964,35 @@ export const ExamManagerWorkspace: React.FC<ExamManagerWorkspaceProps> = ({
                         <span className="px-2.5 py-1 rounded text-[10px] font-bold bg-emerald-100 text-emerald-900">
                           {ex.status}
                         </span>
+
+                        {ex.simulation_status === 'COMPLETED' ? (
+                          <span
+                            className="px-2.5 py-1 bg-emerald-50 text-emerald-800 border border-emerald-300 rounded-lg font-bold text-xs flex items-center gap-1 shadow-2xs"
+                            title="Simulation already completed. The final question paper cannot be viewed again in simulation mode."
+                          >
+                            <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
+                            <span>Simulation Completed ✓</span>
+                          </span>
+                        ) : (
+                          <button
+                            type="button"
+                            onClick={() => handleSimulateExam(ex)}
+                            className="px-3 py-1.5 bg-emerald-700 hover:bg-emerald-600 text-white rounded-lg font-bold text-xs shadow-xs flex items-center gap-1 cursor-pointer transition-all"
+                            title="Start Proctored Final Paper Simulation"
+                          >
+                            <Camera className="w-3.5 h-3.5" />
+                            <span>Simulate Exam</span>
+                          </button>
+                        )}
+
                         <button
                           onClick={() => handleGeneratePaper(ex.id)}
                           disabled={generating || org?.status !== 'VERIFIED'}
-                          className="px-3 py-1.5 bg-emerald-900 hover:bg-emerald-800 disabled:opacity-40 text-white rounded-lg font-bold text-xs shadow-xs cursor-pointer"
+                          className={`px-3 py-1.5 rounded-lg font-bold text-xs shadow-xs cursor-pointer ${
+                            ex.simulation_status === 'COMPLETED'
+                              ? 'bg-emerald-900 hover:bg-emerald-800 text-white ring-2 ring-emerald-500/30'
+                              : 'bg-slate-900 hover:bg-slate-800 text-white disabled:opacity-40'
+                          }`}
                         >
                           Generate Paper
                         </button>
@@ -1024,10 +1096,10 @@ export const ExamManagerWorkspace: React.FC<ExamManagerWorkspaceProps> = ({
                     key={cat}
                     type="button"
                     onClick={() => setExamCategoryFilter(cat)}
-                    className={`px-3 py-1 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                    className={`px-3 py-1.5 rounded-full text-xs font-bold transition-all cursor-pointer ${
                       examCategoryFilter === cat
-                        ? 'bg-slate-900 text-white shadow-xs'
-                        : 'bg-slate-100 hover:bg-slate-200 text-slate-700'
+                        ? 'bg-[#00cc5f] text-black shadow-[0_2px_10px_rgba(0,204,95,0.35)]'
+                        : 'bg-white/70 dark:bg-white/[0.04] hover:bg-slate-100 dark:hover:bg-white/[0.08] text-slate-700 dark:text-slate-300 border border-slate-200/80 dark:border-white/10'
                     }`}
                   >
                     {cat === 'ALL' ? 'All Categories' : cat.replace(' / CET-type Exam', '')}
@@ -1141,14 +1213,81 @@ export const ExamManagerWorkspace: React.FC<ExamManagerWorkspaceProps> = ({
                       </div>
                     </div>
 
+                    {/* Delivery Centres & Copy Control Summary */}
+                    {(() => {
+                      const examCentres = allCentresList.filter(c => c.exam_id === ex.id);
+                      const hasAnyMismatch = examCentres.some(c => c.hasMismatch);
+                      const managerCap = ex.max_copies || 500;
+
+                      return (
+                        <div className="flex flex-wrap items-center justify-between gap-2 py-2 px-3 rounded-xl bg-slate-50 border border-slate-200/80 text-xs">
+                          <div className="flex items-center gap-2">
+                            <Building2 className="w-3.5 h-3.5 text-slate-500" />
+                            <span className="font-semibold text-slate-700">
+                              {examCentres.length === 0
+                                ? 'No delivery centres assigned'
+                                : `${examCentres.length} Centre${examCentres.length > 1 ? 's' : ''} Assigned`}
+                            </span>
+                            <span className="text-slate-400 font-mono text-[11px]">
+                              • Manager Cap: <strong className="text-slate-800">{managerCap}</strong>
+                            </span>
+                          </div>
+
+                          <div className="flex items-center gap-2">
+                            {hasAnyMismatch && (
+                              <span
+                                className="px-2 py-0.5 rounded-md bg-amber-100 text-amber-900 border border-amber-300 font-bold text-[10px] flex items-center gap-1"
+                                title="Quota Mismatch: A centre requested more copies than the Manager Authorized Cap. Final copies are restricted."
+                              >
+                                <AlertTriangle className="w-3 h-3 text-amber-600" />
+                                <span>Quota Mismatch</span>
+                              </span>
+                            )}
+                            {examCentres.length > 0 && (
+                              <span className="text-[11px] font-mono text-slate-600 font-medium">
+                                Enforced Copies:{' '}
+                                <strong className="text-emerald-800">
+                                  {Math.min(...examCentres.map(c => c.finalAllowed ?? Math.min(managerCap, c.max_copies)))}
+                                </strong>
+                              </span>
+                            )}
+                          </div>
+                        </div>
+                      );
+                    })()}
+
                     {/* Action Bar */}
                     <div className="flex flex-wrap items-center justify-between gap-2 pt-1 border-t border-slate-100">
                       <div className="flex items-center gap-2">
+                        {ex.simulation_status === 'COMPLETED' ? (
+                          <span
+                            className="px-3.5 py-1.5 rounded-xl bg-emerald-50 text-emerald-800 border border-emerald-300 font-bold text-xs flex items-center gap-1.5 shadow-2xs"
+                            title="Simulation already completed. The final question paper cannot be viewed again in simulation mode."
+                          >
+                            <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
+                            <span>Simulation Completed ✓</span>
+                          </span>
+                        ) : (
+                          <button
+                            type="button"
+                            onClick={() => handleSimulateExam(ex)}
+                            className="px-3.5 py-1.5 rounded-xl bg-emerald-700 hover:bg-emerald-600 text-white font-bold text-xs flex items-center gap-1.5 shadow-xs cursor-pointer transition-all"
+                            title="Start Proctored Final Paper Simulation"
+                          >
+                            <Camera className="w-3.5 h-3.5" />
+                            <span>Simulate Exam</span>
+                          </button>
+                        )}
+
                         <button
                           type="button"
                           onClick={() => handleGeneratePaper(ex.id)}
                           disabled={generating || org?.status !== 'VERIFIED'}
-                          className="px-3.5 py-1.5 rounded-xl bg-slate-900 hover:bg-slate-800 text-white font-bold text-xs flex items-center gap-1.5 shadow-xs disabled:opacity-50 cursor-pointer"
+                          className={`px-3.5 py-1.5 rounded-xl font-bold text-xs flex items-center gap-1.5 shadow-xs disabled:opacity-50 cursor-pointer ${
+                            ex.simulation_status === 'COMPLETED'
+                              ? 'bg-slate-900 hover:bg-slate-800 text-white ring-2 ring-emerald-500/30'
+                              : 'bg-slate-900 hover:bg-slate-800 text-white'
+                          }`}
                         >
                           <Sparkles className="w-3.5 h-3.5 text-amber-400" />
                           <span>{ex.status === 'GENERATED' ? 'Re-Generate & Encrypt' : 'Generate Encrypted Paper'}</span>
@@ -1158,10 +1297,11 @@ export const ExamManagerWorkspace: React.FC<ExamManagerWorkspaceProps> = ({
                           <button
                             type="button"
                             onClick={() => onLaunchCandidateSimulator(ex.id)}
-                            className="px-3.5 py-1.5 rounded-xl bg-emerald-50 hover:bg-emerald-100 text-emerald-900 border border-emerald-200 font-bold text-xs flex items-center gap-1.5 cursor-pointer"
+                            className="px-3 py-1.5 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 border border-slate-200 font-medium text-xs flex items-center gap-1.5 cursor-pointer"
+                            title="Open candidate portal testing simulator"
                           >
-                            <Play className="w-3.5 h-3.5 text-emerald-700 fill-current" />
-                            <span>Simulate Exam &rarr;</span>
+                            <Play className="w-3 h-3 text-slate-500 fill-current" />
+                            <span>Candidate Simulator</span>
                           </button>
                         )}
                       </div>
@@ -1169,21 +1309,20 @@ export const ExamManagerWorkspace: React.FC<ExamManagerWorkspaceProps> = ({
                       <div className="flex items-center gap-2">
                         <button
                           type="button"
-                          onClick={() => {
-                            setSelectedExamId(ex.id);
-                            setStatusMessage({ type: 'success', text: `Selected exam "${ex.name}" for delivery centres.` });
-                          }}
-                          className="text-slate-600 hover:text-slate-900 text-xs font-semibold px-2 py-1 rounded hover:bg-slate-100 cursor-pointer"
+                          onClick={() => setAddCentreModalExam(ex)}
+                          className="text-slate-600 hover:text-slate-900 text-xs font-semibold px-2 py-1 rounded hover:bg-slate-100 cursor-pointer flex items-center gap-1"
                         >
-                          Add Centre
+                          <Building2 className="w-3 h-3 text-slate-500" />
+                          <span>Add Centre</span>
                         </button>
 
                         <button
                           type="button"
-                          onClick={() => handleEmergencyRegenerate(ex.id)}
-                          className="text-rose-600 hover:text-rose-800 text-xs font-semibold px-2 py-1 rounded hover:bg-rose-50 cursor-pointer"
+                          onClick={() => setEmergencyRegenModalExam(ex)}
+                          className="text-rose-600 hover:text-rose-800 text-xs font-semibold px-2 py-1 rounded hover:bg-rose-50 cursor-pointer flex items-center gap-1"
                         >
-                          Emergency Re-Gen
+                          <RotateCcw className="w-3 h-3 text-rose-500" />
+                          <span>Emergency Re-Gen</span>
                         </button>
                       </div>
                     </div>
@@ -1412,765 +1551,651 @@ export const ExamManagerWorkspace: React.FC<ExamManagerWorkspaceProps> = ({
         </div>
       )}
 
-      {/* QUESTION WORKFLOW & CREATION */}
+      {/* ============================================================ */}
+      {/* QUESTION WORKFLOW SECTION (HIGH-ASSURANCE QUESTION MANAGEMENT) */}
+      {/* ============================================================ */}
       {activeSubTab === 'question_workflow' && (
         <div className="space-y-6">
-          {/* Navigation Pill Bar for Question Workflow */}
-          <div className="flex flex-wrap items-center justify-between gap-3 bg-white p-3 rounded-xl border border-slate-200 shadow-xs">
-            <div className="flex items-center gap-2">
+          {/* Executive Header & Navigation Bar */}
+          <div className="p-4 rounded-2xl bg-white border border-slate-200/80 shadow-xs flex flex-wrap items-center justify-between gap-4">
+            <div className="flex flex-wrap items-center gap-2">
               <button
+                type="button"
                 onClick={() => setQuestionWorkflowTab('extraction')}
-                className={`px-4 py-2 rounded-lg font-bold text-xs flex items-center gap-2 transition-all ${
+                className={`px-4 py-2.5 rounded-xl font-bold text-xs flex items-center gap-2.5 transition-all cursor-pointer ${
                   questionWorkflowTab === 'extraction'
-                    ? 'bg-emerald-900 text-white shadow-xs'
-                    : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
+                    ? 'bg-gradient-to-r from-emerald-950 via-emerald-900 to-teal-900 text-white shadow-sm ring-2 ring-emerald-800/20'
+                    : 'bg-slate-100/80 text-slate-700 hover:bg-slate-200/70 hover:text-slate-900'
                 }`}
               >
-                <FileUp className="w-4 h-4 text-emerald-400" />
-                <span>PDF Question Paper Extractor</span>
-                {extractedQuestions.length > 0 && (
-                  <span className="px-1.5 py-0.5 rounded-full text-[10px] bg-emerald-700 text-white font-mono">
-                    {extractedQuestions.length}
-                  </span>
-                )}
+                <div className={`p-1 rounded-lg ${questionWorkflowTab === 'extraction' ? 'bg-emerald-800 text-emerald-200' : 'bg-slate-200 text-slate-600'}`}>
+                  <FileUp className="w-3.5 h-3.5" />
+                </div>
+                <span>PDF Question Studio</span>
+                <span className="px-2 py-0.5 rounded-full text-[10px] font-mono font-bold bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">
+                  300 DPI
+                </span>
               </button>
 
               <button
+                type="button"
                 onClick={() => setQuestionWorkflowTab('manual')}
-                className={`px-4 py-2 rounded-lg font-bold text-xs flex items-center gap-2 transition-all ${
+                className={`px-4 py-2.5 rounded-xl font-bold text-xs flex items-center gap-2.5 transition-all cursor-pointer ${
                   questionWorkflowTab === 'manual'
-                    ? 'bg-emerald-900 text-white shadow-xs'
-                    : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
+                    ? 'bg-gradient-to-r from-emerald-950 via-emerald-900 to-teal-900 text-white shadow-sm ring-2 ring-emerald-800/20'
+                    : 'bg-slate-100/80 text-slate-700 hover:bg-slate-200/70 hover:text-slate-900'
                 }`}
               >
-                <PlusCircle className="w-4 h-4" />
-                <span>Manual Single Question</span>
+                <div className={`p-1 rounded-lg ${questionWorkflowTab === 'manual' ? 'bg-emerald-800 text-emerald-200' : 'bg-slate-200 text-slate-600'}`}>
+                  <Edit3 className="w-3.5 h-3.5" />
+                </div>
+                <span>Manual Authoring</span>
+                <span className="text-[10px] font-medium opacity-70">Single Entry</span>
               </button>
 
               <button
+                type="button"
                 onClick={() => setQuestionWorkflowTab('matrix')}
-                className={`px-4 py-2 rounded-lg font-bold text-xs flex items-center gap-2 transition-all ${
+                className={`px-4 py-2.5 rounded-xl font-bold text-xs flex items-center gap-2.5 transition-all cursor-pointer ${
                   questionWorkflowTab === 'matrix'
-                    ? 'bg-emerald-900 text-white shadow-xs'
-                    : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
+                    ? 'bg-gradient-to-r from-emerald-950 via-emerald-900 to-teal-900 text-white shadow-sm ring-2 ring-emerald-800/20'
+                    : 'bg-slate-100/80 text-slate-700 hover:bg-slate-200/70 hover:text-slate-900'
                 }`}
               >
-                <Activity className="w-4 h-4 text-teal-400" />
-                <span>Assignment & Verification Matrix</span>
-                <span className="px-1.5 py-0.5 rounded-full text-[10px] bg-slate-200 text-slate-800 font-mono">
+                <div className={`p-1 rounded-lg ${questionWorkflowTab === 'matrix' ? 'bg-emerald-800 text-emerald-200' : 'bg-slate-200 text-slate-600'}`}>
+                  <Activity className="w-3.5 h-3.5" />
+                </div>
+                <span>Verification Matrix</span>
+                <span className={`px-2 py-0.5 rounded-full text-[10px] font-mono font-bold ${questionWorkflowTab === 'matrix' ? 'bg-white/20 text-white' : 'bg-slate-200 text-slate-800'}`}>
                   {assignments.length}
                 </span>
               </button>
             </div>
 
-            <div className="text-xs text-slate-500 flex items-center gap-4">
-              <span>SMEs: <strong className="text-slate-800">{smes.length}</strong></span>
-              <span>Translators: <strong className="text-slate-800">{translators.length}</strong></span>
+            {/* Team Capacity Indicator Chips */}
+            <div className="flex items-center gap-3 text-xs">
+              <div className="flex items-center gap-2 px-3 py-1.5 rounded-xl bg-slate-50 border border-slate-200/80 text-slate-700">
+                <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
+                <span className="font-semibold text-slate-600">SMEs:</span>
+                <span className="font-bold text-slate-900 font-mono">{smes.length} Active</span>
+              </div>
+              <div className="flex items-center gap-2 px-3 py-1.5 rounded-xl bg-slate-50 border border-slate-200/80 text-slate-700">
+                <span className="w-2 h-2 rounded-full bg-purple-500 animate-pulse"></span>
+                <span className="font-semibold text-slate-600">Translators:</span>
+                <span className="font-bold text-slate-900 font-mono">{translators.length} Active</span>
+              </div>
             </div>
           </div>
 
-          {/* TAB 1: PDF QUESTION PAPER EXTRACTION & BULK ASSIGNMENT */}
+          {/* TAB 1: HIGH-RES PDF QUESTION EXTRACTION STUDIO */}
           {questionWorkflowTab === 'extraction' && (
-            <div className="space-y-6">
-              {/* Document Upload & Input Card */}
-              <div className="p-6 rounded-xl bg-white border border-slate-200 shadow-xs space-y-4">
-                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b pb-3">
-                  <div>
-                    <h3 className="text-base font-bold text-slate-900 flex items-center gap-2">
-                      <FileUp className="w-5 h-5 text-emerald-800" />
-                      <span>Upload Question Paper PDF / Transcript</span>
-                    </h3>
-                    <p className="text-xs text-slate-500 mt-0.5">
-                      Upload one or more question papers or paste OCR transcript. Ollama extracts only the questions present in the source.
-                    </p>
-                  </div>
+            <ExamManagerQuestionExtractor
+              smes={smes}
+              translators={translators}
+              org={org}
+              currentUser={currentUser}
+              onAssignmentsUpdated={loadData}
+            />
+          )}
 
-                  <span className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[11px] font-bold border self-start sm:self-auto ${ollamaHealth?.connected ? 'bg-emerald-50 text-emerald-800 border-emerald-200' : 'bg-amber-50 text-amber-800 border-amber-200'}`}>
-                    <Sparkles className="w-3.5 h-3.5" />
-                    <span>Ollama {ollamaHealth?.connected ? 'Connected' : 'Offline'}</span>
-                    {ollamaHealth && <span className="font-normal">({ollamaHealth.model})</span>}
-                  </span>
-                </div>
-
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-xs">
-                  <div>
-                    <label className="block text-slate-700 font-bold mb-1">Target Subject / Discipline</label>
-                    <input
-                      type="text"
-                      value={paperSubject}
-                      onChange={e => setPaperSubject(e.target.value)}
-                      placeholder="e.g. Physics / Mathematics / Computer Science"
-                      className="w-full px-3 py-2 rounded-lg bg-slate-50 border border-slate-300 text-slate-900 focus:bg-white focus:border-emerald-800 focus:outline-hidden"
-                    />
-                  </div>
-
-                  <div>
-                    <label className="block text-slate-700 font-bold mb-1">Examination Category</label>
-                    <input
-                      type="text"
-                      value={paperCategory}
-                      onChange={e => setPaperCategory(e.target.value)}
-                      placeholder="e.g. National Competitive Exam / Semester Board"
-                      className="w-full px-3 py-2 rounded-lg bg-slate-50 border border-slate-300 text-slate-900 focus:bg-white focus:border-emerald-800 focus:outline-hidden"
-                    />
-                  </div>
-                </div>
-
-                {/* Upload Box */}
-                <div
-                  onDragOver={event => { event.preventDefault(); setIsFileDragOver(true); }}
-                  onDragLeave={() => setIsFileDragOver(false)}
-                  onDrop={handleFileDrop}
-                  className={`border-2 border-dashed rounded-xl p-6 bg-slate-50 hover:bg-slate-100/60 transition-colors text-center ${isFileDragOver ? 'border-emerald-600 bg-emerald-50' : 'border-slate-300'}`}
-                >
-                  <Upload className="w-8 h-8 text-slate-400 mx-auto mb-2" />
-                  <p className="text-xs font-bold text-slate-800">
-                    {uploadedFiles.length > 1 ? `${uploadedFiles.length} files selected` : pdfFileName ? `Selected: ${pdfFileName}` : 'Choose Question Paper PDF, Word Doc, or Text File'}
-                  </p>
-                  {uploadedFiles.length > 0 && (
-                    <div className="mx-auto mt-2 max-w-xl space-y-1 text-left">
-                      {uploadedFiles.map(file => (
-                        <div key={file.id} className="flex items-center gap-2 rounded-md bg-white/80 px-2 py-1 text-[11px] text-slate-700">
-                          <FileText className="h-3.5 w-3.5 shrink-0 text-emerald-700" />
-                          <span className="truncate flex-1">{file.name}</span>
-                          <span className="shrink-0 text-slate-500">{(file.size / 1024 / 1024).toFixed(2)} MB</span>
-                          <span className="shrink-0 font-bold text-emerald-700">{file.status === 'READY' ? 'Ready' : file.status}</span>
-                          <button type="button" onClick={() => removeUploadedFile(file.id)} className="shrink-0 text-slate-400 hover:text-rose-600" aria-label={`Remove ${file.name}`}>
-                            <X className="h-3.5 w-3.5" />
-                          </button>
-                        </div>
-                      ))}
+          {/* TAB 2: MANUAL SINGLE QUESTION AUTHORING */}
+          {questionWorkflowTab === 'manual' && (
+            <div className="p-6 rounded-2xl bg-white border border-slate-200/80 shadow-xs space-y-6">
+              {/* Header */}
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-100 pb-4">
+                <div>
+                  <div className="flex items-center gap-2">
+                    <div className="p-2 rounded-xl bg-emerald-100 text-emerald-900">
+                      <Edit3 className="w-4 h-4 text-emerald-800" />
                     </div>
-                  )}
-                  <p className="text-[11px] text-slate-500 mt-1">
-                    Supports .pdf, .txt, .docx, .json files. Extraction pipeline isolates individual questions securely.
+                    <h3 className="text-base font-bold text-slate-900">
+                      Direct Question Authoring Studio
+                    </h3>
+                  </div>
+                  <p className="text-xs text-slate-500 mt-1">
+                    Directly compose high-assurance examination questions with LaTeX math, diagrams, MCQ choices, and cryptographic integrity.
                   </p>
-                  <label className="mt-3 inline-block px-4 py-2 bg-slate-800 hover:bg-slate-700 text-white rounded-lg font-bold text-xs cursor-pointer shadow-xs">
-                    {uploadedFiles.length > 0 ? 'Add More Files' : 'Browse Files'}
-                    <input
-                      type="file"
-                      accept=".pdf,.txt,.docx,.json,.csv"
-                      onChange={handleFileUpload}
-                      multiple
-                      className="hidden"
-                    />
-                  </label>
-                  {uploadedFiles.length > 0 && (
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setUploadedFiles([]);
-                        setPdfFileName('');
-                        setPdfFileData('');
-                        setPdfText('');
-                      }}
-                      className="ml-2 text-xs font-bold text-slate-500 hover:text-rose-600 underline"
-                    >
-                      Clear All Files
-                    </button>
-                  )}
                 </div>
 
-                {/* Text Transcript Box */}
-                <div className="space-y-1.5 text-xs">
-                  <label className="block text-slate-700 font-bold">
-                    Or Paste Question Paper Content / Raw OCR Transcript:
-                  </label>
-                  <textarea
-                    rows={6}
-                    value={pdfText}
-                    onChange={e => setPdfText(e.target.value)}
-                    placeholder={`e.g.
-1. What is the time complexity of lookup in a balanced binary search tree?
-A) O(1)
-B) O(log n)
-C) O(n)
-D) O(n log n)
-Answer: B
-Marks: 4
-
-2. Explain the principle of Shamir Secret Sharing with threshold (k, n).
-Answer: Detailed derivation
-Marks: 10`}
-                    className="w-full px-3 py-2.5 rounded-lg bg-slate-50 border border-slate-300 text-slate-900 font-mono text-xs focus:bg-white focus:border-emerald-800 focus:outline-hidden"
-                  />
-                </div>
-
-                <div className="flex items-center justify-between pt-2">
-                  <button
-                    type="button"
-                    onClick={handleExtractQuestions}
-                    disabled={extracting || (!pdfText.trim() && !pdfFileData)}
-                    className="px-6 py-2.5 bg-emerald-900 hover:bg-emerald-800 disabled:opacity-40 text-white rounded-lg font-bold text-xs shadow-xs flex items-center gap-2"
-                  >
-                    <Sparkles className="w-4 h-4 text-emerald-300" />
-                    <span>{extracting ? 'Extracting Questions with AI...' : 'Run AI Question Extraction'}</span>
-                  </button>
-
-                  {(pdfText || pdfFileName) && (
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setPdfText('');
-                        setPdfFileData('');
-                        setPdfFileName('');
-                        setExtractedQuestions([]);
-                      }}
-                      className="text-xs text-slate-500 hover:text-slate-800 underline"
-                    >
-                      Clear Input
-                    </button>
-                  )}
-                </div>
+                <span className="px-3 py-1 rounded-full text-xs font-bold bg-emerald-50 text-emerald-800 border border-emerald-200 self-start sm:self-auto flex items-center gap-1.5">
+                  <Sparkles className="w-3.5 h-3.5 text-emerald-600" />
+                  <span>AI Pattern Verification Enabled</span>
+                </span>
               </div>
 
-              {/* Extracted Questions Review & Multi-Role Assignment Stage */}
-              {extractedQuestions.length > 0 && (
-                <div className="space-y-4">
-                  {/* Summary & Filter Bar */}
-                  <div className="p-4 rounded-xl bg-emerald-50 border border-emerald-200 text-emerald-900 flex flex-col sm:flex-row sm:items-center justify-between gap-3 shadow-xs">
-                    <div>
-                      <div className="flex items-center gap-2">
-                        <CheckCircle2 className="w-5 h-5 text-emerald-600 shrink-0" />
-                        <span className="font-bold text-sm">
-                          {extractedQuestions.length} Questions Extracted Successfully
-                        </span>
-                        <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-emerald-200/70 text-emerald-900">
-                          {aiEngineUsed ? 'Ollama AI' : 'Unavailable'}
-                        </span>
-                      </div>
-                      {extractionSummary && (
-                        <p className="text-xs text-emerald-800 mt-1 pl-7">{extractionSummary}</p>
-                      )}
-                    </div>
+              <form onSubmit={handleCreateQuestion} className="space-y-6">
+                <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
+                  {/* LEFT COLUMN: Academic & Question Configuration */}
+                  <div className="lg:col-span-5 space-y-4">
+                    <div className="p-4 rounded-xl bg-slate-50/80 border border-slate-200/80 space-y-3.5 text-xs">
+                      <h4 className="font-bold text-slate-800 uppercase tracking-wider text-[10px]">
+                        Academic Domain & Taxonomy
+                      </h4>
 
-                    {/* Selection Controls */}
-                    <div className="flex items-center gap-1.5 text-xs pl-7 sm:pl-0">
-                      <button
-                        type="button"
-                        onClick={() => selectAllExtracted('ALL')}
-                        className="px-2.5 py-1 bg-white hover:bg-emerald-100 text-emerald-900 border border-emerald-300 rounded font-semibold text-[11px]"
-                      >
-                        Select All ({extractedQuestions.length})
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => selectAllExtracted('MCQ')}
-                        className="px-2.5 py-1 bg-white hover:bg-emerald-100 text-emerald-900 border border-emerald-300 rounded font-semibold text-[11px]"
-                      >
-                        MCQ Only
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => selectAllExtracted('THEORY')}
-                        className="px-2.5 py-1 bg-white hover:bg-emerald-100 text-emerald-900 border border-emerald-300 rounded font-semibold text-[11px]"
-                      >
-                        Theory Only
-                      </button>
-                      <button
-                        type="button"
-                        onClick={deselectAllExtracted}
-                        className="px-2.5 py-1 bg-white hover:bg-rose-50 text-rose-700 border border-rose-200 rounded font-semibold text-[11px]"
-                      >
-                        Clear
-                      </button>
-                    </div>
-                  </div>
-
-                  {/* Direct Assignment Configuration Card */}
-                  <div className="p-6 rounded-xl bg-slate-900 text-white border border-slate-800 shadow-md space-y-4">
-                    <div className="flex items-center justify-between border-b border-slate-800 pb-3">
                       <div>
-                        <h4 className="text-sm font-bold text-white flex items-center gap-2">
-                          <Users className="w-4 h-4 text-emerald-400" />
-                          <span>Assign Selected ({selectedExtractedIds.size}) Questions to SME & Translator</span>
-                        </h4>
-                        <p className="text-[11px] text-slate-400 mt-0.5">
-                          Selected questions will be ingested into the secure question bank and assigned immediately to experts.
-                        </p>
+                        <label className="block text-slate-700 font-bold mb-1">Subject / Discipline *</label>
+                        <input
+                          type="text"
+                          value={qSubject}
+                          onChange={e => setQSubject(e.target.value)}
+                          placeholder="e.g. Physics / Mathematics / Computer Science"
+                          required
+                          className="w-full px-3 py-2 rounded-lg bg-white border border-slate-300 text-slate-900 focus:border-emerald-800 focus:outline-hidden"
+                        />
+                        {/* Quick Subject Chips */}
+                        <div className="flex flex-wrap gap-1.5 mt-1.5">
+                          {['Physics', 'Chemistry', 'Mathematics', 'Computer Science', 'Biology'].map(subj => (
+                            <button
+                              key={subj}
+                              type="button"
+                              onClick={() => setQSubject(subj)}
+                              className="px-2 py-0.5 rounded text-[10px] bg-white border border-slate-200 hover:border-emerald-500 text-slate-600 hover:text-emerald-800 transition-colors"
+                            >
+                              {subj}
+                            </button>
+                          ))}
+                        </div>
                       </div>
 
-                      <span className="text-xs font-mono text-emerald-400 font-bold bg-emerald-950/60 px-3 py-1 rounded-full border border-emerald-800">
-                        {selectedExtractedIds.size} of {extractedQuestions.length} Selected
-                      </span>
-                    </div>
-
-                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 text-xs">
-                      {/* SME Assignment */}
                       <div>
-                        <label className="block text-slate-300 font-bold mb-1">Assign to SME for Review</label>
+                        <label className="block text-slate-700 font-bold mb-1">Topic / Syllabus Module *</label>
+                        <input
+                          type="text"
+                          value={qTopic}
+                          onChange={e => setQTopic(e.target.value)}
+                          placeholder="e.g. Asymmetric Cryptography / Thermodynamics"
+                          required
+                          className="w-full px-3 py-2 rounded-lg bg-white border border-slate-300 text-slate-900 focus:border-emerald-800 focus:outline-hidden"
+                        />
+                      </div>
+
+                      {/* Question Type Toggle Cards */}
+                      <div>
+                        <label className="block text-slate-700 font-bold mb-1.5">Question Format</label>
+                        <div className="grid grid-cols-2 gap-2">
+                          <button
+                            type="button"
+                            onClick={() => setExamType('MCQ')}
+                            className={`p-2.5 rounded-xl border font-bold text-xs flex flex-col items-center gap-1 transition-all ${
+                              examType === 'MCQ'
+                                ? 'bg-emerald-50 border-emerald-500 text-emerald-950 ring-2 ring-emerald-500/20 shadow-xs'
+                                : 'bg-white border-slate-200 text-slate-600 hover:bg-slate-100/50'
+                            }`}
+                          >
+                            <span className="text-sm">🔘</span>
+                            <span>Multiple Choice (MCQ)</span>
+                          </button>
+
+                          <button
+                            type="button"
+                            onClick={() => setExamType('THEORY')}
+                            className={`p-2.5 rounded-xl border font-bold text-xs flex flex-col items-center gap-1 transition-all ${
+                              examType === 'THEORY'
+                                ? 'bg-emerald-50 border-emerald-500 text-emerald-950 ring-2 ring-emerald-500/20 shadow-xs'
+                                : 'bg-white border-slate-200 text-slate-600 hover:bg-slate-100/50'
+                            }`}
+                          >
+                            <span className="text-sm">📝</span>
+                            <span>Theory / Descriptive</span>
+                          </button>
+                        </div>
+                      </div>
+
+                      {/* Difficulty Selection Pills */}
+                      <div>
+                        <label className="block text-slate-700 font-bold mb-1.5">Cognitive Difficulty Level</label>
+                        <div className="grid grid-cols-3 gap-2">
+                          {(['EASY', 'MEDIUM', 'HARD'] as const).map(diff => {
+                            const isSelected = qDifficulty === diff;
+                            const colorClass =
+                              diff === 'EASY'
+                                ? isSelected ? 'bg-emerald-700 text-white border-emerald-700 shadow-xs' : 'bg-white text-emerald-800 border-emerald-200 hover:bg-emerald-50'
+                                : diff === 'MEDIUM'
+                                ? isSelected ? 'bg-amber-600 text-white border-amber-600 shadow-xs' : 'bg-white text-amber-800 border-amber-200 hover:bg-amber-50'
+                                : isSelected ? 'bg-rose-700 text-white border-rose-700 shadow-xs' : 'bg-white text-rose-800 border-rose-200 hover:bg-rose-50';
+
+                            return (
+                              <button
+                                key={diff}
+                                type="button"
+                                onClick={() => setQDifficulty(diff)}
+                                className={`py-1.5 rounded-lg border font-bold text-[11px] text-center transition-all ${colorClass}`}
+                              >
+                                {diff}
+                              </button>
+                            );
+                          })}
+                        </div>
+                      </div>
+
+                      {/* Marks & Scoring */}
+                      <div className="grid grid-cols-2 gap-3 pt-1">
+                        <div>
+                          <label className="block text-slate-700 font-bold mb-1">Marks (+)</label>
+                          <input
+                            type="number"
+                            value={qMarks}
+                            onChange={e => setQMarks(Number(e.target.value))}
+                            min={1}
+                            max={100}
+                            className="w-full px-3 py-2 rounded-lg bg-white border border-slate-300 text-slate-900 font-mono font-bold text-center focus:border-emerald-800 focus:outline-hidden"
+                          />
+                        </div>
+
+                        <div>
+                          <label className="block text-slate-700 font-bold mb-1">Negative (-)</label>
+                          <input
+                            type="number"
+                            step="0.25"
+                            defaultValue={1.0}
+                            className="w-full px-3 py-2 rounded-lg bg-white border border-slate-300 text-slate-900 font-mono font-bold text-center focus:border-emerald-800 focus:outline-hidden"
+                          />
+                        </div>
+                      </div>
+
+                      {/* SME Verifier Assignment */}
+                      <div className="pt-2 border-t border-slate-200/80">
+                        <label className="block text-slate-700 font-bold mb-1">Assign to SME Verifier</label>
                         <select
-                          value={extractAssignSmeId}
-                          onChange={e => setExtractAssignSmeId(e.target.value)}
-                          className="w-full px-3 py-2 rounded-lg bg-slate-800 border border-slate-700 text-white focus:border-emerald-500 focus:outline-hidden"
+                          value={assignedSmeId}
+                          onChange={e => setAssignedSmeId(e.target.value)}
+                          className="w-full px-3 py-2 rounded-lg bg-white border border-slate-300 text-slate-900 focus:border-emerald-800 focus:outline-hidden text-xs"
                         >
-                          <option value="">-- No SME Assignment (Direct Pool) --</option>
+                          <option value="">-- No Assignment (Direct Pool Draft) --</option>
                           {smes.map(s => (
                             <option key={s.id} value={s.id}>
                               {s.full_name} ({s.email})
                             </option>
                           ))}
                         </select>
-                        <span className="text-[10px] text-slate-400 mt-0.5 block">
-                          SME will review answer keys & syllabus alignment.
-                        </span>
-                      </div>
-
-                      {/* Linguistic Translator Assignment */}
-                      <div>
-                        <label className="block text-slate-300 font-bold mb-1">Assign to Linguistic Translator</label>
-                        <select
-                          value={extractAssignTranslatorId}
-                          onChange={e => setExtractAssignTranslatorId(e.target.value)}
-                          className="w-full px-3 py-2 rounded-lg bg-slate-800 border border-slate-700 text-white focus:border-emerald-500 focus:outline-hidden"
-                        >
-                          <option value="">-- No Translator Assignment --</option>
-                          {translators.map(t => (
-                            <option key={t.id} value={t.id}>
-                              {t.full_name} ({t.email})
-                            </option>
-                          ))}
-                        </select>
-                        <span className="text-[10px] text-slate-400 mt-0.5 block">
-                          Translator will convert statements to regional vernacular.
-                        </span>
-                      </div>
-
-                      {/* Target Language */}
-                      <div>
-                        <label className="block text-slate-300 font-bold mb-1">Target Language for Translation</label>
-                        <select
-                          value={extractAssignTargetLanguage}
-                          onChange={e => setExtractAssignTargetLanguage(e.target.value)}
-                          disabled={!extractAssignTranslatorId}
-                          className="w-full px-3 py-2 rounded-lg bg-slate-800 border border-slate-700 text-white focus:border-emerald-500 focus:outline-hidden disabled:opacity-50"
-                        >
-                          {SUPPORTED_TRANSLATION_LANGUAGES.map(l => (
-                            <option key={l.code} value={l.code}>
-                              {l.label}
-                            </option>
-                          ))}
-                        </select>
                       </div>
                     </div>
+                  </div>
 
-                    {/* Assignment Instructions / Notes */}
-                    <div className="text-xs">
-                      <label className="block text-slate-300 font-bold mb-1">Special Instructions / Review Notes (Optional)</label>
-                      <input
-                        type="text"
-                        value={extractAssignNotes}
-                        onChange={e => setExtractAssignNotes(e.target.value)}
-                        placeholder="e.g. Ensure strict adherence to CBSE Class 12 Syllabus 2026 and verify MCQ answer derivations."
-                        className="w-full px-3 py-2 rounded-lg bg-slate-800 border border-slate-700 text-white placeholder-slate-500 focus:border-emerald-500 focus:outline-hidden"
+                  {/* RIGHT COLUMN: Question Statement, Options & AI Check */}
+                  <div className="lg:col-span-7 space-y-4">
+                    {/* Question Content Input */}
+                    <div className="p-4 rounded-xl bg-slate-50/80 border border-slate-200/80 space-y-2">
+                      <div className="flex items-center justify-between text-xs">
+                        <label className="text-slate-800 font-bold">
+                          Question Content Statement *
+                        </label>
+                        <span className="text-[11px] font-mono text-slate-400">
+                          {qContent.length} characters
+                        </span>
+                      </div>
+                      <textarea
+                        rows={5}
+                        value={qContent}
+                        onChange={e => setQContent(e.target.value)}
+                        placeholder="Write the complete question statement. Include formulas, equations, or scenario criteria..."
+                        required
+                        className="w-full px-3.5 py-2.5 rounded-xl bg-white border border-slate-300 text-slate-900 text-xs focus:border-emerald-800 focus:outline-hidden leading-relaxed"
                       />
                     </div>
 
-                    <div className="flex items-center justify-end gap-3 pt-2 border-t border-slate-800">
+                    {/* AI Similarity & Duplicate Check Banner */}
+                    <div className="p-3.5 rounded-xl bg-emerald-50/60 border border-emerald-200/80 flex flex-wrap items-center justify-between gap-3 text-xs">
+                      <div className="flex items-center gap-2">
+                        <Sparkles className="w-4 h-4 text-emerald-700 shrink-0" />
+                        <div>
+                          <span className="font-bold text-emerald-950">AI Question Pool Duplicate Engine</span>
+                          <p className="text-[11px] text-emerald-800/80">Scan current repository for semantic similarity before saving.</p>
+                        </div>
+                      </div>
+
+                      <div className="flex items-center gap-2">
+                        <button
+                          type="button"
+                          onClick={handleCheckAiSimilarity}
+                          disabled={aiChecking || !qContent}
+                          className="px-3.5 py-1.5 bg-emerald-800 hover:bg-emerald-700 disabled:opacity-40 text-white rounded-lg font-bold text-xs shadow-2xs flex items-center gap-1.5 transition-all cursor-pointer"
+                        >
+                          <Sparkles className="w-3 h-3 text-emerald-300" />
+                          <span>{aiChecking ? 'Analyzing...' : 'Scan Pool'}</span>
+                        </button>
+                        {aiCheckResult && (
+                          <span className="px-2.5 py-1 rounded-md text-[11px] font-bold bg-white text-emerald-900 border border-emerald-300 font-mono shadow-2xs">
+                            Score: {aiCheckResult.similarityScore ?? '0.04'} (Clear)
+                          </span>
+                        )}
+                      </div>
+                    </div>
+
+                    {/* MCQ Options Builder */}
+                    {examType === 'MCQ' && (
+                      <div className="p-4 rounded-xl bg-slate-50/80 border border-slate-200/80 space-y-3">
+                        <div className="flex items-center justify-between">
+                          <label className="text-slate-800 font-bold text-xs">
+                            MCQ Answer Choices (Click letter to set as Correct Answer)
+                          </label>
+                          <span className="text-[11px] font-bold text-emerald-800">
+                            Current Key: Option {qCorrectAnswer || 'A'}
+                          </span>
+                        </div>
+
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                          {qOptions.map((opt, i) => {
+                            const letter = String.fromCharCode(65 + i);
+                            const isCorrect = (qCorrectAnswer || 'A').toUpperCase() === letter;
+
+                            return (
+                              <div
+                                key={i}
+                                className={`flex items-center gap-2 p-2 rounded-xl border transition-all ${
+                                  isCorrect
+                                    ? 'bg-emerald-50/80 border-emerald-500 ring-2 ring-emerald-500/20'
+                                    : 'bg-white border-slate-200 hover:border-slate-300'
+                                }`}
+                              >
+                                <button
+                                  type="button"
+                                  onClick={() => setQCorrectAnswer(letter)}
+                                  className={`w-7 h-7 rounded-full font-bold text-xs flex items-center justify-center shrink-0 transition-colors cursor-pointer ${
+                                    isCorrect
+                                      ? 'bg-emerald-700 text-white shadow-2xs'
+                                      : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
+                                  }`}
+                                  title="Mark as correct answer"
+                                >
+                                  {letter}
+                                </button>
+                                <input
+                                  type="text"
+                                  value={opt}
+                                  onChange={e => {
+                                    const newOpts = [...qOptions];
+                                    newOpts[i] = e.target.value;
+                                    setQOptions(newOpts);
+                                  }}
+                                  placeholder={`Option ${letter} text...`}
+                                  className="w-full px-2 py-1 text-xs bg-transparent border-0 text-slate-900 focus:outline-hidden"
+                                />
+                              </div>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Action Bar */}
+                    <div className="flex items-center justify-end gap-3 pt-3 border-t border-slate-200/80">
                       <button
                         type="button"
-                        onClick={handleImportExtracted}
-                        disabled={importingBatch || selectedExtractedIds.size === 0}
-                        className="px-6 py-2.5 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-40 text-white rounded-lg font-bold text-xs shadow-md flex items-center gap-2 transition-all"
+                        onClick={() => {
+                          setQContent('');
+                          setQSubject('');
+                          setQTopic('');
+                          setQOptions(['', '', '', '']);
+                        }}
+                        className="px-4 py-2 text-slate-500 hover:text-slate-800 font-bold text-xs transition-colors cursor-pointer"
                       >
-                        <Send className="w-4 h-4" />
-                        <span>
-                          {importingBatch
-                            ? 'Ingesting & Enqueueing Tasks...'
-                            : `Import & Enqueue ${selectedExtractedIds.size} Selected Questions`}
-                        </span>
+                        Reset Form
+                      </button>
+
+                      <button
+                        type="submit"
+                        className="px-6 py-2.5 bg-gradient-to-r from-emerald-900 via-emerald-800 to-teal-800 hover:from-emerald-800 hover:to-teal-700 text-white rounded-xl font-bold text-xs shadow-md flex items-center gap-2 transition-all cursor-pointer"
+                      >
+                        <Send className="w-3.5 h-3.5 text-emerald-300" />
+                        <span>Save & Enqueue to Pool</span>
                       </button>
                     </div>
                   </div>
-
-                  {/* Question Cards List */}
-                  <div className="space-y-3">
-                    {extractedQuestions.map((q, idx) => {
-                      const isSelected = selectedExtractedIds.has(q.tempId);
-                      return (
-                        <div
-                          key={q.tempId}
-                          className={`p-4 rounded-xl border transition-all text-xs space-y-3 ${
-                            isSelected
-                              ? 'bg-white border-emerald-400 ring-2 ring-emerald-500/10 shadow-xs'
-                              : 'bg-slate-50/70 border-slate-200 opacity-70'
-                          }`}
-                        >
-                          <div className="flex items-start justify-between gap-3">
-                            <div className="flex items-center gap-3">
-                              <button
-                                type="button"
-                                onClick={() => toggleExtractedSelection(q.tempId)}
-                                className="text-emerald-800 hover:text-emerald-900"
-                              >
-                                {isSelected ? (
-                                  <CheckSquare className="w-5 h-5 text-emerald-700" />
-                                ) : (
-                                  <Square className="w-5 h-5 text-slate-400" />
-                                )}
-                              </button>
-                              <span className="font-bold text-slate-900 text-xs">
-                                Question #{q.question_number || idx + 1}
-                              </span>
-                              <span
-                                className={`px-2 py-0.5 rounded text-[10px] font-bold ${
-                                  q.question_type === 'MCQ'
-                                    ? 'bg-blue-100 text-blue-900'
-                                    : 'bg-amber-100 text-amber-900'
-                                }`}
-                              >
-                                {q.question_type}
-                              </span>
-                            </div>
-
-                            <div className="flex items-center gap-2">
-                              <span className="font-mono text-[11px] text-slate-600 bg-slate-100 px-2 py-0.5 rounded">
-                                Marks: {q.marks} {q.negative_marks ? `(-${q.negative_marks})` : ''}
-                              </span>
-                              <button
-                                type="button"
-                                onClick={() => removeExtractedQuestion(q.tempId)}
-                                className="p-1 text-slate-400 hover:text-rose-600 rounded"
-                                title="Remove from batch"
-                              >
-                                <Trash2 className="w-4 h-4" />
-                              </button>
-                            </div>
-                          </div>
-
-                          {q.source_file && (
-                            <div className="flex items-center gap-1.5 text-[11px] text-slate-500 border-b border-slate-100 pb-2">
-                              <FileText className="h-3.5 w-3.5 text-emerald-700" />
-                              <span>Source: {q.source_file}</span>
-                              {q.page_number && <span>• Page {q.page_number}</span>}
-                            </div>
-                          )}
-
-                          {/* Editable Question Text */}
-                          <div>
-                            <textarea
-                              rows={2}
-                              value={q.content_text}
-                              onChange={e => updateExtractedQuestion(q.tempId, { content_text: e.target.value })}
-                              className="w-full px-3 py-1.5 rounded-lg bg-slate-50 border border-slate-300 text-slate-900 text-xs focus:bg-white focus:border-emerald-800 focus:outline-hidden"
-                            />
-                          </div>
-
-                          {/* MCQ Options */}
-                          {q.question_type === 'MCQ' && q.options && q.options.length > 0 && (
-                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 pt-1 border-t border-slate-100">
-                              {q.options.map((opt, optIdx) => (
-                                <div key={optIdx} className="flex items-center gap-2">
-                                  <span className="font-bold text-slate-600 text-[11px] w-5 shrink-0">
-                                    {String.fromCharCode(65 + optIdx)}:
-                                  </span>
-                                  <input
-                                    type="text"
-                                    value={opt}
-                                    onChange={e => {
-                                      const updatedOpts = [...q.options!];
-                                      updatedOpts[optIdx] = e.target.value;
-                                      updateExtractedQuestion(q.tempId, { options: updatedOpts });
-                                    }}
-                                    className="w-full px-2.5 py-1 rounded bg-slate-50 border border-slate-300 text-slate-900 text-xs"
-                                  />
-                                </div>
-                              ))}
-                            </div>
-                          )}
-
-                          {/* Metadata row */}
-                          <div className="grid grid-cols-1 sm:grid-cols-4 gap-2 pt-1 border-t border-slate-100 text-[11px]">
-                            <div>
-                              <span className="text-slate-500 block">Subject / Topic:</span>
-                              <input
-                                type="text"
-                                value={`${q.subject} - ${q.topic}`}
-                                onChange={e => {
-                                  const parts = e.target.value.split('-');
-                                  updateExtractedQuestion(q.tempId, {
-                                    subject: (parts[0] || '').trim(),
-                                    topic: (parts[1] || '').trim(),
-                                  });
-                                }}
-                                className="w-full px-2 py-0.5 rounded bg-slate-50 border border-slate-300 text-slate-900 font-mono text-[11px]"
-                              />
-                            </div>
-
-                            <div>
-                              <span className="text-slate-500 block">Difficulty:</span>
-                              <select
-                                value={q.difficulty}
-                                onChange={e => updateExtractedQuestion(q.tempId, { difficulty: e.target.value as any })}
-                                className="w-full px-2 py-0.5 rounded bg-slate-50 border border-slate-300 text-slate-900 text-[11px]"
-                              >
-                                <option value="EASY">EASY</option>
-                                <option value="MEDIUM">MEDIUM</option>
-                                <option value="HARD">HARD</option>
-                              </select>
-                            </div>
-
-                            <div>
-                              <span className="text-slate-500 block">Correct Answer:</span>
-                              <input
-                                type="text"
-                                value={q.correct_answer}
-                                onChange={e => updateExtractedQuestion(q.tempId, { correct_answer: e.target.value })}
-                                className="w-full px-2 py-0.5 rounded bg-slate-50 border border-slate-300 text-slate-900 font-bold text-[11px]"
-                              />
-                            </div>
-
-                            <div>
-                              <span className="text-slate-500 block">Marks:</span>
-                              <input
-                                type="number"
-                                value={q.marks}
-                                onChange={e => updateExtractedQuestion(q.tempId, { marks: Number(e.target.value) })}
-                                className="w-full px-2 py-0.5 rounded bg-slate-50 border border-slate-300 text-slate-900 text-[11px]"
-                              />
-                            </div>
-                          </div>
-                        </div>
-                      );
-                    })}
-                  </div>
                 </div>
-              )}
-            </div>
-          )}
-
-          {/* TAB 2: MANUAL SINGLE QUESTION ENTRY */}
-          {questionWorkflowTab === 'manual' && (
-            <div className="p-6 rounded-xl bg-white border border-slate-200 shadow-xs space-y-4">
-              <h3 className="text-base font-bold text-slate-900 border-b pb-2">
-                Add Single Question to Secure Pool
-              </h3>
-
-              <form onSubmit={handleCreateQuestion} className="space-y-4 text-xs">
-                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                  <div>
-                    <label className="block text-slate-700 font-bold mb-1">Subject</label>
-                    <input
-                      type="text"
-                      value={qSubject}
-                      onChange={e => setQSubject(e.target.value)}
-                      placeholder="e.g. Computer Science"
-                      required
-                      className="w-full px-3 py-2 rounded-lg bg-slate-50 border border-slate-300 text-slate-900"
-                    />
-                  </div>
-
-                  <div>
-                    <label className="block text-slate-700 font-bold mb-1">Topic</label>
-                    <input
-                      type="text"
-                      value={qTopic}
-                      onChange={e => setQTopic(e.target.value)}
-                      placeholder="e.g. Cryptography"
-                      required
-                      className="w-full px-3 py-2 rounded-lg bg-slate-50 border border-slate-300 text-slate-900"
-                    />
-                  </div>
-
-                  <div>
-                    <label className="block text-slate-700 font-bold mb-1">Difficulty</label>
-                    <select
-                      value={qDifficulty}
-                      onChange={e => setQDifficulty(e.target.value as any)}
-                      className="w-full px-3 py-2 rounded-lg bg-slate-50 border border-slate-300 text-slate-900"
-                    >
-                      <option value="EASY">EASY</option>
-                      <option value="MEDIUM">MEDIUM</option>
-                      <option value="HARD">HARD</option>
-                    </select>
-                  </div>
-                </div>
-
-                <div>
-                  <label className="block text-slate-700 font-bold mb-1">Question Content Text *</label>
-                  <textarea
-                    rows={3}
-                    value={qContent}
-                    onChange={e => setQContent(e.target.value)}
-                    placeholder="Enter complete question statement with mathematical or theoretical criteria..."
-                    required
-                    className="w-full px-3 py-2 rounded-lg bg-slate-50 border border-slate-300 text-slate-900"
-                  />
-                </div>
-
-                {/* AI Similarity & Duplicate Check Action */}
-                <div className="flex items-center gap-3">
-                  <button
-                    type="button"
-                    onClick={handleCheckAiSimilarity}
-                    disabled={aiChecking || !qContent}
-                    className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-emerald-50 hover:bg-emerald-100 text-emerald-900 border border-emerald-200 rounded-lg font-bold text-xs"
-                  >
-                    <Sparkles className="w-3.5 h-3.5 text-emerald-700" />
-                    <span>{aiChecking ? 'Analyzing Pool...' : 'AI Duplicate & Similarity Check'}</span>
-                  </button>
-
-                  {aiCheckResult && (
-                    <span className="text-[11px] text-emerald-800 font-semibold bg-emerald-50 px-2.5 py-1 rounded border border-emerald-200">
-                      Similarity Score: {aiCheckResult.similarityScore || '0.04'} (No Conflict Detected)
-                    </span>
-                  )}
-                </div>
-
-                {examType === 'MCQ' && (
-                  <div className="grid grid-cols-2 gap-3 pt-2 border-t">
-                    {qOptions.map((opt, i) => (
-                      <div key={i}>
-                        <label className="block text-slate-600 font-bold mb-1">Option {String.fromCharCode(65 + i)}</label>
-                        <input
-                          type="text"
-                          value={opt}
-                          onChange={e => {
-                            const newOpts = [...qOptions];
-                            newOpts[i] = e.target.value;
-                            setQOptions(newOpts);
-                          }}
-                          className="w-full px-3 py-1.5 rounded-lg bg-slate-50 border border-slate-300 text-slate-900"
-                        />
-                      </div>
-                    ))}
-                  </div>
-                )}
-
-                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 pt-2">
-                  <div>
-                    <label className="block text-slate-700 font-bold mb-1">Correct Answer</label>
-                    <input
-                      type="text"
-                      value={qCorrectAnswer}
-                      onChange={e => setQCorrectAnswer(e.target.value)}
-                      placeholder="e.g. B or Derivation"
-                      required
-                      className="w-full px-3 py-2 rounded-lg bg-slate-50 border border-slate-300 text-slate-900"
-                    />
-                  </div>
-
-                  <div>
-                    <label className="block text-slate-700 font-bold mb-1">Marks</label>
-                    <input
-                      type="number"
-                      value={qMarks}
-                      onChange={e => setQMarks(Number(e.target.value))}
-                      className="w-full px-3 py-2 rounded-lg bg-slate-50 border border-slate-300 text-slate-900"
-                    />
-                  </div>
-
-                  <div>
-                    <label className="block text-slate-700 font-bold mb-1">Assign to SME for Verification</label>
-                    <select
-                      value={assignedSmeId}
-                      onChange={e => setAssignedSmeId(e.target.value)}
-                      className="w-full px-3 py-2 rounded-lg bg-slate-50 border border-slate-300 text-slate-900"
-                    >
-                      <option value="">-- Select SME Verifier --</option>
-                      {smes.map(s => (
-                        <option key={s.id} value={s.id}>{s.full_name} ({s.email})</option>
-                      ))}
-                    </select>
-                  </div>
-                </div>
-
-                <button
-                  type="submit"
-                  className="px-5 py-2.5 bg-emerald-900 hover:bg-emerald-800 text-white rounded-lg font-bold text-xs shadow-xs"
-                >
-                  Save & Enqueue for Verification
-                </button>
               </form>
             </div>
           )}
 
           {/* TAB 3: ASSIGNMENT & VERIFICATION MATRIX */}
           {questionWorkflowTab === 'matrix' && (
-            <div className="p-6 rounded-xl bg-white border border-slate-200 shadow-xs space-y-4">
-              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b pb-3">
-                <div>
-                  <h3 className="text-base font-bold text-slate-900">
-                    Live Assignment & Review Matrix
-                  </h3>
-                  <p className="text-xs text-slate-500 mt-0.5">
-                    Real-time verification queue across all assigned SMEs and Linguistic Translators.
-                  </p>
+            <div className="space-y-6">
+              {/* Executive Header & KPI Metrics */}
+              <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+                <div className="p-4 rounded-2xl bg-white border border-slate-200/80 shadow-xs flex items-center gap-3.5">
+                  <div className="w-10 h-10 rounded-xl bg-slate-900 text-white flex items-center justify-center shadow-xs">
+                    <Activity className="w-5 h-5 text-emerald-400" />
+                  </div>
+                  <div>
+                    <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400 block">Total Active Tasks</span>
+                    <span className="text-xl font-black text-slate-900 font-mono">{assignments.length}</span>
+                  </div>
                 </div>
 
-                <span className="text-xs font-mono text-slate-600 bg-slate-100 px-3 py-1 rounded-full border">
-                  {assignments.length} Total Active Tasks
-                </span>
+                <div className="p-4 rounded-2xl bg-white border border-slate-200/80 shadow-xs flex items-center gap-3.5">
+                  <div className="w-10 h-10 rounded-xl bg-blue-50 text-blue-600 border border-blue-200 flex items-center justify-center">
+                    <UserCheck className="w-5 h-5" />
+                  </div>
+                  <div>
+                    <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400 block">SME Reviews</span>
+                    <span className="text-xl font-black text-blue-900 font-mono">
+                      {assignments.filter(a => a.assignment_type === 'SME_REVIEW').length}
+                    </span>
+                  </div>
+                </div>
+
+                <div className="p-4 rounded-2xl bg-white border border-slate-200/80 shadow-xs flex items-center gap-3.5">
+                  <div className="w-10 h-10 rounded-xl bg-purple-50 text-purple-600 border border-purple-200 flex items-center justify-center">
+                    <Languages className="w-5 h-5" />
+                  </div>
+                  <div>
+                    <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400 block">Translations</span>
+                    <span className="text-xl font-black text-purple-900 font-mono">
+                      {assignments.filter(a => a.assignment_type === 'LINGUISTIC_TRANSLATION').length}
+                    </span>
+                  </div>
+                </div>
+
+                <div className="p-4 rounded-2xl bg-white border border-slate-200/80 shadow-xs flex items-center gap-3.5">
+                  <div className="w-10 h-10 rounded-xl bg-emerald-50 text-emerald-600 border border-emerald-200 flex items-center justify-center">
+                    <CheckCircle2 className="w-5 h-5" />
+                  </div>
+                  <div>
+                    <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400 block">Completed & Verified</span>
+                    <span className="text-xl font-black text-emerald-900 font-mono">
+                      {assignments.filter(a => a.status === 'COMPLETED').length}
+                    </span>
+                  </div>
+                </div>
               </div>
 
-              {assignments.length === 0 ? (
-                <p className="text-xs text-slate-400 p-6 text-center bg-slate-50 rounded-lg">
-                  No active assignments found. Extract questions or assign questions from Question Pools.
-                </p>
-              ) : (
-                <div className="overflow-x-auto">
-                  <table className="w-full text-left text-xs">
-                    <thead>
-                      <tr className="border-b bg-slate-50 text-slate-600 font-bold">
-                        <th className="p-3">Question ID</th>
-                        <th className="p-3">Type</th>
-                        <th className="p-3">Assignee</th>
-                        <th className="p-3">Target Language</th>
-                        <th className="p-3">Assigned Date</th>
-                        <th className="p-3">Status</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-slate-100">
-                      {assignments.map(a => (
-                        <tr key={a.id} className="hover:bg-slate-50/80">
-                          <td className="p-3 font-mono text-[11px] font-bold text-slate-800">
-                            {a.question_id.substring(0, 10)}...
-                          </td>
-                          <td className="p-3">
-                            <span
-                              className={`px-2 py-0.5 rounded text-[10px] font-bold ${
-                                a.assignment_type === 'SME_REVIEW'
-                                  ? 'bg-blue-100 text-blue-900'
-                                  : 'bg-purple-100 text-purple-900'
-                              }`}
-                            >
-                              {a.assignment_type === 'SME_REVIEW' ? 'SME Review' : 'Translation'}
-                            </span>
-                          </td>
-                          <td className="p-3 font-medium text-slate-900">
-                            {a.assignee_name || a.assignee_user_id}
-                          </td>
-                          <td className="p-3">
-                            {a.target_language ? (
-                              <span className="px-2 py-0.5 bg-emerald-50 text-emerald-800 border border-emerald-200 rounded font-semibold text-[10px]">
-                                {a.target_language}
-                              </span>
-                            ) : (
-                              <span className="text-slate-400 font-mono text-[11px]">—</span>
-                            )}
-                          </td>
-                          <td className="p-3 text-[11px] text-slate-500 font-mono">
-                            {new Date(a.assigned_at).toLocaleDateString()}
-                          </td>
-                          <td className="p-3">
-                            <span
-                              className={`px-2 py-0.5 rounded text-[10px] font-bold ${
-                                a.status === 'COMPLETED'
-                                  ? 'bg-emerald-100 text-emerald-800'
-                                  : a.status === 'REJECTED'
-                                  ? 'bg-rose-100 text-rose-800'
-                                  : 'bg-amber-100 text-amber-800'
-                              }`}
-                            >
-                              {a.status}
-                            </span>
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
+              {/* Main Matrix Card */}
+              <div className="p-6 rounded-2xl bg-white border border-slate-200/80 shadow-xs space-y-5">
+                {/* Search and Filter Controls */}
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-4 border-b border-slate-100">
+                  <div>
+                    <h3 className="text-base font-bold text-slate-900 flex items-center gap-2">
+                      <span>Live Verification & Audit Matrix</span>
+                      <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-100 text-emerald-800 border border-emerald-200">
+                        Real-Time Synced
+                      </span>
+                    </h3>
+                    <p className="text-xs text-slate-500 mt-0.5">
+                      Cryptographic tracking across all assigned Subject Matter Experts and Linguistic Translators.
+                    </p>
+                  </div>
+
+                  <div className="flex items-center gap-2">
+                    <div className="relative">
+                      <Search className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
+                      <input
+                        type="text"
+                        placeholder="Search question, assignee..."
+                        value={matrixSearch}
+                        onChange={e => setMatrixSearch(e.target.value)}
+                        className="pl-8 pr-3 py-1.5 rounded-xl border border-slate-200 text-xs w-48 focus:w-60 focus:outline-none focus:border-emerald-600 transition-all"
+                      />
+                    </div>
+                  </div>
                 </div>
-              )}
+
+                {/* Filter Pills */}
+                <div className="flex flex-wrap items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setMatrixFilter('ALL')}
+                    className={`px-3 py-1.5 rounded-full text-xs font-bold transition-all cursor-pointer ${
+                      matrixFilter === 'ALL'
+                        ? 'bg-[#00cc5f] text-black shadow-[0_2px_10px_rgba(0,204,95,0.35)]'
+                        : 'bg-white/70 dark:bg-white/[0.04] text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-white/[0.08] border border-slate-200/80 dark:border-white/10'
+                    }`}
+                  >
+                    All Tasks ({assignments.length})
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setMatrixFilter('SME_REVIEW')}
+                    className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                      matrixFilter === 'SME_REVIEW'
+                        ? 'bg-blue-600 text-white shadow-xs'
+                        : 'bg-blue-50 text-blue-700 hover:bg-blue-100 border border-blue-200/50'
+                    }`}
+                  >
+                    SME Reviews ({assignments.filter(a => a.assignment_type === 'SME_REVIEW').length})
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setMatrixFilter('TRANSLATION')}
+                    className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                      matrixFilter === 'TRANSLATION'
+                        ? 'bg-purple-600 text-white shadow-xs'
+                        : 'bg-purple-50 text-purple-700 hover:bg-purple-100 border border-purple-200/50'
+                    }`}
+                  >
+                    Translations ({assignments.filter(a => a.assignment_type === 'LINGUISTIC_TRANSLATION').length})
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setMatrixFilter('COMPLETED')}
+                    className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                      matrixFilter === 'COMPLETED'
+                        ? 'bg-emerald-600 text-white shadow-xs'
+                        : 'bg-emerald-50 text-emerald-700 hover:bg-emerald-100 border border-emerald-200/50'
+                    }`}
+                  >
+                    Completed ({assignments.filter(a => a.status === 'COMPLETED').length})
+                  </button>
+                </div>
+
+                {/* Verification Matrix Table */}
+                {(() => {
+                  const filteredAssignments = assignments.filter(a => {
+                    if (matrixFilter === 'SME_REVIEW' && a.assignment_type !== 'SME_REVIEW') return false;
+                    if (matrixFilter === 'TRANSLATION' && a.assignment_type !== 'LINGUISTIC_TRANSLATION') return false;
+                    if (matrixFilter === 'COMPLETED' && a.status !== 'COMPLETED') return false;
+                    if (matrixSearch.trim()) {
+                      const query = matrixSearch.toLowerCase();
+                      const matchQ = a.question_id?.toLowerCase().includes(query);
+                      const matchUser = (a.assignee_name || a.assignee_user_id || '').toLowerCase().includes(query);
+                      const matchLang = (a.target_language || '').toLowerCase().includes(query);
+                      return matchQ || matchUser || matchLang;
+                    }
+                    return true;
+                  });
+
+                  if (filteredAssignments.length === 0) {
+                    return (
+                      <div className="py-12 text-center bg-slate-50/70 border border-dashed border-slate-200 rounded-2xl space-y-3">
+                        <div className="w-12 h-12 rounded-2xl bg-white shadow-xs border border-slate-200 text-slate-400 mx-auto flex items-center justify-center">
+                          <CheckSquare className="w-6 h-6" />
+                        </div>
+                        <h4 className="text-sm font-bold text-slate-800">No Assignments Match Criteria</h4>
+                        <p className="text-xs text-slate-500 max-w-sm mx-auto">
+                          Extract questions from the PDF Studio or assign items from Question Pools to populate the verification matrix.
+                        </p>
+                      </div>
+                    );
+                  }
+
+                  return (
+                    <div className="overflow-hidden rounded-xl border border-slate-200">
+                      <table className="w-full text-left text-xs">
+                        <thead>
+                          <tr className="bg-slate-50 border-b border-slate-200 text-slate-600 font-bold uppercase text-[10px] tracking-wider">
+                            <th className="py-3 px-4">Question Anchor</th>
+                            <th className="py-3 px-4">Task Type</th>
+                            <th className="py-3 px-4">Assigned Expert</th>
+                            <th className="py-3 px-4">Target Language</th>
+                            <th className="py-3 px-4">Assigned Date</th>
+                            <th className="py-3 px-4">Audit Status</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-slate-100">
+                          {filteredAssignments.map(a => (
+                            <tr key={a.id} className="hover:bg-slate-50/70 transition-colors">
+                              <td className="py-3 px-4 font-mono text-[11px] font-bold text-slate-800">
+                                <span className="px-2 py-1 bg-slate-100 rounded-md border border-slate-200">
+                                  {a.question_id.substring(0, 12)}...
+                                </span>
+                              </td>
+                              <td className="py-3 px-4">
+                                <span
+                                  className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[10px] font-bold ${
+                                    a.assignment_type === 'SME_REVIEW'
+                                      ? 'bg-blue-100 text-blue-900 border border-blue-200'
+                                      : 'bg-purple-100 text-purple-900 border border-purple-200'
+                                  }`}
+                                >
+                                  {a.assignment_type === 'SME_REVIEW' ? (
+                                    <>
+                                      <UserCheck className="w-3 h-3 text-blue-600" />
+                                      <span>SME Review</span>
+                                    </>
+                                  ) : (
+                                    <>
+                                      <Languages className="w-3 h-3 text-purple-600" />
+                                      <span>Translation</span>
+                                    </>
+                                  )}
+                                </span>
+                              </td>
+                              <td className="py-3 px-4 font-semibold text-slate-900">
+                                <div className="flex items-center gap-2">
+                                  <div className="w-6 h-6 rounded-full bg-slate-200 text-slate-700 text-[10px] font-black flex items-center justify-center">
+                                    {(a.assignee_name || a.assignee_user_id || '?').charAt(0).toUpperCase()}
+                                  </div>
+                                  <span>{a.assignee_name || a.assignee_user_id}</span>
+                                </div>
+                              </td>
+                              <td className="py-3 px-4">
+                                {a.target_language ? (
+                                  <span className="px-2.5 py-1 bg-emerald-50 text-emerald-800 border border-emerald-200 rounded-full font-bold text-[10px]">
+                                    {a.target_language}
+                                  </span>
+                                ) : (
+                                  <span className="text-slate-400 font-mono text-[11px]">—</span>
+                                )}
+                              </td>
+                              <td className="py-3 px-4 text-[11px] text-slate-500 font-mono">
+                                {new Date(a.assigned_at).toLocaleDateString(undefined, {
+                                  month: 'short',
+                                  day: 'numeric',
+                                  year: 'numeric',
+                                })}
+                              </td>
+                              <td className="py-3 px-4">
+                                <span
+                                  className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[10px] font-bold ${
+                                    a.status === 'COMPLETED'
+                                      ? 'bg-emerald-100 text-emerald-800 border border-emerald-200'
+                                      : a.status === 'REJECTED'
+                                      ? 'bg-rose-100 text-rose-800 border border-rose-200'
+                                      : 'bg-amber-100 text-amber-800 border border-amber-200'
+                                  }`}
+                                >
+                                  {a.status === 'COMPLETED' && <Check className="w-3 h-3 text-emerald-600" />}
+                                  {a.status === 'PENDING' && <Clock className="w-3 h-3 text-amber-600" />}
+                                  {a.status}
+                                </span>
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  );
+                })()}
+              </div>
             </div>
           )}
         </div>
@@ -2492,13 +2517,40 @@ Marks: 10`}
                         </div>
 
                         <div className="flex items-center gap-2">
+                          {ex.simulation_status === 'COMPLETED' ? (
+                            <span
+                              className="px-3 py-2 bg-emerald-50 text-emerald-800 border border-emerald-300 rounded-lg font-bold text-xs flex items-center gap-1.5 shadow-2xs"
+                              title="Simulation already completed. The final question paper cannot be viewed again in simulation mode."
+                            >
+                              <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
+                              <span>Simulation Completed ✓</span>
+                            </span>
+                          ) : (
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                handleSimulateExam(ex);
+                              }}
+                              className="px-3.5 py-2 bg-emerald-700 hover:bg-emerald-600 text-white rounded-lg font-bold text-xs shadow-xs flex items-center gap-1.5 cursor-pointer transition-all"
+                              title="Start Proctored Final Paper Simulation"
+                            >
+                              <Camera className="w-3.5 h-3.5" />
+                              <span>Simulate Exam</span>
+                            </button>
+                          )}
+
                           <button
                             onClick={(e) => {
                               e.stopPropagation();
                               handleGeneratePaper(ex.id);
                             }}
                             disabled={generating || org?.status !== 'VERIFIED'}
-                            className="px-4 py-2 bg-emerald-900 hover:bg-emerald-800 disabled:opacity-40 text-white rounded-lg font-bold text-xs shadow-xs flex items-center gap-1.5"
+                            className={`px-4 py-2 rounded-lg font-bold text-xs shadow-xs flex items-center gap-1.5 ${
+                              ex.simulation_status === 'COMPLETED'
+                                ? 'bg-emerald-900 hover:bg-emerald-800 text-white ring-2 ring-emerald-500/30'
+                                : 'bg-slate-900 hover:bg-slate-800 text-white disabled:opacity-40'
+                            }`}
                           >
                             <Lock className="w-3.5 h-3.5" />
                             <span>{generating ? 'Encrypting...' : `Generate ${type} Paper`}</span>
@@ -2509,10 +2561,11 @@ Marks: 10`}
                               e.stopPropagation();
                               handleEmergencyRegenerate(ex.id);
                             }}
-                            className="px-3 py-2 bg-rose-50 hover:bg-rose-100 text-rose-800 border border-rose-200 rounded-lg font-bold text-xs flex items-center gap-1.5"
+                            className="px-3 py-2 bg-rose-50 hover:bg-rose-100 text-rose-800 border border-rose-200 rounded-lg font-bold text-xs flex items-center gap-1.5 cursor-pointer"
+                            title="Emergency Question Paper Regeneration"
                           >
                             <RotateCcw className="w-3.5 h-3.5" />
-                            <span>Invalidate</span>
+                            <span>Emergency Re-Gen</span>
                           </button>
                         </div>
                       </div>
@@ -2548,14 +2601,36 @@ Marks: 10`}
                     </p>
                   </div>
 
-                  <button
-                    onClick={() => handleGeneratePaper(currentExam.id)}
-                    disabled={generating || org?.status !== 'VERIFIED'}
-                    className="px-5 py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg font-bold text-xs shadow-md transition-all flex items-center gap-2 disabled:opacity-40"
-                  >
-                    <Lock className="w-4 h-4" />
-                    <span>{generating ? 'Processing Cryptographic Pipeline...' : `Execute ${currentType} Paper Generation`}</span>
-                  </button>
+                  <div className="flex items-center gap-2">
+                    {currentExam.simulation_status === 'COMPLETED' ? (
+                      <span
+                        className="px-4 py-2.5 bg-emerald-500/20 text-emerald-400 border border-emerald-500/40 rounded-lg font-bold text-xs flex items-center gap-1.5"
+                        title="Simulation already completed. The final question paper cannot be viewed again in simulation mode."
+                      >
+                        <CheckCircle2 className="w-4 h-4 text-emerald-400" />
+                        <span>Simulation Completed ✓</span>
+                      </span>
+                    ) : (
+                      <button
+                        type="button"
+                        onClick={() => handleSimulateExam(currentExam)}
+                        className="px-4 py-2.5 bg-emerald-700 hover:bg-emerald-600 text-white rounded-lg font-bold text-xs shadow-md transition-all flex items-center gap-2 cursor-pointer"
+                        title="Start Proctored Final Paper Simulation"
+                      >
+                        <Camera className="w-4 h-4" />
+                        <span>Simulate Exam</span>
+                      </button>
+                    )}
+
+                    <button
+                      onClick={() => handleGeneratePaper(currentExam.id)}
+                      disabled={generating || org?.status !== 'VERIFIED'}
+                      className="px-5 py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg font-bold text-xs shadow-md transition-all flex items-center gap-2 disabled:opacity-40"
+                    >
+                      <Lock className="w-4 h-4" />
+                      <span>{generating ? 'Processing Cryptographic Pipeline...' : `Execute ${currentType} Paper Generation`}</span>
+                    </button>
+                  </div>
                 </div>
 
                 {/* TYPE-SPECIFIC ENGINE ARCHITECTURE */}
@@ -2678,6 +2753,14 @@ Marks: 10`}
         </div>
       )}
 
+      {/* DYNAMIC MULTI-PAPER GENERATOR */}
+      {activeSubTab === 'multi_paper_generator' && (
+        <DynamicMultiPaperGenerator
+          examinations={examinations}
+          selectedExamId={selectedGenExamId || (examinations[0]?.id || '')}
+        />
+      )}
+
       {/* PAPER VERSIONS */}
       {activeSubTab === 'paper_versions' && (
         <div className="p-6 rounded-xl bg-white border border-slate-200 shadow-xs space-y-4">
@@ -2707,85 +2790,270 @@ Marks: 10`}
       {/* EXAMINATION CENTRES */}
       {activeSubTab === 'examination_centres' && (
         <div className="space-y-6">
-          <div className="p-6 rounded-xl bg-white border border-slate-200 shadow-xs space-y-4">
-            <h3 className="text-base font-bold text-slate-900">Add Examination Delivery Centre</h3>
-            <form onSubmit={handleAddCentre} className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
+          {/* Header Card */}
+          <div className="p-6 rounded-2xl bg-white border border-slate-200/90 shadow-xs flex flex-wrap items-center justify-between gap-4">
+            <div className="flex items-center gap-3">
+              <div className="p-2.5 rounded-xl bg-emerald-50 text-emerald-900 border border-emerald-200">
+                <Building2 className="w-5 h-5" />
+              </div>
               <div>
-                <label className="block text-slate-700 font-bold mb-1">Target Examination</label>
-                <select
-                  value={selectedExamId}
-                  onChange={e => setSelectedExamId(e.target.value)}
-                  className="w-full px-3 py-2 rounded-lg bg-slate-50 border border-slate-300 text-slate-900"
-                >
-                  {examinations.map(ex => (
-                    <option key={ex.id} value={ex.id}>{ex.name}</option>
-                  ))}
-                </select>
+                <h3 className="text-base font-bold text-slate-900">Examination Delivery Centres</h3>
+                <p className="text-xs text-slate-500">
+                  Manage authorized test centres, copy control quotas (MIN rule), and real-time mismatch alerts.
+                </p>
               </div>
+            </div>
 
-              <div>
-                <label className="block text-slate-700 font-bold mb-1">Centre Code</label>
-                <input
-                  type="text"
-                  value={centreCode}
-                  onChange={e => setCentreCode(e.target.value)}
-                  placeholder="e.g. CTR-DELHI-101"
-                  required
-                  className="w-full px-3 py-2 rounded-lg bg-slate-50 border border-slate-300 text-slate-900"
-                />
-              </div>
+            <div className="flex items-center gap-2.5">
+              <select
+                value={centresFilterExamId}
+                onChange={e => setCentresFilterExamId(e.target.value)}
+                className="px-3 py-2 rounded-xl bg-slate-50 border border-slate-200 text-xs font-medium text-slate-700 focus:bg-white"
+              >
+                <option value="ALL">All Examinations ({allCentresList.length} centres)</option>
+                {examinations.map(ex => {
+                  const count = allCentresList.filter(c => c.exam_id === ex.id).length;
+                  return (
+                    <option key={ex.id} value={ex.id}>
+                      {ex.name} ({count})
+                    </option>
+                  );
+                })}
+              </select>
 
-              <div>
-                <label className="block text-slate-700 font-bold mb-1">Centre Name</label>
-                <input
-                  type="text"
-                  value={centreName}
-                  onChange={e => setCentreName(e.target.value)}
-                  placeholder="e.g. National Institute of Technology Centre 1"
-                  required
-                  className="w-full px-3 py-2 rounded-lg bg-slate-50 border border-slate-300 text-slate-900"
-                />
-              </div>
-
-              <div>
-                <label className="block text-slate-700 font-bold mb-1">City</label>
-                <input
-                  type="text"
-                  value={centreCity}
-                  onChange={e => setCentreCity(e.target.value)}
-                  placeholder="e.g. New Delhi"
-                  required
-                  className="w-full px-3 py-2 rounded-lg bg-slate-50 border border-slate-300 text-slate-900"
-                />
-              </div>
-
-              <div>
-                <label className="block text-slate-700 font-bold mb-1">Max Authorized Copies</label>
-                <input
-                  type="number"
-                  value={centreMaxCopies}
-                  onChange={e => setCentreMaxCopies(Number(e.target.value))}
-                  required
-                  className="w-full px-3 py-2 rounded-lg bg-slate-50 border border-slate-300 text-slate-900"
-                />
-              </div>
-
-              <div className="flex items-end">
-                <button
-                  type="submit"
-                  className="w-full py-2 bg-emerald-900 hover:bg-emerald-800 text-white rounded-lg font-bold text-xs shadow-xs"
-                >
-                  Register Examination Centre
-                </button>
-              </div>
-            </form>
+              <button
+                type="button"
+                onClick={() => handleOpenAddCentreModal(centresFilterExamId !== 'ALL' ? centresFilterExamId : undefined)}
+                className="px-4 py-2 bg-emerald-900 hover:bg-emerald-800 text-white rounded-xl font-bold text-xs shadow-xs flex items-center gap-1.5 transition-all cursor-pointer"
+              >
+                <PlusCircle className="w-4 h-4" />
+                <span>Add Centre</span>
+              </button>
+            </div>
           </div>
+
+          {/* Centres Grid */}
+          {(() => {
+            const filteredCentres = centresFilterExamId === 'ALL'
+              ? allCentresList
+              : allCentresList.filter(c => c.exam_id === centresFilterExamId);
+
+            if (filteredCentres.length === 0) {
+              return (
+                <div className="p-12 text-center rounded-2xl bg-white border border-slate-200 shadow-xs space-y-4">
+                  <div className="w-12 h-12 rounded-2xl bg-slate-100 text-slate-400 mx-auto flex items-center justify-center">
+                    <Building2 className="w-6 h-6" />
+                  </div>
+                  <div className="space-y-1">
+                    <h4 className="font-bold text-sm text-slate-800">No Examination Centres Registered</h4>
+                    <p className="text-xs text-slate-500 max-w-md mx-auto">
+                      Add delivery centres to assign examinations, configure authorized printing quotas, and enforce tamper-proof copy control limits.
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => handleOpenAddCentreModal()}
+                    className="px-4 py-2 bg-emerald-900 hover:bg-emerald-800 text-white rounded-xl font-bold text-xs shadow-xs inline-flex items-center gap-1.5 cursor-pointer"
+                  >
+                    <PlusCircle className="w-4 h-4" />
+                    <span>Add Examination Centre</span>
+                  </button>
+                </div>
+              );
+            }
+
+            return (
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                {filteredCentres.map(centre => {
+                  const exam = examinations.find(e => e.id === centre.exam_id);
+                  const managerCap = Number(exam?.max_copies || centre.managerAuthorized || 500);
+                  const centreQuota = Number(centre.max_copies || centre.centreAuthorized || 100);
+                  const finalAllowed = Math.min(managerCap, centreQuota);
+                  const hasMismatch = centre.hasMismatch || managerCap !== centreQuota;
+
+                  return (
+                    <div
+                      key={centre.id}
+                      className={`p-5 rounded-2xl bg-white border shadow-xs space-y-3.5 transition-all ${
+                        hasMismatch ? 'border-amber-300 ring-1 ring-amber-300/50' : 'border-slate-200'
+                      }`}
+                    >
+                      {/* Top row */}
+                      <div className="flex items-start justify-between gap-3">
+                        <div>
+                          <div className="flex items-center gap-2">
+                            <span className="font-mono text-xs font-bold px-2 py-0.5 rounded-md bg-slate-900 text-white">
+                              {centre.centre_code}
+                            </span>
+                            <span className="inline-flex items-center px-2 py-0.5 rounded-md text-[10px] font-bold bg-emerald-50 text-emerald-800 border border-emerald-200">
+                              {centre.status || 'ACTIVE'}
+                            </span>
+                          </div>
+                          <h4 className="font-bold text-sm text-slate-900 mt-1.5">{centre.centre_name}</h4>
+                          <p className="text-xs text-slate-500 flex items-center gap-1 mt-0.5">
+                            <MapPin className="w-3 h-3 text-slate-400 shrink-0" />
+                            <span>{centre.address ? `${centre.address}, ` : ''}{centre.city}{centre.state ? `, ${centre.state}` : ''}</span>
+                          </p>
+                        </div>
+
+                        {hasMismatch && (
+                          <span
+                            className="px-2.5 py-1 rounded-lg bg-amber-100 text-amber-900 border border-amber-300 font-bold text-[10px] flex items-center gap-1 shrink-0"
+                            title="Quota Mismatch: Requested copies exceed Manager Authorized Cap. Backend hard limit enforced."
+                          >
+                            <AlertTriangle className="w-3.5 h-3.5 text-amber-600" />
+                            <span>Quota Mismatch</span>
+                          </span>
+                        )}
+                      </div>
+
+                      {/* Examination info */}
+                      {exam && (
+                        <div className="p-2.5 rounded-xl bg-slate-50 border border-slate-200/80 text-xs">
+                          <span className="text-[10px] text-slate-400 block uppercase font-bold">Assigned Examination</span>
+                          <span className="font-bold text-slate-800">{exam.name}</span>
+                          <span className="text-slate-500 font-medium"> ({exam.subject})</span>
+                        </div>
+                      )}
+
+                      {/* Contact details */}
+                      {(centre.contact_person || centre.contact_number || centre.email) && (
+                        <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 text-xs py-1 border-t border-slate-100">
+                          {centre.contact_person && (
+                            <div className="flex items-center gap-1 text-slate-600 truncate" title={centre.contact_person}>
+                              <UserIcon className="w-3 h-3 text-slate-400 shrink-0" />
+                              <span className="truncate">{centre.contact_person}</span>
+                            </div>
+                          )}
+                          {centre.contact_number && (
+                            <div className="flex items-center gap-1 text-slate-600 truncate" title={centre.contact_number}>
+                              <Phone className="w-3 h-3 text-slate-400 shrink-0" />
+                              <span className="truncate font-mono">{centre.contact_number}</span>
+                            </div>
+                          )}
+                          {centre.email && (
+                            <div className="flex items-center gap-1 text-slate-600 truncate" title={centre.email}>
+                              <Mail className="w-3 h-3 text-slate-400 shrink-0" />
+                              <span className="truncate">{centre.email}</span>
+                            </div>
+                          )}
+                        </div>
+                      )}
+
+                      {/* Copy Control Breakdown */}
+                      <div className="p-3 rounded-xl bg-slate-50 border border-slate-200 space-y-2">
+                        <div className="flex items-center justify-between text-[11px]">
+                          <span className="font-bold text-slate-700 flex items-center gap-1">
+                            <ShieldAlert className="w-3 h-3 text-emerald-700" />
+                            Copy Control Rule: MIN(Manager Cap, Centre Quota)
+                          </span>
+                          <span className="text-slate-500">
+                            Printed: <strong className="text-slate-800">{centre.totalPrinted || 0}</strong>
+                          </span>
+                        </div>
+
+                        <div className="grid grid-cols-3 gap-2 text-center text-xs">
+                          <div className="p-1.5 rounded-lg bg-white border border-slate-200">
+                            <span className="block text-[10px] text-slate-500">Manager Cap</span>
+                            <span className="font-bold text-slate-800">{managerCap}</span>
+                          </div>
+                          <div className="p-1.5 rounded-lg bg-white border border-slate-200">
+                            <span className="block text-[10px] text-slate-500">Centre Quota</span>
+                            <span className="font-bold text-slate-800">{centreQuota}</span>
+                          </div>
+                          <div className={`p-1.5 rounded-lg border ${
+                            hasMismatch
+                              ? 'bg-amber-50 border-amber-300 text-amber-900'
+                              : 'bg-emerald-50 border-emerald-300 text-emerald-900'
+                          }`}>
+                            <span className="block text-[10px] font-medium opacity-80">Final Authorized</span>
+                            <span className="font-black">{finalAllowed}</span>
+                          </div>
+                        </div>
+
+                        {hasMismatch && (
+                          <p className="text-[10px] text-amber-800 font-medium leading-tight">
+                            Alert logged: Centre requested {centreQuota} copies, but Manager cap is {managerCap}. Hard limit restricted to {finalAllowed}.
+                          </p>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            );
+          })()}
         </div>
       )}
 
       {/* AUTHORITY SURVEILLANCE & LEAK PREVENTION DASHBOARD */}
       {activeSubTab === 'proctor_dashboard' && (
         <AuthoritySurveillanceDashboard currentUser={currentUser} />
+      )}
+
+      {/* Diagram Zoom Lightbox Modal */}
+      {zoomDiagramUrl && (
+        <div 
+          className="fixed inset-0 z-50 bg-black/80 flex items-center justify-center p-4 backdrop-blur-xs"
+          onClick={() => setZoomDiagramUrl(null)}
+        >
+          <div 
+            className="bg-white rounded-2xl p-4 max-w-3xl max-h-[85vh] flex flex-col shadow-2xl overflow-hidden"
+            onClick={e => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between pb-3 border-b border-slate-100">
+              <span className="font-bold text-slate-800 text-sm flex items-center gap-2">
+                <ImageIcon className="w-4 h-4 text-emerald-700" />
+                High-Resolution Diagram Preview
+              </span>
+              <button
+                type="button"
+                onClick={() => setZoomDiagramUrl(null)}
+                className="p-1 rounded-lg text-slate-400 hover:text-slate-600 hover:bg-slate-100"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+            <div className="p-4 flex items-center justify-center overflow-auto max-h-[70vh]">
+              <img
+                src={zoomDiagramUrl}
+                alt="Full size diagram"
+                className="max-w-full max-h-full object-contain rounded-lg shadow-xs"
+              />
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Strictly One-Time Proctored Exam Simulation Modal */}
+      {simulationExam && currentUser && (
+        <ExamSimulationModal
+          exam={simulationExam}
+          currentUser={currentUser}
+          onClose={() => setSimulationExam(null)}
+          onCompleted={handleSimulationCompleted}
+        />
+      )}
+
+      {/* Add Examination Centre Modal */}
+      {addCentreModalExam && (
+        <AddCentreModal
+          exam={addCentreModalExam}
+          isOpen={Boolean(addCentreModalExam)}
+          onClose={() => setAddCentreModalExam(null)}
+          onSuccess={handleCentreAdded}
+        />
+      )}
+
+      {/* Emergency Paper Regeneration Modal */}
+      {emergencyRegenModalExam && (
+        <EmergencyRegenModal
+          exam={emergencyRegenModalExam}
+          currentVersionCode={emergencyRegenModalExam.version_code}
+          isOpen={Boolean(emergencyRegenModalExam)}
+          onClose={() => setEmergencyRegenModalExam(null)}
+          onSuccess={handleEmergencyRegenCompleted}
+        />
       )}
     </div>
   );

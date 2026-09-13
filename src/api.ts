@@ -18,6 +18,19 @@ import {
   AuthorityProctorEvent,
   AuthoritySurveillanceMetrics,
   AicteUniversity,
+  RegistrationVerificationResult,
+  MultiPaperSourcePaper,
+  PaperBlueprintConfig,
+  BlueprintValidationResult,
+  GeneratedPaper,
+  GeneratedPaperQuestion,
+  CandidateAssignmentItem,
+  ExamSimulationStartResponse,
+  ExaminationCentre,
+  AddCentrePayload,
+  AddCentreResponse,
+  EmergencyRegeneratePayload,
+  EmergencyRegenerateResponse,
 } from './types';
 
 export const DEVICE_APPROVAL_EVENT = 'zeroleak:device-approval-needed';
@@ -287,6 +300,31 @@ export const api = {
   verifyDeviceChallenge: (payload: { challengeId: string; signature: string; deviceUuid: string }) => request<{ message: string; token: string; user: User; device: any }>('/api/auth/device/verify', { method: 'POST', body: JSON.stringify(payload) }),
   getMe: () => request<{ user: User }>('/api/auth/me'),
 
+  // Two-stage public registration
+  verifyOrganization: (payload: any) =>
+    request<{ result: RegistrationVerificationResult; orgId: string; token: string | null; user: User | null }>(
+      '/api/registration/verify-organization',
+      { method: 'POST', body: JSON.stringify(payload) },
+    ),
+  deviceBindingChallenge: (payload: { public_key: string; device_name?: string }, bindingToken: string) =>
+    request<{ challengeId: string; challenge: string }>(
+      '/api/registration/device-binding/challenge',
+      {
+        method: 'POST',
+        body: JSON.stringify(payload),
+        headers: { Authorization: `Bearer ${bindingToken}` },
+      },
+    ),
+  deviceBindingVerify: (payload: { challengeId: string; signature: string }, bindingToken: string) =>
+    request<{ message: string; token: string; user: User; device: TrustedDevice }>(
+      '/api/registration/device-binding/verify',
+      {
+        method: 'POST',
+        body: JSON.stringify(payload),
+        headers: { Authorization: `Bearer ${bindingToken}` },
+      },
+    ),
+
   // Organizations
   registerOrg: (payload: any) => request<{ message: string; orgId: string; verification: any }>('/api/organizations/register', { method: 'POST', body: JSON.stringify(payload) }),
   getCurrentOrg: () => request<{ organization: Organization | null; documents: OrganizationDocument[]; history: VerificationHistoryItem[]; representatives: any[] }>('/api/organizations/current'),
@@ -315,16 +353,22 @@ export const api = {
   // Examinations
   getExaminations: () => request<{ examinations: Examination[] }>('/api/examinations'),
   createExamination: (payload: any) => request<{ message: string; examId: string }>('/api/examinations', { method: 'POST', body: JSON.stringify(payload) }),
-  getExaminationDetails: (id: string) => request<{ examination: Examination; configuration: any; centres: any[]; versions: any[] }>(`/api/examinations/${id}`),
-  addCentre: (examId: string, payload: any) => request<{ message: string; centreId: string }>(`/api/examinations/${examId}/centres`, { method: 'POST', body: JSON.stringify(payload) }),
+  getExaminationDetails: (id: string) => request<{ examination: Examination; configuration: any; centres: ExaminationCentre[]; versions: any[] }>(`/api/examinations/${id}`),
+  addCentre: (examId: string, payload: AddCentrePayload) => request<AddCentreResponse>(`/api/examinations/${examId}/centres`, { method: 'POST', body: JSON.stringify(payload) }),
+  getCentresForExam: (examId: string) => request<{ centres: ExaminationCentre[]; managerAuthorized: number }>(`/api/examinations/${examId}/centres`),
+  getAllCentres: () => request<{ centres: ExaminationCentre[] }>('/api/centres'),
   analyzeTheoryPattern: (examId: string, reference_text: string) => request<{ message: string; pattern: any }>(`/api/examinations/${examId}/analyze-pattern`, { method: 'POST', body: JSON.stringify({ reference_text }) }),
   confirmPattern: (examId: string, payload: any) => request<{ message: string }>(`/api/examinations/${examId}/confirm-pattern`, { method: 'POST', body: JSON.stringify(payload) }),
 
   // Questions & OCR/PDF Extraction & Assignments
   getQuestions: () => request<{ questions: Question[] }>('/api/questions'),
   createQuestion: (payload: any) => request<{ message: string; questionId: string }>('/api/questions', { method: 'POST', body: JSON.stringify(payload) }),
-  extractQuestionsFromPaper: (payload: { paper_text?: string; file_name?: string; file_data?: string; subject?: string; category?: string }) =>
+  extractQuestionsFromPaper: (payload: { paper_text?: string; file_name?: string; file_data?: string; subject?: string; category?: string; job_id?: string }) =>
     request<PaperExtractionResponse>('/api/question-papers/extract', { method: 'POST', body: JSON.stringify(payload) }),
+  extractThreeStandardPapers: () =>
+    request<{ message: string; extractedQuestions: any[]; papers: any[]; totalExtracted: number }>('/api/question-papers/extract-three-standard-papers', { method: 'POST' }),
+  getExtractionProgress: (jobId: string) =>
+    request<{ jobId: string; status: 'PENDING' | 'PROCESSING' | 'COMPLETED' | 'FAILED'; percent: number; stage: string; message: string; current: number; total: number; updatedAt: number }>(`/api/question-papers/extract-progress/${jobId}`),
   getOllamaHealth: () => request<{ connected: boolean; model: string; error?: string }>('/api/question-papers/ollama-health'),
   bulkCreateQuestions: (payload: { questions: any[]; auto_assign_sme_id?: string; auto_assign_translator_id?: string; target_language?: string; assignment_notes?: string }) =>
     request<{ message: string; createdCount: number; questionIds: string[] }>('/api/questions/bulk-create', { method: 'POST', body: JSON.stringify(payload) }),
@@ -341,6 +385,33 @@ export const api = {
   verifyQuestion: (id: string, payload: any) => request<{ message: string; newStatus: string }>(`/api/questions/${id}/verify`, { method: 'POST', body: JSON.stringify(payload) }),
   quarantineQuestion: (id: string, payload: any) => request<{ message: string; quarantineId: string }>(`/api/questions/${id}/quarantine`, { method: 'POST', body: JSON.stringify(payload) }),
   checkAiSimilarity: (candidate_text: string) => request<{ result: any }>('/api/questions/ai-similarity-check', { method: 'POST', body: JSON.stringify({ candidate_text }) }),
+
+  // Question Boundary Editor & Visual Crop Pipeline
+  getPaperPages: (paperId: string) =>
+    request<{ pages: Array<{ id: string; paper_id: string; page_number: number; image_url: string; width: number; height: number; dpi: number; disk_path?: string }> }>(`/api/papers/${paperId}/pages`),
+  getPaperQuestionsForReview: (paperId: string) =>
+    request<{
+      paper: any;
+      questions: any[];
+      stats: {
+        total: number;
+        autoExtracted: number;
+        needsReview: number;
+        manuallyCorrected: number;
+        completed: number;
+        skipped: number;
+      };
+    }>(`/api/papers/${paperId}/questions-review`),
+  cropQuestionBoundary: (payload: { questionId: string; pageNumber: number; x1: number; y1: number; x2: number; y2: number }) =>
+    request<{ success: boolean; questionId: string; imageUrl: string; crop_coordinates: any; extraction_status: string }>('/api/questions/crop-boundary', { method: 'POST', body: JSON.stringify(payload) }),
+  splitQuestionBoundary: (payload: { questionId: string; splitY: number }) =>
+    request<{ success: boolean; message: string; originalQuestion: any; newQuestion: any }>('/api/questions/split', { method: 'POST', body: JSON.stringify(payload) }),
+  mergeNextQuestionBoundary: (payload: { questionId: string; expandPixels?: number }) =>
+    request<{ success: boolean; imageUrl: string; crop_coordinates: any }>('/api/questions/merge-next', { method: 'POST', body: JSON.stringify(payload) }),
+  bulkFinalizeQuestions: (payload: { paperId?: string; questionIds?: string[] }) =>
+    request<{ success: boolean; message: string }>('/api/questions/bulk-finalize', { method: 'POST', body: JSON.stringify(payload) }),
+  updateQuestionReview: (payload: { questionId: string; content_text?: string; options?: any[]; correct_answer?: string; marks?: number; extraction_status?: string; options_status?: string }) =>
+    request<{ success: boolean; message: string }>('/api/questions/update-review', { method: 'POST', body: JSON.stringify(payload) }),
 
   // Multilingual Translation Workbench (Translator Role)
   getTranslations: (params?: { language?: string; status?: string; question_id?: string }) => {
@@ -380,7 +451,24 @@ export const api = {
       method: 'POST',
       body: JSON.stringify({ versionId }),
     }),
-  emergencyRegenerate: (examId: string, payload: any) => request<{ message: string; invalidatedVersion?: string; quarantinedCount: number }>(`/api/examinations/${examId}/emergency-regenerate`, { method: 'POST', body: JSON.stringify(payload) }),
+  emergencyRegenerate: (examId: string, payload: EmergencyRegeneratePayload) => request<EmergencyRegenerateResponse>(`/api/examinations/${examId}/emergency-regenerate`, { method: 'POST', body: JSON.stringify(payload) }),
+  
+  // Exam Simulation (Manager strictly one-time proctored preview)
+  startExamSimulation: (examId: string, payload?: any) =>
+    request<ExamSimulationStartResponse>(`/api/examinations/${examId}/simulate/start`, {
+      method: 'POST',
+      body: payload ? JSON.stringify(payload) : undefined,
+    }),
+  logSimulationEvent: (examId: string, payload: { sessionToken: string; eventType: string; details?: any }) =>
+    request<{ success: boolean; recordedEvent?: any }>(`/api/examinations/${examId}/simulate/event`, {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    }),
+  completeExamSimulation: (examId: string, payload: { sessionToken?: string; reason?: string }) =>
+    request<{ message: string; simulation_status: string; completedAt: string }>(`/api/examinations/${examId}/simulate/complete`, {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    }),
 
   // Secure Delivery & Printing
   getReleasedExams: () => request<{ examinations: Examination[] }>('/api/delivery/released-exams'),
@@ -549,6 +637,58 @@ export const api = {
       request<{ success: boolean; message: string }>(`/api/authority-proctor/sessions/${sessionId}/emergency-lock`, {
         method: 'POST',
         body: JSON.stringify({ reason }),
+      }),
+  },
+  multiPaper: {
+    getSourcePapers: (examId?: string) =>
+      request<{ success: boolean; papers: MultiPaperSourcePaper[] }>(
+        `/api/multi-paper/source-papers${examId ? `?examId=${encodeURIComponent(examId)}` : ''}`
+      ),
+    validateBlueprint: (blueprint: PaperBlueprintConfig, sourcePaperIds?: string[]) =>
+      request<{ success: boolean; validation: BlueprintValidationResult }>('/api/multi-paper/validate-blueprint', {
+        method: 'POST',
+        body: JSON.stringify({ blueprint, source_paper_ids: sourcePaperIds }),
+      }),
+    generate: (payload: {
+      exam_id?: string;
+      title: string;
+      blueprint: PaperBlueprintConfig;
+      versions: string[];
+      source_paper_ids?: string[];
+    }) =>
+      request<{ success: boolean; message: string; papers: GeneratedPaper[] }>('/api/multi-paper/generate', {
+        method: 'POST',
+        body: JSON.stringify(payload),
+      }),
+    getGeneratedPapers: (examId?: string) =>
+      request<{ success: boolean; papers: GeneratedPaper[] }>(
+        `/api/multi-paper/generated${examId ? `?examId=${encodeURIComponent(examId)}` : ''}`
+      ),
+    getGeneratedPaperDetails: (paperId: string) =>
+      request<{ success: boolean; paper: GeneratedPaper; questions: GeneratedPaperQuestion[] }>(
+        `/api/multi-paper/generated/${paperId}`
+      ),
+    assignCandidates: (payload: {
+      generated_paper_id: string;
+      candidates: { roll_number: string; candidate_name?: string; email?: string; center_code?: string; seat_number?: string }[];
+    }) =>
+      request<{ success: boolean; assigned_count: number; message: string }>('/api/multi-paper/assign-candidates', {
+        method: 'POST',
+        body: JSON.stringify(payload),
+      }),
+    getAssignments: (paperId: string) =>
+      request<{ success: boolean; assignments: CandidateAssignmentItem[] }>(
+        `/api/multi-paper/assignments?paperId=${encodeURIComponent(paperId)}`
+      ),
+    traceLeak: (payload: { fingerprint?: string; question_id?: string; candidate_roll?: string }) =>
+      request<{
+        success: boolean;
+        matched_paper?: GeneratedPaper | null;
+        matched_assignments?: CandidateAssignmentItem[];
+        matched_questions?: GeneratedPaperQuestion[];
+      }>('/api/multi-paper/trace-leak', {
+        method: 'POST',
+        body: JSON.stringify(payload),
       }),
   },
 };

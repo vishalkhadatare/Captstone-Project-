@@ -2,19 +2,43 @@
 
 :root {
   color-scheme: light;
-  --zeroleaf-bg: #F8FAFC;
-  --zeroleaf-panel: #FFFFFF;
-  --zeroleaf-primary: #047857;
-  --zeroleaf-primary-hover: #059669;
-  --zeroleaf-accent: #0F766E;
-  --zeroleaf-light: #CCFBF1;
+  --header-height: 4rem;
+  --strands-green: #00cc5f;
+  --strands-green-hover: #00e069;
+  --strands-green-glow: rgba(0, 204, 95, 0.35);
+  --strands-mint-bg: rgba(0, 204, 95, 0.1);
+  --strands-mint-border: rgba(0, 204, 95, 0.25);
+  --zeroleaf-bg: #FAFCFA;
+  --zeroleaf-panel: rgba(255, 255, 255, 0.82);
+  --zeroleaf-primary: #00cc5f;
+  --zeroleaf-primary-hover: #00e069;
+  --zeroleaf-accent: #00cc5f;
+  --zeroleaf-light: #d4f5e0;
   --zeroleaf-heading: #0F172A;
   --zeroleaf-body: #334155;
   --zeroleaf-muted: #64748B;
-  --zeroleaf-border: #E2E8F0;
-  --zeroleaf-success: #10B981;
+  --zeroleaf-border: rgba(0, 204, 95, 0.18);
+  --zeroleaf-success: #00cc5f;
   --zeroleaf-warning: #F59E0B;
   --zeroleaf-error: #EF4444;
+}
+
+html.dark {
+  color-scheme: dark;
+  --header-height: 4rem;
+  --strands-green: #00cc5f;
+  --strands-green-hover: #00ff77;
+  --strands-green-glow: rgba(0, 204, 95, 0.45);
+  --strands-mint-bg: rgba(0, 204, 95, 0.15);
+  --strands-mint-border: rgba(0, 204, 95, 0.35);
+  --zeroleaf-bg: #080B11;
+  --zeroleaf-panel: rgba(11, 15, 23, 0.7);
+  --zeroleaf-heading: #FFFFFF;
+  --zeroleaf-body: #CBD5E1;
+  --zeroleaf-muted: #94A3B8;
+  --zeroleaf-border: rgba(255, 255, 255, 0.1);
+  --zeroleaf-primary: #00cc5f;
+  --zeroleaf-primary-hover: #00ff77;
 }
 
 html {
@@ -26,9 +50,14 @@ html {
 body {
   margin: 0;
   min-width: 320px;
-  background: #F8FAFC;
+  background: #FAFCFA;
   color: #0F172A;
   font-feature-settings: "cv02", "cv03", "cv04", "cv11";
+}
+
+html.dark body {
+  background: #080B11;
+  color: #F3F4F6;
 }
 
 /* Modern Minimalist Scrollbars */
@@ -47,66 +76,76 @@ body {
   background: #94A3B8;
 }
 
-/* High-End Enterprise Design Utilities */
-/* High-End Enterprise Design Utilities */
-.modern-card {
-  background: #FFFFFF;
-  border: 1px solid #E2E8F0;
+html.dark ::-webkit-scrollbar-thumb {
+  background: #1E293B;
+}
+html.dark ::-webkit-scrollbar-thumb:hover {
+  background: #334155;
+}
+
+/* High-End Transparent Glassmorphic Design Utilities */
+.modern-card,
+.stat-card-luxury,
+.metric-card,
+.luxury-glass,
+.glass-card,
+.cyber-mesh-bg div[class*="rounded-2xl"][class*="bg-white"],
+.cyber-mesh-bg div[class*="rounded-3xl"][class*="bg-white"],
+.cyber-mesh-bg div[class*="rounded-xl"][class*="bg-white"] {
+  background: rgba(255, 255, 255, 0.82) !important;
+  backdrop-filter: blur(24px) !important;
+  -webkit-backdrop-filter: blur(24px) !important;
+  border: 1px solid rgba(0, 204, 95, 0.18) !important;
   border-radius: 1.25rem;
-  box-shadow: 0 4px 20px -2px rgba(15, 23, 42, 0.04);
+  box-shadow: 0 10px 30px -4px rgba(0, 204, 95, 0.08), 0 2px 8px rgba(15, 23, 42, 0.03) !important;
   transition: all 250ms cubic-bezier(0.16, 1, 0.3, 1);
 }
 
-.modern-card:hover {
-  border-color: #CBD5E1;
-  box-shadow: 0 12px 30px -4px rgba(15, 23, 42, 0.08);
+.modern-card:hover,
+.stat-card-luxury:hover,
+.metric-card:hover {
+  border-color: rgba(0, 204, 95, 0.45) !important;
+  box-shadow: 0 14px 36px -6px rgba(0, 204, 95, 0.18) !important;
 }
 
 .luxury-glass {
-  background: rgba(255, 255, 255, 0.85);
-  backdrop-filter: blur(16px);
-  -webkit-backdrop-filter: blur(16px);
-  border: 1px solid rgba(255, 255, 255, 0.9);
-  box-shadow: 0 20px 40px -10px rgba(15, 23, 42, 0.07), 0 0 0 1px rgba(226, 232, 240, 0.8);
+  background: rgba(255, 255, 255, 0.88) !important;
+  backdrop-filter: blur(24px) !important;
+  -webkit-backdrop-filter: blur(24px) !important;
+  border: 1px solid rgba(0, 204, 95, 0.22) !important;
+  box-shadow: 0 20px 40px -10px rgba(0, 204, 95, 0.1) !important;
   border-radius: 1.25rem;
 }
 
 .glass-card {
-  background: rgba(255, 255, 255, 0.9);
-  backdrop-filter: blur(14px);
-  -webkit-backdrop-filter: blur(14px);
-  border: 1px solid rgba(226, 232, 240, 0.85);
+  background: rgba(255, 255, 255, 0.85) !important;
+  backdrop-filter: blur(24px) !important;
+  -webkit-backdrop-filter: blur(24px) !important;
+  border: 1px solid rgba(0, 204, 95, 0.18) !important;
   border-radius: 1.25rem;
-  box-shadow: 0 10px 32px -4px rgba(15, 23, 42, 0.05);
+  box-shadow: 0 10px 32px -4px rgba(0, 204, 95, 0.08) !important;
 }
 
 .metric-card {
   padding: 1.25rem;
   border-radius: 1.25rem;
-  background: #FFFFFF;
-  border: 1px solid #E2E8F0;
-  box-shadow: 0 4px 16px -2px rgba(15, 23, 42, 0.04);
   position: relative;
   overflow: hidden;
-  transition: transform 220ms cubic-bezier(0.16, 1, 0.3, 1), box-shadow 220ms cubic-bezier(0.16, 1, 0.3, 1), border-color 220ms ease;
 }
 
 .metric-card:hover {
   transform: translateY(-3px);
-  border-color: #A7F3D0;
-  box-shadow: 0 16px 32px -6px rgba(4, 120, 87, 0.12);
+  border-color: #00cc5f !important;
+  box-shadow: 0 16px 36px -6px rgba(0, 204, 95, 0.22) !important;
 }
 
 .stat-card-luxury {
   position: relative;
   border-radius: 1.25rem;
-  background: #FFFFFF;
-  border: 1px solid #E2E8F0;
-  box-shadow: 0 4px 20px -2px rgba(15, 23, 42, 0.04);
-  transition: all 220ms cubic-bezier(0.16, 1, 0.3, 1);
   overflow: hidden;
 }
 
+/* Luminous Green Top Accent Line */
 .stat-card-luxury::before {
   content: '';
   position: absolute;
@@ -114,48 +153,321 @@ body {
   left: 0;
   right: 0;
   height: 3px;
-  background: linear-gradient(90deg, #059669, #0D9488, #0284C7);
-  opacity: 0.85;
+  background: linear-gradient(90deg, #00cc5f 0%, #00ff77 50%, #00cc5f 100%) !important;
+  box-shadow: 0 0 14px rgba(0, 204, 95, 0.6) !important;
+  opacity: 1 !important;
 }
 
 .stat-card-luxury:hover {
   transform: translateY(-2px);
-  box-shadow: 0 16px 32px -4px rgba(15, 23, 42, 0.08);
-  border-color: #CBD5E1;
+  box-shadow: 0 16px 36px -4px rgba(0, 204, 95, 0.2) !important;
+  border-color: #00cc5f !important;
 }
 
+/* Inner Workspace Shell: Fully transparent to show radiant curves backdrop */
 .cyber-mesh-bg {
-  background:
-    radial-gradient(ellipse 80% 60% at 50% -15%, rgba(16, 185, 129, 0.14), transparent),
-    radial-gradient(ellipse 60% 40% at 85% 20%, rgba(13, 148, 136, 0.08), transparent),
-    radial-gradient(ellipse 50% 50% at 10% 80%, rgba(59, 130, 246, 0.06), transparent),
-    #F8FAFC;
+  background: transparent !important;
+}
+
+/* Unified Dark Mode Glassmorphism Overrides */
+html.dark .cyber-mesh-bg {
+  background: transparent !important;
+  color: #F3F4F6 !important;
+}
+
+html.dark .modern-card,
+html.dark .stat-card-luxury,
+html.dark .metric-card,
+html.dark .glass-card,
+html.dark .luxury-glass,
+html.dark .cyber-mesh-bg div[class*="rounded-2xl"][class*="bg-white"],
+html.dark .cyber-mesh-bg div[class*="rounded-3xl"][class*="bg-white"],
+html.dark .cyber-mesh-bg div[class*="rounded-xl"][class*="bg-white"] {
+  background: rgba(11, 15, 23, 0.7) !important;
+  backdrop-filter: blur(24px) !important;
+  -webkit-backdrop-filter: blur(24px) !important;
+  border: 1px solid rgba(255, 255, 255, 0.09) !important;
+  border-top: 1px solid rgba(0, 204, 95, 0.35) !important;
+  box-shadow: 0 12px 40px 0 rgba(0, 0, 0, 0.6) !important;
+  color: #F3F4F6 !important;
+}
+
+html.dark .modern-card:hover,
+html.dark .stat-card-luxury:hover,
+html.dark .metric-card:hover {
+  border-color: rgba(0, 204, 95, 0.5) !important;
+  box-shadow: 0 14px 42px 0 rgba(0, 204, 95, 0.22) !important;
+}
+
+html.dark .cyber-mesh-bg div[class*="bg-slate-50"],
+html.dark .cyber-mesh-bg div[class*="bg-slate-100"] {
+  background: rgba(255, 255, 255, 0.04) !important;
+  border-color: rgba(255, 255, 255, 0.08) !important;
+  color: #E2E8F0 !important;
+}
+
+html.dark .cyber-mesh-bg [class*="text-slate-900"],
+html.dark .cyber-mesh-bg [class*="text-slate-950"],
+html.dark .cyber-mesh-bg [class*="text-black"] {
+  color: #F8FAFC !important;
+}
+
+html.dark .cyber-mesh-bg [class*="text-slate-500"],
+html.dark .cyber-mesh-bg [class*="text-slate-600"] {
+  color: #94A3B8 !important;
+}
+
+html.dark .cyber-mesh-bg input,
+html.dark .cyber-mesh-bg select,
+html.dark .cyber-mesh-bg textarea {
+  background: rgba(255, 255, 255, 0.04) !important;
+  border-color: rgba(255, 255, 255, 0.12) !important;
+  color: #FFFFFF !important;
+}
+
+.cyber-mesh-bg input:focus,
+.cyber-mesh-bg select:focus,
+.cyber-mesh-bg textarea:focus,
+.input-luxury:focus {
+  border-color: #00cc5f !important;
+  box-shadow: 0 0 0 3px rgba(0, 204, 95, 0.25) !important;
+  outline: none !important;
+}
+
+html.dark .cyber-mesh-bg input:focus,
+html.dark .cyber-mesh-bg select:focus,
+html.dark .cyber-mesh-bg textarea:focus {
+  background: rgba(255, 255, 255, 0.07) !important;
+  border-color: #00cc5f !important;
+  box-shadow: 0 0 0 3px rgba(0, 204, 95, 0.3) !important;
+}
+
+html.dark .cyber-mesh-bg table {
+  color: #E2E8F0 !important;
+}
+
+html.dark .cyber-mesh-bg th {
+  background: rgba(255, 255, 255, 0.04) !important;
+  color: #94A3B8 !important;
+  border-color: rgba(255, 255, 255, 0.08) !important;
+}
+
+html.dark .cyber-mesh-bg td {
+  border-color: rgba(255, 255, 255, 0.06) !important;
+}
+
+.cyber-mesh-bg tr:hover td {
+  background: rgba(0, 204, 95, 0.04) !important;
+}
+
+html.dark .cyber-mesh-bg tr:hover td {
+  background: rgba(0, 204, 95, 0.08) !important;
+}
+
+/* ========================================================================= */
+/* STRANDS AGENTS RADIANT #00cc5f ("production agents") BUTTONS & CONTROLS  */
+/* ========================================================================= */
+
+.btn-gradient-emerald,
+.cyber-mesh-bg button[class*="bg-emerald-900"],
+.cyber-mesh-bg button[class*="bg-emerald-800"],
+.cyber-mesh-bg button[class*="bg-emerald-700"],
+.cyber-mesh-bg button[class*="bg-emerald-600"],
+.cyber-mesh-bg a[class*="bg-emerald-900"],
+.cyber-mesh-bg a[class*="bg-emerald-800"],
+.cyber-mesh-bg a[class*="bg-emerald-700"],
+.cyber-mesh-bg a[class*="bg-emerald-600"] {
+  background: #00cc5f !important;
+  color: #000000 !important;
+  font-weight: 700 !important;
+  border: 1px solid rgba(0, 204, 95, 0.5) !important;
+  box-shadow: 0 4px 18px rgba(0, 204, 95, 0.35) !important;
+  transition: all 200ms ease !important;
+}
+
+.btn-gradient-emerald:hover,
+.cyber-mesh-bg button[class*="bg-emerald-900"]:hover,
+.cyber-mesh-bg button[class*="bg-emerald-800"]:hover,
+.cyber-mesh-bg button[class*="bg-emerald-700"]:hover,
+.cyber-mesh-bg button[class*="bg-emerald-600"]:hover,
+.cyber-mesh-bg a[class*="bg-emerald-900"]:hover,
+.cyber-mesh-bg a[class*="bg-emerald-800"]:hover,
+.cyber-mesh-bg a[class*="bg-emerald-700"]:hover,
+.cyber-mesh-bg a[class*="bg-emerald-600"]:hover {
+  background: #00e069 !important;
+  box-shadow: 0 6px 26px rgba(0, 204, 95, 0.55) !important;
+  transform: translateY(-1px) !important;
+}
+
+.btn-gradient-emerald:active,
+.cyber-mesh-bg button[class*="bg-emerald-900"]:active,
+.cyber-mesh-bg button[class*="bg-emerald-800"]:active,
+.cyber-mesh-bg button[class*="bg-emerald-700"]:active,
+.cyber-mesh-bg button[class*="bg-emerald-600"]:active {
+  transform: translateY(0) !important;
+}
+
+html.dark .btn-gradient-emerald,
+html.dark .cyber-mesh-bg button[class*="bg-emerald-900"],
+html.dark .cyber-mesh-bg button[class*="bg-emerald-800"],
+html.dark .cyber-mesh-bg button[class*="bg-emerald-700"],
+html.dark .cyber-mesh-bg button[class*="bg-emerald-600"] {
+  background: #00cc5f !important;
+  color: #000000 !important;
+  font-weight: 700 !important;
+  box-shadow: 0 4px 22px rgba(0, 204, 95, 0.45) !important;
+}
+
+html.dark .btn-gradient-emerald:hover,
+html.dark .cyber-mesh-bg button[class*="bg-emerald-900"]:hover,
+html.dark .cyber-mesh-bg button[class*="bg-emerald-800"]:hover,
+html.dark .cyber-mesh-bg button[class*="bg-emerald-700"]:hover,
+html.dark .cyber-mesh-bg button[class*="bg-emerald-600"]:hover {
+  background: #00ff77 !important;
+  box-shadow: 0 6px 30px rgba(0, 204, 95, 0.65) !important;
+}
+
+/* Secondary Buttons & Subtle Action Pills */
+.cyber-mesh-bg button[class*="bg-emerald-50"],
+.cyber-mesh-bg button[class*="bg-emerald-100"] {
+  background: rgba(0, 204, 95, 0.1) !important;
+  color: #00873d !important;
+  border: 1px solid rgba(0, 204, 95, 0.3) !important;
+  font-weight: 600 !important;
+}
+
+.cyber-mesh-bg button[class*="bg-emerald-50"]:hover,
+.cyber-mesh-bg button[class*="bg-emerald-100"]:hover {
+  background: rgba(0, 204, 95, 0.2) !important;
+  color: #005c28 !important;
+  border-color: rgba(0, 204, 95, 0.5) !important;
+}
+
+html.dark .cyber-mesh-bg button[class*="bg-emerald-50"],
+html.dark .cyber-mesh-bg button[class*="bg-emerald-100"] {
+  background: rgba(0, 204, 95, 0.14) !important;
+  color: #00cc5f !important;
+  border: 1px solid rgba(0, 204, 95, 0.4) !important;
+}
+
+html.dark .cyber-mesh-bg button[class*="bg-emerald-50"]:hover,
+html.dark .cyber-mesh-bg button[class*="bg-emerald-100"]:hover {
+  background: rgba(0, 204, 95, 0.25) !important;
+  color: #00ff77 !important;
+  border-color: rgba(0, 204, 95, 0.6) !important;
+  box-shadow: 0 0 18px rgba(0, 204, 95, 0.3) !important;
+}
+
+/* Badges & Chips: Exact translucent mint tint with glowing text */
+.cyber-mesh-bg span[class*="bg-emerald-50"],
+.cyber-mesh-bg span[class*="bg-emerald-100"],
+.cyber-mesh-bg div[class*="bg-emerald-50"]:not(button),
+.cyber-mesh-bg div[class*="bg-emerald-100"]:not(button) {
+  background: rgba(0, 204, 95, 0.1) !important;
+  color: #00873d !important;
+  border: 1px solid rgba(0, 204, 95, 0.25) !important;
+}
+
+html.dark .cyber-mesh-bg span[class*="bg-emerald-50"],
+html.dark .cyber-mesh-bg span[class*="bg-emerald-100"],
+html.dark .cyber-mesh-bg div[class*="bg-emerald-50"]:not(button),
+html.dark .cyber-mesh-bg div[class*="bg-emerald-100"]:not(button) {
+  background: rgba(0, 204, 95, 0.15) !important;
+  color: #00cc5f !important;
+  border: 1px solid rgba(0, 204, 95, 0.35) !important;
+  text-shadow: 0 0 12px rgba(0, 204, 95, 0.4) !important;
+}
+
+/* Text Highlights: Radiant Emerald from "production agents" */
+.cyber-mesh-bg [class*="text-emerald-700"],
+.cyber-mesh-bg [class*="text-emerald-800"],
+.cyber-mesh-bg [class*="text-emerald-900"],
+.cyber-mesh-bg [class*="text-emerald-950"],
+.cyber-mesh-bg [class*="text-teal-700"],
+.cyber-mesh-bg [class*="text-teal-800"],
+.cyber-mesh-bg [class*="text-teal-900"] {
+  color: #00873d !important;
+}
+
+html.dark .cyber-mesh-bg [class*="text-emerald-600"],
+html.dark .cyber-mesh-bg [class*="text-emerald-700"],
+html.dark .cyber-mesh-bg [class*="text-emerald-800"],
+html.dark .cyber-mesh-bg [class*="text-emerald-900"],
+html.dark .cyber-mesh-bg [class*="text-emerald-950"],
+html.dark .cyber-mesh-bg [class*="text-teal-600"],
+html.dark .cyber-mesh-bg [class*="text-teal-700"],
+html.dark .cyber-mesh-bg [class*="text-teal-800"],
+html.dark .cyber-mesh-bg [class*="text-teal-900"] {
+  color: #00cc5f !important;
+  text-shadow: 0 0 16px rgba(0, 204, 95, 0.35) !important;
+}
+
+/* Subtle Emerald Borders */
+.cyber-mesh-bg [class*="border-emerald-200"],
+.cyber-mesh-bg [class*="border-emerald-300"],
+.cyber-mesh-bg [class*="border-emerald-400"],
+.cyber-mesh-bg [class*="border-teal-200"],
+.cyber-mesh-bg [class*="border-teal-300"] {
+  border-color: rgba(0, 204, 95, 0.25) !important;
+}
+
+html.dark .cyber-mesh-bg [class*="border-emerald-200"],
+html.dark .cyber-mesh-bg [class*="border-emerald-300"],
+html.dark .cyber-mesh-bg [class*="border-emerald-400"],
+html.dark .cyber-mesh-bg [class*="border-teal-200"],
+html.dark .cyber-mesh-bg [class*="border-teal-300"] {
+  border-color: rgba(0, 204, 95, 0.35) !important;
+}
+
+/* Active filter tabs when highlighted */
+.cyber-mesh-bg button[class*="bg-emerald-950"],
+.cyber-mesh-bg div[class*="bg-emerald-950"] {
+  background: #00cc5f !important;
+  color: #000000 !important;
+  border-color: #00cc5f !important;
+  box-shadow: 0 4px 18px rgba(0, 204, 95, 0.35) !important;
+}
+.cyber-mesh-bg button[class*="bg-emerald-950"] span,
+.cyber-mesh-bg div[class*="bg-emerald-950"] span {
+  color: #000000 !important;
+}
+
+html.dark .cyber-mesh-bg button[class*="bg-emerald-950"],
+html.dark .cyber-mesh-bg div[class*="bg-emerald-950"] {
+  background: rgba(0, 204, 95, 0.2) !important;
+  color: #00ff77 !important;
+  border: 1px solid #00cc5f !important;
+  box-shadow: 0 0 20px rgba(0, 204, 95, 0.3) !important;
+}
+html.dark .cyber-mesh-bg button[class*="bg-emerald-950"] span,
+html.dark .cyber-mesh-bg div[class*="bg-emerald-950"] span {
+  color: #00ff77 !important;
 }
 
 .cyber-grid {
   background-image: 
-    linear-gradient(rgba(148, 163, 184, 0.07) 1px, transparent 1px),
-    linear-gradient(90deg, rgba(148, 163, 184, 0.07) 1px, transparent 1px);
+    linear-gradient(rgba(0, 204, 95, 0.05) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(0, 204, 95, 0.05) 1px, transparent 1px);
   background-size: 32px 32px;
 }
 
 .glow-emerald {
-  box-shadow: 0 0 24px -4px rgba(16, 185, 129, 0.35);
+  box-shadow: 0 0 24px -4px rgba(0, 204, 95, 0.45);
 }
 
 .glow-teal {
-  box-shadow: 0 0 24px -4px rgba(13, 148, 136, 0.35);
+  box-shadow: 0 0 24px -4px rgba(0, 204, 95, 0.35);
 }
 
 .badge-glow-green {
-  background: rgba(16, 185, 129, 0.1);
-  border: 1px solid rgba(16, 185, 129, 0.3);
-  box-shadow: 0 0 10px rgba(16, 185, 129, 0.15);
+  background: rgba(0, 204, 95, 0.12);
+  border: 1px solid rgba(0, 204, 95, 0.35);
+  box-shadow: 0 0 14px rgba(0, 204, 95, 0.25);
 }
 
 .input-luxury {
-  background: #F8FAFC;
-  border: 1px solid #E2E8F0;
+  background: rgba(255, 255, 255, 0.85);
+  border: 1px solid rgba(0, 204, 95, 0.22);
   border-radius: 0.75rem;
   transition: all 180ms ease;
 }

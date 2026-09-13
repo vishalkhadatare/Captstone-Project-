@@ -770,11 +770,26 @@ export const TranslatorWorkspace: React.FC<TranslatorWorkspaceProps> = ({
                         <div>
                           <span className="text-[11px] font-bold text-slate-600 block mb-1">Options:</span>
                           <div className="space-y-1.5">
-                            {JSON.parse(selectedQuestion.options_json).map((opt: string, idx: number) => (
-                              <div key={idx} className="p-2 rounded bg-white border border-slate-200 text-slate-800 text-[11px]">
-                                {opt}
-                              </div>
-                            ))}
+                            {(() => {
+                              try {
+                                const raw = typeof selectedQuestion.options_json === 'string'
+                                  ? JSON.parse(selectedQuestion.options_json)
+                                  : selectedQuestion.options_json;
+                                const opts = Array.isArray(raw) ? raw : [];
+                                return opts.map((opt: any, idx: number) => {
+                                  const text = typeof opt === 'string' ? opt : (opt?.text ?? opt?.value ?? JSON.stringify(opt));
+                                  const label = typeof opt === 'object' && opt?.label ? opt.label : String.fromCharCode(65 + idx);
+                                  return (
+                                    <div key={idx} className="p-2 rounded bg-white border border-slate-200 text-slate-800 text-[11px] flex items-center gap-2">
+                                      <span className="font-bold text-slate-500">({label})</span>
+                                      <span>{text}</span>
+                                    </div>
+                                  );
+                                });
+                              } catch {
+                                return null;
+                              }
+                            })()}
                           </div>
                         </div>
                       )}

@@ -41,6 +41,37 @@ export type OrgVerificationStatus =
   | 'REJECTED'
   | 'VERIFICATION_REQUIRED';
 
+// Result of the Stage-1 rule-based verification engine (mirrors server/verification.ts).
+export interface RegistrationVerificationCheck {
+  id: string;
+  label: string;
+  status: 'PASS' | 'PENDING' | 'FAIL';
+  detail: string;
+}
+
+export interface RegistrationDocumentDetail {
+  doc_type: string;
+  file_name: string;
+  file_size: number;
+  sha256: string | null;
+  extraction_status: 'EXTRACTED' | 'UNAVAILABLE' | 'CORRUPT' | 'MISSING';
+  match_status: 'MATCH' | 'MISMATCH' | 'UNVERIFIED';
+  detail: string;
+}
+
+export interface RegistrationVerificationResult {
+  status: 'VERIFIED' | 'PENDING_VERIFICATION' | 'VERIFICATION_FAILED';
+  verificationMethod: string;
+  verificationSource: string | null;
+  verificationDate: string;
+  documentVerificationStatus: 'VERIFIED' | 'PENDING' | 'FAILED';
+  message: string;
+  evidence: {
+    checks: RegistrationVerificationCheck[];
+    documents: RegistrationDocumentDetail[];
+  };
+}
+
 export interface Organization {
   id: string;
   name: string;
@@ -167,6 +198,9 @@ export interface Examination {
   isTimeUnlocked?: boolean;
   serverCurrentTime?: string;
   unlockDateTime?: string;
+  simulation_status?: 'NOT_STARTED' | 'IN_PROGRESS' | 'COMPLETED';
+  simulated_at?: string;
+  simulated_by?: string;
 }
 
 export type QuestionStatus =
@@ -193,6 +227,7 @@ export interface Question {
   question_type: 'MCQ' | 'THEORY' | 'MIXED' | 'PRACTICAL_CODING';
   content_text: string;
   options_json?: string;
+  diagram_url?: string;
   status: QuestionStatus;
   created_by: string;
   created_at: string;
@@ -334,6 +369,21 @@ export interface QuestionAssignment {
   assigned_by_name?: string;
 }
 
+export interface ExtractedDiagramImage {
+  image_id: string;
+  type: string;
+  data_url?: string;
+  path?: string;
+  page_number?: number;
+  bbox?: number[];
+  association_confidence?: number;
+}
+
+export interface ExtractedQuestionOption {
+  label: string;
+  text: string;
+}
+
 export interface ExtractedQuestion {
   tempId: string;
   question_number?: string;
@@ -350,10 +400,20 @@ export interface ExtractedQuestion {
   language: string;
   syllabus: string;
   content_text: string;
-  options: string[] | null;
+  options: Array<string | ExtractedQuestionOption> | null;
+  images?: ExtractedDiagramImage[];
+  diagram_url?: string;
+  diagram_data?: string;
+  has_diagram?: boolean;
   source_paper_id?: string;
   source_file?: string;
+  paper_number?: number;
   selected?: boolean;
+  question_images?: string[];
+  status?: string;
+  option_detection_confidence?: number;
+  options_extraction_status?: 'certain' | 'uncertain';
+  stitch_mode?: string;
 }
 
 export interface PaperExtractionResponse {
@@ -364,6 +424,7 @@ export interface PaperExtractionResponse {
   extractionSummary: string;
   aiEngineUsed: boolean;
   sourcePaperId?: string;
+  paperId?: string;
   sourceFile?: string;
   processingStatus?: string;
   pages?: number;
@@ -566,5 +627,232 @@ export interface AuthoritySurveillanceData {
   metrics: AuthoritySurveillanceMetrics;
   sessions: AuthorityProctorSession[];
 }
+
+// =========================================================================
+// DYNAMIC MULTI-PAPER GENERATOR TYPES
+// =========================================================================
+
+export interface MultiPaperSourcePaper {
+  id: string;
+  original_filename: string;
+  subject: string;
+  examination_category: string;
+  processing_status: string;
+  page_count: number;
+  question_count: number;
+  actualQuestionCount: number;
+  verifiedQuestionCount: number;
+  uploaded_at: string;
+  breakdown: Array<{ subject: string; difficulty: string; count: number }>;
+}
+
+export interface SubjectRule {
+  subject: string;
+  count: number;
+}
+
+export interface DifficultyRatio {
+  easy: number;
+  medium: number;
+  hard: number;
+}
+
+export interface PaperBlueprintConfig {
+  name: string;
+  totalQuestions: number;
+  subjects: SubjectRule[];
+  difficulty: DifficultyRatio;
+  maxSourceContributionPercent: number;
+  antiDuplication?: boolean;
+}
+
+export interface BlueprintValidationResult {
+  feasible: boolean;
+  errors: string[];
+  stats: {
+    availableCount: number;
+    requiredCount: number;
+    maxAllowedPerPaper: number;
+    minRequiredPapers: number;
+  };
+}
+
+export interface ShuffledOptionItem {
+  id: string;
+  text: string;
+  label: string;
+}
+
+export interface GeneratedPaperQuestion {
+  id: string;
+  generated_paper_id: string;
+  question_id: string;
+  source_paper_id?: string;
+  source_filename?: string;
+  display_order: number;
+  content_text: string;
+  subject: string;
+  topic: string;
+  difficulty: string;
+  diagram_url?: string;
+  shuffledOptions: ShuffledOptionItem[];
+  correct_option_id: string;
+  displayed_correct_answer: string;
+  marks: number;
+  negative_marks: number;
+}
+
+export interface GeneratedPaper {
+  id: string;
+  org_id: string;
+  blueprint_id?: string;
+  title: string;
+  exam_id?: string;
+  version_code: string;
+  total_questions: number;
+  source_papers: string[];
+  difficulty_breakdown: Record<string, number>;
+  subject_breakdown: Record<string, number>;
+  source_contribution: Record<string, { count: number; percent: number; filename?: string }>;
+  paper_fingerprint: string;
+  generation_seed: string;
+  question_sequence_hash: string;
+  option_permutation_hash: string;
+  status: string;
+  generated_by: string;
+  generated_at: string;
+}
+
+export interface CandidateAssignmentItem {
+  id: string;
+  candidate_id: string;
+  candidate_name?: string;
+  candidate_roll_number?: string;
+  candidate_group?: string;
+  generated_paper_id: string;
+  version_code?: string;
+  paper_title?: string;
+  paper_fingerprint: string;
+  assigned_at: string;
+}
+
+// Examination Manager One-Time Proctored Simulation
+export interface ExamSimulationQuestion {
+  orderIndex: number;
+  questionId: string;
+  subject: string;
+  topic: string;
+  difficulty: string;
+  marks: number;
+  negativeMarks?: number;
+  type: string;
+  content: string;
+  options?: string[] | null;
+  correctAnswerEncryptedNotice?: string;
+}
+
+export interface ExamSimulationPaper {
+  examinationId: string;
+  examinationName: string;
+  subject: string;
+  category: string;
+  examType: string;
+  versionCode: string;
+  setLabel: string;
+  isUniversity3PaperFormat?: boolean;
+  isMultiSubjectMCQFormat?: boolean;
+  subjectBreakdown?: Array<{ subject: string; count: number; totalMarks: number }>;
+  generatedAt: string;
+  durationMinutes: number;
+  totalMarks: number;
+  instructions: string[];
+  questions: ExamSimulationQuestion[];
+}
+
+export interface ExamSimulationStartResponse {
+  sessionToken: string;
+  paper: ExamSimulationPaper;
+  durationMinutes: number;
+  durationSeconds: number;
+  startedAt: string;
+  expiresAt: string;
+  simulationStatus: 'IN_PROGRESS' | 'COMPLETED';
+}
+
+// Examination Centre & Copy Control
+export interface ExaminationCentre {
+  id: string;
+  exam_id: string;
+  org_id?: string;
+  centre_code: string;
+  centre_name: string;
+  address: string;
+  city: string;
+  state: string;
+  contact_person?: string;
+  contact_number?: string;
+  email?: string;
+  operator_user_id?: string;
+  max_copies: number;
+  status: string;
+  created_by?: string;
+  created_at: string;
+  updated_at?: string;
+  exam_name?: string;
+  exam_subject?: string;
+  managerAuthorized?: number;
+  centreAuthorized?: number;
+  finalAllowed?: number;
+  hasMismatch?: boolean;
+  totalPrinted?: number;
+}
+
+export interface AddCentrePayload {
+  centre_name: string;
+  centre_code: string;
+  address: string;
+  city: string;
+  state: string;
+  contact_person: string;
+  contact_number: string;
+  email: string;
+  max_copies: number;
+  operator_user_id?: string;
+}
+
+export interface AddCentreResponse {
+  message: string;
+  centre: ExaminationCentre;
+  copyControl: {
+    managerAuthorized: number;
+    centreAuthorized: number;
+    finalAllowed: number;
+    hasMismatch: boolean;
+  };
+}
+
+export interface EmergencyRegeneratePayload {
+  reason: string;
+  quarantine_suspect_questions?: boolean;
+  compromised_question_ids?: string[];
+}
+
+export interface EmergencyRegenerateResponse {
+  message: string;
+  invalidatedVersion?: string;
+  newVersionCode: string;
+  paperVersionId: string;
+  checksumSHA256: string;
+  keyFingerprint: string;
+  quarantinedCount: number;
+  shamirSharesCreated: number;
+  shamirQuorumThreshold: number;
+  status: string;
+  generatedSets?: any[];
+  subjectBreakdown?: Array<{ subject: string; count: number; totalMarks: number }>;
+}
+
+
+
 
 

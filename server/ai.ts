@@ -1,4 +1,15 @@
 import { GoogleGenAI } from '@google/genai';
+import { spawn } from 'child_process';
+import fs from 'fs';
+import path from 'path';
+
+function getPdfExtractorPath(): string {
+  const candidate1 = path.resolve(process.cwd(), 'server', 'pdf_extractor.py');
+  if (fs.existsSync(candidate1)) return candidate1;
+  const candidate2 = path.resolve(process.cwd(), 'pdf_extractor.py');
+  if (fs.existsSync(candidate2)) return candidate2;
+  return candidate1;
+}
 
 let aiClient: GoogleGenAI | null = null;
 
@@ -361,10 +372,30 @@ Output Schema:
   };
 }
 
+export interface ExtractedDiagramImage {
+  image_id: string;
+  type: string;
+  data_url?: string;
+  path?: string;
+  page_number?: number;
+  bbox?: number[];
+  association_confidence?: number;
+}
+
+export interface ExtractedQuestionOption {
+  label: string;
+  text: string;
+}
+
 export interface ExtractedQuestion {
-  tempId: string;
+  id?: string;
+  paper_id?: string;
+  tempId?: string;
+  questionNumber?: number | string;
   question_number?: string;
   page_number?: number;
+  source_page?: number;
+  source_file?: string;
   extraction_confidence?: number;
   needs_review?: boolean;
   subject: string;
@@ -377,20 +408,232 @@ export interface ExtractedQuestion {
   language: string;
   syllabus: string;
   content_text: string;
-  options: string[] | null;
+  options: Array<string | ExtractedQuestionOption> | null;
+  options_json?: string;
+  images?: ExtractedDiagramImage[];
+  diagram_url?: string;
+  diagram_data?: string;
+  has_diagram?: boolean;
+  has_table?: boolean;
   selected?: boolean;
+  question_images?: string[];
+  status?: string;
+  option_detection_confidence?: number;
+  options_extraction_status?: 'certain' | 'uncertain';
+  options_status?: 'EXTRACTED' | 'PENDING_REVIEW';
+  extraction_status?: 'AUTO_EXTRACTED' | 'NEEDS_REVIEW' | 'MANUALLY_CORRECTED' | 'COMPLETED' | 'SKIPPED';
+  crop_coordinates?: any;
+  crop_coordinates_pt?: any;
+  validation_flags?: string[];
+  image_url?: string;
+  high_res_page_url?: string;
+  page_width?: number;
+  page_height?: number;
+  stitch_mode?: string;
 }
 
 export interface PaperExtractionResult {
+  document_id?: string;
+  paper_id?: string;
+  questions?: ExtractedQuestion[];
   extractedQuestions: ExtractedQuestion[];
   totalExtracted: number;
+  autoExtractedCount?: number;
+  needsReviewCount?: number;
+  manuallyCorrectedCount?: number;
   detectedSubject: string;
   extractionSummary: string;
   aiEngineUsed: boolean;
+  stats?: {
+    total: number;
+    auto_extracted: number;
+    needs_review: number;
+    pages: number;
+  };
+  pages_dir?: string;
 }
 
 export interface OllamaExtractionResult extends PaperExtractionResult {
   pages: number;
+}
+
+export interface PythonExtractionResult extends PaperExtractionResult {
+  engine?: string;
+  pages?: Array<{ pageNumber: number; page_number?: number; image_url: string; width: number; height: number; dpi: number; disk_path: string; status?: string }>;
+  pageCount?: number;
+}
+
+export interface ExtractionProgressEvent {
+  type: 'progress';
+  percent: number;
+  stage: string;
+  message: string;
+  current: number;
+  total: number;
+}
+
+export async function extractQuestionsWithPython(
+  payload: {
+    paper_text?: string;
+    file_data?: string;
+    file_name?: string;
+    file_path?: string;
+    subject?: string;
+    category?: string;
+    job_id?: string;
+  },
+  onProgress?: (progress: ExtractionProgressEvent) => void
+): Promise<PythonExtractionResult> {
+  return new Promise((resolve, reject) => {
+    const pythonExe = process.env.PYTHON_PATH || 'python';
+    const scriptPath = getPdfExtractorPath();
+
+    const tempDir = path.resolve(process.cwd(), 'scratch', 'temp_uploads');
+    if (!fs.existsSync(tempDir)) {
+      try {
+        fs.mkdirSync(tempDir, { recursive: true });
+      } catch {}
+    }
+
+    let tempFileCreated = false;
+    let effectiveFilePath = payload.file_path;
+
+    if (!effectiveFilePath && payload.file_data) {
+      try {
+        const cleanB64 = payload.file_data.includes(',') ? payload.file_data.split(',')[1] : payload.file_data;
+        const buf = Buffer.from(cleanB64, 'base64');
+        effectiveFilePath = path.join(tempDir, `extract_${payload.job_id || Date.now()}_${Math.random().toString(36).slice(2, 7)}.pdf`);
+        fs.writeFileSync(effectiveFilePath, buf);
+        tempFileCreated = true;
+      } catch (err) {
+        console.warn('Failed to create temp PDF for Python extractor:', err);
+      }
+    }
+
+    const cleanPayload = {
+      ...payload,
+      file_path: effectiveFilePath,
+      file_data: effectiveFilePath ? undefined : payload.file_data,
+    };
+
+    const cleanupTempFile = () => {
+      if (tempFileCreated && effectiveFilePath && fs.existsSync(effectiveFilePath)) {
+        fs.unlink(effectiveFilePath, () => {});
+      }
+    };
+
+    const proc = spawn(pythonExe, ['-u', scriptPath], {
+      windowsHide: true,
+      stdio: ['pipe', 'pipe', 'pipe'],
+      env: {
+        ...process.env,
+        PYTHONIOENCODING: 'utf-8',
+        PYTHONUTF8: '1',
+      },
+    });
+
+    let stdoutData = '';
+    let stderrData = '';
+    let stderrBuffer = '';
+
+    proc.stdout.on('data', (chunk: Buffer) => {
+      stdoutData += chunk.toString('utf-8');
+    });
+
+    proc.stderr.on('data', (chunk: Buffer) => {
+      const text = chunk.toString('utf-8');
+      stderrBuffer += text;
+
+      // Parse complete lines for JSON progress events
+      const lines = stderrBuffer.split('\n');
+      stderrBuffer = lines.pop() || ''; // Keep unfinished line in buffer
+
+      for (const line of lines) {
+        const trimmed = line.trim();
+        if (trimmed.startsWith('{"type":"progress"') || trimmed.startsWith('{"type": "progress"')) {
+          try {
+            const parsed = JSON.parse(trimmed) as ExtractionProgressEvent;
+            if (onProgress) {
+              onProgress(parsed);
+            }
+          } catch {
+            // Ignore parse errors on debug output
+          }
+        } else if (trimmed) {
+          stderrData += line + '\n';
+        }
+      }
+    });
+
+    proc.on('error', (err) => {
+      cleanupTempFile();
+      reject(new Error(`Failed to execute Python extractor (${pythonExe}): ${err.message}`));
+    });
+
+    proc.on('close', (code) => {
+      cleanupTempFile();
+      if (code !== 0 && !stdoutData.trim()) {
+        return reject(new Error(`Python extractor exited with code ${code}: ${stderrData || 'Unknown error'}`));
+      }
+      try {
+        let cleanStdout = stdoutData.trim();
+        // If fitz or any C-library printed a notice to stdout, extract the valid JSON object
+        const firstBrace = cleanStdout.indexOf('{');
+        const lastBrace = cleanStdout.lastIndexOf('}');
+        if (firstBrace !== -1 && lastBrace !== -1 && lastBrace > firstBrace) {
+          cleanStdout = cleanStdout.slice(firstBrace, lastBrace + 1);
+        }
+        const parsed = JSON.parse(cleanStdout);
+        if (parsed.error && (!parsed.extractedQuestions || parsed.extractedQuestions.length === 0)) {
+          return reject(new Error(parsed.error));
+        }
+        resolve(parsed);
+      } catch (err) {
+        reject(new Error(`Invalid JSON output from Python extractor: ${stdoutData.slice(0, 300)} (stderr: ${stderrData.slice(0, 200)})`));
+      }
+    });
+
+    proc.stdin.write(JSON.stringify(cleanPayload));
+    proc.stdin.end();
+  });
+}
+
+export async function recropQuestionWithPython(payload: {
+  file_path: string;
+  page_num: number;
+  x1: number;
+  y1: number;
+  x2: number;
+  y2: number;
+  output_path: string;
+}): Promise<boolean> {
+  return new Promise((resolve) => {
+    const pythonExe = process.env.PYTHON_PATH || 'python';
+    const scriptPath = getPdfExtractorPath();
+    const args = ['-u', scriptPath, '--crop-custom', JSON.stringify(payload)];
+    const proc = spawn(pythonExe, args, { windowsHide: true });
+    let stdout = '';
+    let stderr = '';
+    proc.stdout.on('data', (d: Buffer) => { stdout += d.toString('utf-8'); });
+    proc.stderr.on('data', (d: Buffer) => { stderr += d.toString('utf-8'); });
+    proc.on('close', (code) => {
+      if (code === 0) {
+        try {
+          const res = JSON.parse(stdout.trim());
+          resolve(!!res.success);
+        } catch {
+          resolve(fs.existsSync(payload.output_path));
+        }
+      } else {
+        console.error('Custom crop failed:', stderr);
+        resolve(false);
+      }
+    });
+    proc.on('error', (err) => {
+      console.error('Spawn error during custom crop:', err);
+      resolve(false);
+    });
+  });
 }
 
 const OLLAMA_BASE_URL = (process.env.OLLAMA_BASE_URL || 'http://localhost:11434').replace(/\/$/, '');

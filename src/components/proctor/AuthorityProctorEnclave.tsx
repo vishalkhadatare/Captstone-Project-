@@ -25,6 +25,7 @@ import {
   Radio,
   Sliders,
   Sparkles,
+  ArrowRight,
 } from 'lucide-react';
 import { User, AuthorityProctorSession, RiskLevel } from '../../types';
 import { api } from '../../api';
@@ -577,6 +578,22 @@ export const AuthorityProctorEnclave: React.FC<AuthorityProctorEnclaveProps> = (
     }
   }, [recentWarning]);
 
+  // Listen for direct enter event from header or quick-links
+  useEffect(() => {
+    const handleDirectEnter = () => {
+      if (gateOpen) {
+        if (cameraActive && micActive) {
+          handleEnterEnclave();
+        } else {
+          startGatePreview();
+        }
+      }
+    };
+
+    window.addEventListener('enter-authority-enclave', handleDirectEnter);
+    return () => window.removeEventListener('enter-authority-enclave', handleDirectEnter);
+  }, [gateOpen, cameraActive, micActive]);
+
   // =========================================================================
   // RENDER: 1. Mandatory Pre-Enclave Permission & Camera Gate Screen
   // =========================================================================
@@ -584,30 +601,70 @@ export const AuthorityProctorEnclave: React.FC<AuthorityProctorEnclaveProps> = (
     const allPermissionsGranted = cameraActive && micActive;
 
     return (
-      <div className="rounded-2xl border-2 border-slate-700 bg-slate-950 text-slate-100 p-6 sm:p-10 shadow-2xl relative overflow-hidden">
+      <div className="rounded-2xl border-2 border-slate-700 bg-slate-950 text-slate-100 p-4 sm:p-7 shadow-2xl relative overflow-hidden">
         {/* Top security gradient strip */}
         <div className="absolute top-0 left-0 right-0 h-1.5 bg-gradient-to-r from-emerald-500 via-teal-400 to-cyan-500" />
 
-        <div className="max-w-3xl mx-auto space-y-6">
+        <div className="max-w-3xl mx-auto space-y-4 sm:space-y-5">
           {/* Header Banner */}
-          <div className="text-center space-y-2">
-            <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-emerald-950/80 border border-emerald-600/40 text-emerald-400 text-xs font-mono font-semibold uppercase tracking-wider mb-1">
+          <div className="text-center space-y-1.5">
+            <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-emerald-950/80 border border-emerald-600/40 text-emerald-400 text-xs font-mono font-semibold uppercase tracking-wider">
               <ShieldCheck className="w-4 h-4 text-emerald-400" />
               <span>Mandatory On-Camera Authority Enclave</span>
             </div>
-            <h2 className="text-2xl sm:text-3xl font-extrabold text-white tracking-tight">
+            <h2 className="text-xl sm:text-2xl font-extrabold text-white tracking-tight">
               {title || 'Authority Proctor Mode: Hardware & Security Permissions'}
             </h2>
-            <p className="text-slate-400 text-xs sm:text-sm max-w-xl mx-auto">
+            <p className="text-slate-400 text-xs max-w-xl mx-auto">
               To prevent examination paper leaks, all officials must turn <strong className="text-emerald-300">ON Camera</strong> and <strong className="text-emerald-300">ON Microphone</strong> before accessing confidential question authoring, vetting, or decryption.
             </p>
           </div>
 
+          {/* HIGH PRIORITY PROCEED BANNER WHEN PERMISSIONS READY */}
+          {allPermissionsGranted && (
+            <div className="p-4 rounded-xl bg-gradient-to-r from-emerald-950 via-teal-950 to-slate-900 border-2 border-emerald-400 shadow-xl shadow-emerald-950/60 flex flex-col sm:flex-row items-center justify-between gap-4 animate-in fade-in zoom-in-95">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-xl bg-emerald-500/20 border border-emerald-400/60 flex items-center justify-center text-emerald-300 shrink-0">
+                  <ShieldCheck className="w-6 h-6 text-emerald-400" />
+                </div>
+                <div>
+                  <div className="flex items-center gap-2">
+                    <span className="w-2.5 h-2.5 rounded-full bg-emerald-400 animate-ping" />
+                    <p className="text-sm font-black text-emerald-200 tracking-wide">
+                      ALL PERMISSIONS READY • VERIFY ASSIGNED QUESTIONS
+                    </p>
+                  </div>
+                  <p className="text-xs text-slate-300 mt-0.5">
+                    Hardware sensors verified. Click below to unlock your assigned questions queue now.
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={handleEnterEnclave}
+                disabled={initializing}
+                className="w-full sm:w-auto px-6 py-3 rounded-xl bg-gradient-to-r from-emerald-500 via-teal-400 to-emerald-500 hover:from-emerald-400 hover:to-teal-300 text-slate-950 font-black text-xs uppercase tracking-wider shadow-lg shadow-emerald-950/80 flex items-center justify-center gap-2 transition-all cursor-pointer transform hover:scale-[1.03] active:scale-95 shrink-0"
+              >
+                {initializing ? (
+                  <>
+                    <RefreshCw className="w-4 h-4 animate-spin text-slate-950" />
+                    <span>Entering Enclave...</span>
+                  </>
+                ) : (
+                  <>
+                    <CheckCircle2 className="w-4 h-4 text-slate-950" />
+                    <span>Enter Enclave & Start Review →</span>
+                  </>
+                )}
+              </button>
+            </div>
+          )}
+
           {/* Main Verification Grid */}
-          <div className="grid grid-cols-1 md:grid-cols-12 gap-6 items-center">
+          <div className="grid grid-cols-1 md:grid-cols-12 gap-5 items-center">
             {/* Left: Rectangular Live Camera Viewfinder */}
-            <div className="md:col-span-6 space-y-3">
-              <div className="relative aspect-video w-full bg-slate-900 rounded-xl overflow-hidden border-2 border-slate-700 shadow-xl flex items-center justify-center">
+            <div className="md:col-span-6 space-y-2.5">
+              <div className="relative aspect-video max-h-52 w-full bg-slate-900 rounded-xl overflow-hidden border-2 border-slate-700 shadow-xl flex items-center justify-center">
                 <video
                   ref={gateVideoRef}
                   autoPlay
@@ -795,7 +852,7 @@ export const AuthorityProctorEnclave: React.FC<AuthorityProctorEnclaveProps> = (
                 ) : (
                   <>
                     <Camera className="w-5 h-5" />
-                    <span>Turn ON Camera & Grant All Permissions</span>
+                    <span>Step 1: Turn ON Camera & Microphone</span>
                   </>
                 )}
               </button>
@@ -804,25 +861,25 @@ export const AuthorityProctorEnclave: React.FC<AuthorityProctorEnclaveProps> = (
                 type="button"
                 onClick={handleEnterEnclave}
                 disabled={initializing}
-                className="px-10 py-3.5 rounded-xl bg-gradient-to-r from-emerald-600 via-teal-600 to-emerald-700 hover:from-emerald-500 hover:to-teal-500 text-white font-bold text-sm shadow-xl shadow-emerald-950/50 flex items-center gap-3 mx-auto transition-all cursor-pointer transform hover:scale-[1.02]"
+                className="px-10 py-3.5 rounded-xl bg-gradient-to-r from-emerald-500 via-teal-400 to-emerald-600 hover:from-emerald-400 hover:to-teal-300 text-slate-950 font-black text-sm shadow-xl shadow-emerald-950/60 flex items-center gap-3 mx-auto transition-all cursor-pointer transform hover:scale-[1.03] active:scale-95 ring-2 ring-emerald-400/60"
               >
                 {initializing ? (
                   <>
-                    <RefreshCw className="w-5 h-5 animate-spin" />
-                    <span>Initializing Enclave Hardware...</span>
+                    <RefreshCw className="w-5 h-5 animate-spin text-slate-950" />
+                    <span>Initializing Secure Enclave...</span>
                   </>
                 ) : (
                   <>
-                    <ShieldCheck className="w-5 h-5 text-emerald-200" />
-                    <span>Enter On-Camera Enclave (Camera ON)</span>
+                    <ShieldCheck className="w-5 h-5 text-slate-950" />
+                    <span>Enter On-Camera Enclave & Verify Questions →</span>
                   </>
                 )}
               </button>
             )}
 
-            <p className="text-[11px] text-slate-500">
+            <p className="text-[11px] text-slate-400">
               {allPermissionsGranted
-                ? '✓ All permissions verified. Your live camera will be displayed in a movable rectangular box.'
+                ? '✓ All permissions verified. Click above to open the double-blind question vetting portal & review assigned questions.'
                 : 'Click "Turn ON Camera" and select "Allow" in your browser popup to unlock this workspace.'}
             </p>
           </div>

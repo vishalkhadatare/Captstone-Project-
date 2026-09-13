@@ -464,13 +464,29 @@ export const OrgRegistrationPage: React.FC<OrgRegistrationPageProps> = ({
   };
 
   return (
-    <div className="min-h-screen bg-slate-950/5 flex flex-col justify-center py-10 px-4 sm:px-6 lg:px-8 font-sans">
-      <div className="max-w-3xl mx-auto w-full space-y-6">
+    <div className="min-h-screen bg-slate-50 dark:bg-[#080B11] flex flex-col justify-center py-10 px-4 sm:px-6 lg:px-8 relative overflow-hidden transition-colors duration-300 font-['Figtree',sans-serif]">
+      {/* Ambient Glowing Wave Curves Background */}
+      <div className="absolute inset-0 pointer-events-none overflow-hidden select-none z-0">
+        <img
+          src="/curve-primary.svg"
+          alt=""
+          className="absolute -top-32 -left-20 w-[950px] max-w-none opacity-40 dark:opacity-30 mix-blend-screen filter blur-[8px] animate-pulse"
+          style={{ animationDuration: '9s' }}
+        />
+        <img
+          src="/curve-secondary.svg"
+          alt=""
+          className="absolute -bottom-40 -right-20 w-[900px] max-w-none opacity-40 dark:opacity-25 mix-blend-screen filter blur-[10px]"
+        />
+        <div className="absolute inset-0 bg-[radial-gradient(circle_at_top,_rgba(0,204,95,0.06),transparent_65%)]" />
+      </div>
+
+      <div className="max-w-3xl mx-auto w-full space-y-6 relative z-10">
         {/* Back Button */}
         <div className="flex items-center justify-between">
           <button
             onClick={onBackToLanding}
-            className="inline-flex items-center gap-1.5 text-xs font-bold text-slate-600 hover:text-slate-900 transition-colors cursor-pointer"
+            className="inline-flex items-center gap-1.5 text-xs font-bold text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white transition-colors cursor-pointer"
           >
             <ArrowLeft className="w-4 h-4" />
             <span>Return to Landing Portal</span>
@@ -479,22 +495,22 @@ export const OrgRegistrationPage: React.FC<OrgRegistrationPageProps> = ({
           <button
             type="button"
             onClick={navigateLogin}
-            className="text-xs font-bold text-emerald-800 hover:text-emerald-950 hover:underline cursor-pointer"
+            className="text-xs font-bold text-emerald-800 dark:text-[#00cc5f] hover:text-emerald-950 dark:hover:underline cursor-pointer"
           >
             Existing Enclave? Sign In &rarr;
           </button>
         </div>
 
         {/* Main Card */}
-        <div className="stat-card-luxury p-6 sm:p-9 rounded-3xl bg-white/95 backdrop-blur-xl border border-slate-200/90 shadow-[0_20px_50px_-10px_rgba(15,23,42,0.08)] space-y-7 relative overflow-hidden">
+        <div className="stat-card-luxury p-6 sm:p-9 rounded-3xl bg-white/80 dark:bg-[#0B0F17]/65 backdrop-blur-2xl border border-slate-200/90 dark:border-white/15 shadow-2xl space-y-7 relative overflow-hidden">
           <div className="absolute top-0 left-0 right-0 h-2 bg-gradient-to-r from-emerald-600 via-teal-600 to-blue-600" />
 
           {/* Header */}
-          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-slate-100 pb-5">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-slate-100 dark:border-white/10 pb-5">
             <div className="flex items-center gap-3">
               <ZeroLeakLogo variant="icon" size="sm" imgHeightClass="h-10 w-10" />
               <div>
-                <h1 className="text-2xl font-black text-slate-950 tracking-tight leading-tight">
+                <h1 className="text-2xl font-black text-slate-950 dark:text-white tracking-tight leading-tight">
                   Institutional Enclave Accreditation
                 </h1>
                 <p className="text-[11px] text-slate-500 font-medium">

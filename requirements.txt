@@ -1,1 +1,5 @@
 PyMuPDF>=1.24.0
+rapidocr>=1.4.0
+onnxruntime>=1.18.0
+Pillow>=10.0.0
+opencv-python>=4.8.0

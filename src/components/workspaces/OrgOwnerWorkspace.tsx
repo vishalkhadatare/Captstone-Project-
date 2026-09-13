@@ -55,13 +55,13 @@ export const OrgOwnerWorkspace: React.FC<OrgOwnerWorkspaceProps> = ({
   const [managerContact, setManagerContact] = useState('');
   const [managerDesignation, setManagerDesignation] = useState('');
   const [managerPassword, setManagerPassword] = useState('');
-  const [managerRole, setManagerRole] = useState<'EXAM_MANAGER' | 'AUDITOR'>('EXAM_MANAGER');
+  const [managerRole, setManagerRole] = useState<'EXAM_MANAGER' | 'AUDITOR' | 'SME' | 'TRANSLATOR' | 'CENTRE_OPERATOR'>('EXAM_MANAGER');
   const [showAddUserModal, setShowAddUserModal] = useState(false);
   const [issuedCredentials, setIssuedCredentials] = useState<{
     name: string;
     email: string;
     password: string;
-    role: 'EXAM_MANAGER' | 'AUDITOR';
+    role: 'EXAM_MANAGER' | 'AUDITOR' | 'SME' | 'TRANSLATOR' | 'CENTRE_OPERATOR';
     roleLabel: string;
   } | null>(null);
   const [copiedField, setCopiedField] = useState<string | null>(null);
@@ -153,7 +153,16 @@ export const OrgOwnerWorkspace: React.FC<OrgOwnerWorkspaceProps> = ({
       email: managerEmail.trim().toLowerCase(),
       password: managerPassword,
       role: managerRole,
-      roleLabel: managerRole === 'EXAM_MANAGER' ? 'Examination Manager' : 'Auditor',
+      roleLabel:
+        managerRole === 'EXAM_MANAGER'
+          ? 'Examination Manager'
+          : managerRole === 'AUDITOR'
+          ? 'Auditor'
+          : managerRole === 'SME'
+          ? 'Subject Matter Expert (SME)'
+          : managerRole === 'TRANSLATOR'
+          ? 'Linguistic Translator'
+          : 'Centre Superintendent & Operator',
     };
 
     try {
@@ -963,11 +972,14 @@ export const OrgOwnerWorkspace: React.FC<OrgOwnerWorkspaceProps> = ({
                     <label className="block text-slate-700 font-bold mb-1">Institutional Role *</label>
                     <select
                       value={managerRole}
-                      onChange={e => setManagerRole(e.target.value as 'EXAM_MANAGER' | 'AUDITOR')}
+                      onChange={e => setManagerRole(e.target.value as any)}
                       className="w-full px-3.5 py-2.5 rounded-xl bg-slate-50 border border-slate-300 text-slate-900 text-xs font-semibold focus:bg-white focus:outline-none focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 transition-all"
                     >
                       <option value="EXAM_MANAGER">Examination Manager</option>
                       <option value="AUDITOR">Auditor</option>
+                      <option value="SME">Subject Matter Expert (SME)</option>
+                      <option value="TRANSLATOR">Linguistic Translator</option>
+                      <option value="CENTRE_OPERATOR">Centre Superintendent & Operator</option>
                     </select>
                   </div>
 

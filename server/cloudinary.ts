@@ -15,7 +15,7 @@ function getCloudinaryConfig() {
   const apiKey = process.env.CLOUDINARY_API_KEY || cloudinaryUrl?.[1];
   const apiSecret = process.env.CLOUDINARY_API_SECRET || cloudinaryUrl?.[2];
   if (!cloudName || !apiKey || !apiSecret) {
-    throw new Error('Cloudinary is not configured. Set CLOUDINARY_CLOUD_NAME, CLOUDINARY_API_KEY, and CLOUDINARY_API_SECRET.');
+    return null;
   }
   cloudinary.config({ cloud_name: cloudName, api_key: apiKey, api_secret: apiSecret, secure: true });
   return { cloudName, apiKey, apiSecret };
@@ -25,35 +25,37 @@ export async function uploadDocumentToCloudinary(
   fileData: string,
   originalFilename: string,
   folder: string
-): Promise<CloudinaryUploadResult> {
-  const { cloudName, apiKey, apiSecret } = getCloudinaryConfig();
-  const base64 = fileData.includes(',') ? fileData.split(',')[1] : fileData;
-  const fileBuffer = Buffer.from(base64, 'base64');
-  if (fileBuffer.length === 0) throw new Error('The uploaded document is empty.');
-  if (fileBuffer.length > 50 * 1024 * 1024) throw new Error('The uploaded document exceeds the 50 MB limit.');
-
-  const publicId = `${crypto.randomUUID()}-${originalFilename.replace(/[^a-zA-Z0-9._-]/g, '_').replace(/\.[^.]+$/, '')}`;
-  const dataUri = `data:application/pdf;base64,${fileBuffer.toString('base64')}`;
-  let payload: Partial<CloudinaryUploadResult>;
+): Promise<CloudinaryUploadResult | null> {
   try {
-    payload = await cloudinary.uploader.upload(dataUri, {
+    const config = getCloudinaryConfig();
+    if (!config) return null;
+    const base64 = fileData.includes(',') ? fileData.split(',')[1] : fileData;
+    const fileBuffer = Buffer.from(base64, 'base64');
+    if (fileBuffer.length === 0 || fileBuffer.length > 50 * 1024 * 1024) return null;
+
+    const publicId = `${crypto.randomUUID()}-${originalFilename.replace(/[^a-zA-Z0-9._-]/g, '_').replace(/\.[^.]+$/, '')}`;
+    const dataUri = `data:application/pdf;base64,${fileBuffer.toString('base64')}`;
+
+    const payload = await cloudinary.uploader.upload(dataUri, {
       folder,
       public_id: publicId,
       resource_type: 'raw',
       use_filename: false,
       unique_filename: false,
-      timeout: 120000,
+      timeout: 30000,
     }) as Partial<CloudinaryUploadResult>;
+
+    if (!payload.secure_url || !payload.public_id) {
+      return null;
+    }
+    return {
+      secure_url: payload.secure_url,
+      public_id: payload.public_id,
+      bytes: payload.bytes || fileBuffer.length,
+      resource_type: payload.resource_type || 'raw',
+    };
   } catch (error: any) {
-    throw new Error(`Cloudinary upload failed: ${error?.message || 'Unable to reach Cloudinary.'}`);
+    console.warn('[ZeroLeak Storage] Cloudinary upload skipped / offline:', error?.message);
+    return null;
   }
-  if (!payload.secure_url || !payload.public_id) {
-    throw new Error('Cloudinary upload returned an incomplete response.');
-  }
-  return {
-    secure_url: payload.secure_url,
-    public_id: payload.public_id,
-    bytes: payload.bytes || fileBuffer.length,
-    resource_type: payload.resource_type || 'raw',
-  };
 }

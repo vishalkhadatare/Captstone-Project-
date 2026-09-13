@@ -1,10 +1,46 @@
 import fs from 'fs';
 import path from 'path';
 import initSqlJs, { type Database } from 'sql.js';
+import { Pool } from 'pg';
 
 let dbInstance: Database | null = null;
 let SQL_MODULE: any = null;
 const DB_FILE_PATH = path.join(process.cwd(), 'zeroleak_data.sqlite');
+
+let pgPool: Pool | null = null;
+let pgInitialized = false;
+
+export function getPostgresPool(): Pool | null {
+  if (!pgPool) {
+    const host = process.env.DB_HOST || 'localhost';
+    const port = parseInt(process.env.DB_PORT || '5432', 10);
+    const database = process.env.DB_NAME || 'zero_leak';
+    const user = process.env.DB_USER || 'postgres';
+    const password = process.env.DB_PASSWORD || 'Vishal123';
+
+    try {
+      pgPool = new Pool({
+        host,
+        port,
+        database,
+        user,
+        password,
+        connectionTimeoutMillis: 5000,
+        idleTimeoutMillis: 30000,
+        max: 20,
+      });
+
+      pgPool.on('error', (err) => {
+        console.warn('PostgreSQL idle client warning:', err.message);
+      });
+    } catch (e) {
+      console.error('Failed to initialize PostgreSQL pool:', e);
+      pgPool = null;
+    }
+  }
+  return pgPool;
+}
+
 
 function cleanCorruptedDbFiles() {
   try {
@@ -48,6 +84,108 @@ export async function resetDatabase(): Promise<Database> {
   return dbInstance;
 }
 
+export async function initPostgres(): Promise<boolean> {
+  if (pgInitialized) return true;
+  const pool = getPostgresPool();
+  if (!pool) return false;
+
+  try {
+    const client = await pool.connect();
+    try {
+      await client.query('SELECT 1;');
+      console.log('✓ PostgreSQL connected to', process.env.DB_NAME || 'zero_leak');
+
+      const schemaPath = path.join(process.cwd(), 'database', 'schema.sql');
+      if (fs.existsSync(schemaPath)) {
+        const schemaSql = fs.readFileSync(schemaPath, 'utf8');
+        await client.query(schemaSql);
+        console.log('✓ PostgreSQL schema verified/applied (38 tables)');
+      }
+    } finally {
+      client.release();
+    }
+    pgInitialized = true;
+    return true;
+  } catch (err: any) {
+    console.warn('PostgreSQL connection notice (operating with local SQLite engine):', err.message);
+    return false;
+  }
+}
+
+export async function hydrateFromPostgres(db: Database): Promise<void> {
+  const pool = getPostgresPool();
+  if (!pool || !pgInitialized) return;
+
+  const coreTables = [
+    'organizations',
+    'users',
+    'authorized_users',
+    'trusted_devices',
+    'organization_documents',
+    'organization_verifications',
+    'authorized_representatives',
+    'aicte_universities',
+    'authoritative_institutions',
+    'examinations',
+    'examination_configurations',
+    'examination_centres',
+    'questions',
+    'question_papers',
+    'question_verifications',
+    'question_assignments',
+    'question_translations',
+    'question_quarantine',
+    'paper_versions',
+    'paper_questions',
+    'paper_validation_results',
+    'encrypted_papers',
+    'key_shares',
+    'paper_release_events',
+    'print_copies',
+    'audit_events',
+    'security_events',
+    'notifications',
+    'exam_attempts',
+    'proctor_sessions',
+    'authority_proctor_sessions',
+    'proctor_events',
+    'proctor_settings',
+    'system_settings',
+    'paper_blueprints',
+    'generated_papers',
+    'generated_paper_questions',
+    'candidate_paper_assignments',
+  ];
+
+  let totalRowsLoaded = 0;
+  for (const table of coreTables) {
+    try {
+      const res = await pool.query(`SELECT * FROM ${table}`);
+      if (res.rows.length > 0) {
+        totalRowsLoaded += res.rows.length;
+        for (const row of res.rows) {
+          const keys = Object.keys(row);
+          const values = Object.values(row).map((v) => {
+            if (v === null || v === undefined) return null;
+            if (v instanceof Date) return v.toISOString();
+            if (typeof v === 'object') return JSON.stringify(v);
+            if (typeof v === 'boolean') return v ? 1 : 0;
+            return v;
+          });
+          const placeholders = keys.map(() => '?').join(', ');
+          const sql = `INSERT OR REPLACE INTO ${table} (${keys.join(', ')}) VALUES (${placeholders})`;
+          try {
+            db.run(sql, values as any[]);
+          } catch {}
+        }
+      }
+    } catch {}
+  }
+  if (totalRowsLoaded > 0) {
+    console.log(`✓ In-memory database hydrated with ${totalRowsLoaded} records from PostgreSQL`);
+  }
+}
+
 export async function getDb(): Promise<Database> {
   if (dbInstance) {
     try {
@@ -71,7 +209,6 @@ export async function getDb(): Promise<Database> {
       const fileBuffer = fs.readFileSync(DB_FILE_PATH);
       if (fileBuffer && fileBuffer.length > 0) {
         const candidateDb = new SQL_MODULE.Database(fileBuffer);
-        // Execute integrity checks to guarantee B-Tree and table headers are uncorrupted
         candidateDb.exec('PRAGMA integrity_check;');
         candidateDb.exec('SELECT count(*) FROM sqlite_master;');
         initializeSchema(candidateDb);
@@ -79,7 +216,7 @@ export async function getDb(): Promise<Database> {
         isLoadedSuccessfully = true;
       }
     } catch (e) {
-      console.error('Corrupted or malformed SQLite database detected on disk. Resetting to clean database:', e);
+      console.error('Corrupted or malformed SQLite database detected on disk. Resetting:', e);
       cleanCorruptedDbFiles();
       isLoadedSuccessfully = false;
       dbInstance = null;
@@ -88,19 +225,23 @@ export async function getDb(): Promise<Database> {
 
   if (!isLoadedSuccessfully || !dbInstance) {
     dbInstance = new SQL_MODULE.Database();
-    try {
-      initializeSchema(dbInstance);
-      saveDb();
-    } catch (schemaErr) {
-      console.error('Critical schema initialization failure on fresh DB:', schemaErr);
-      dbInstance = new SQL_MODULE.Database();
-      initializeSchema(dbInstance);
-      saveDb();
-    }
+    initializeSchema(dbInstance);
   }
 
+  // Connect to PostgreSQL and hydrate SQLite in-memory with live database data
+  try {
+    const pgReady = await initPostgres();
+    if (pgReady) {
+      await hydrateFromPostgres(dbInstance);
+    }
+  } catch (pgSyncErr) {
+    console.warn('PostgreSQL hydration notice:', pgSyncErr);
+  }
+
+  saveDb();
   return dbInstance;
 }
+
 
 export function saveDb() {
   if (!dbInstance) return;
@@ -301,12 +442,29 @@ function initializeSchema(db: Database) {
       setting_value TEXT NOT NULL
     );
 
+    CREATE TABLE IF NOT EXISTS exam_simulation_sessions (
+      id TEXT PRIMARY KEY,
+      exam_id TEXT NOT NULL,
+      user_id TEXT NOT NULL,
+      session_token TEXT NOT NULL UNIQUE,
+      status TEXT NOT NULL DEFAULT 'ACTIVE',
+      paper_snapshot_json TEXT,
+      events_json TEXT,
+      duration_seconds INTEGER DEFAULT 900,
+      started_at TEXT NOT NULL,
+      expires_at TEXT NOT NULL,
+      completed_at TEXT,
+      created_at TEXT NOT NULL
+    );
+
     CREATE INDEX IF NOT EXISTS idx_trusted_devices_user ON trusted_devices(user_id);
     CREATE INDEX IF NOT EXISTS idx_trusted_devices_org ON trusted_devices(org_id);
     CREATE INDEX IF NOT EXISTS idx_trusted_devices_uuid ON trusted_devices(device_uuid);
     CREATE INDEX IF NOT EXISTS idx_trusted_devices_status ON trusted_devices(status);
     CREATE INDEX IF NOT EXISTS idx_device_challenges_user ON device_challenges(user_id, purpose);
     CREATE INDEX IF NOT EXISTS idx_device_replacement_user ON device_replacement_requests(user_id, status);
+    CREATE INDEX IF NOT EXISTS idx_exam_simulations_exam ON exam_simulation_sessions(exam_id);
+    CREATE INDEX IF NOT EXISTS idx_exam_simulations_token ON exam_simulation_sessions(session_token);
 
     -- Device Events
     CREATE TABLE IF NOT EXISTS device_events (
@@ -355,13 +513,21 @@ function initializeSchema(db: Database) {
     CREATE TABLE IF NOT EXISTS examination_centres (
       id TEXT PRIMARY KEY,
       exam_id TEXT NOT NULL,
+      org_id TEXT,
       centre_code TEXT NOT NULL,
       centre_name TEXT NOT NULL,
       city TEXT NOT NULL,
+      state TEXT,
       address TEXT NOT NULL,
+      contact_person TEXT,
+      contact_number TEXT,
+      email TEXT,
       operator_user_id TEXT,
       max_copies INTEGER NOT NULL DEFAULT 100,
-      created_at TEXT NOT NULL
+      status TEXT NOT NULL DEFAULT 'ACTIVE',
+      created_by TEXT,
+      created_at TEXT NOT NULL,
+      updated_at TEXT
     );
 
     -- Questions
@@ -383,6 +549,7 @@ function initializeSchema(db: Database) {
       question_type TEXT NOT NULL, -- 'MCQ', 'THEORY'
       content_text TEXT NOT NULL,
       options_json TEXT, -- JSON array of options for MCQ
+      diagram_url TEXT, -- Base64 Data URL or Cloudinary URL of associated diagram/circuit/figure
       status TEXT NOT NULL DEFAULT 'DRAFT', -- 'DRAFT', 'UNDER_VERIFICATION', 'VERIFIED', 'ELIGIBLE_FOR_PAPER', 'QUARANTINED', 'COMPROMISED', 'CLEARED', 'RETIRED'
       created_by TEXT NOT NULL,
       created_at TEXT NOT NULL,
@@ -398,10 +565,27 @@ function initializeSchema(db: Database) {
       processing_status TEXT NOT NULL,
       page_count INTEGER NOT NULL DEFAULT 0,
       question_count INTEGER NOT NULL DEFAULT 0,
+      auto_extracted_count INTEGER NOT NULL DEFAULT 0,
+      needs_review_count INTEGER NOT NULL DEFAULT 0,
+      manually_corrected_count INTEGER NOT NULL DEFAULT 0,
+      pages_dir TEXT,
       extraction_error TEXT,
       cloudinary_url TEXT,
       cloudinary_public_id TEXT,
       uploaded_at TEXT NOT NULL
+    );
+
+    -- Question Paper High-Res Pages (Preserved at 300 DPI)
+    CREATE TABLE IF NOT EXISTS question_paper_pages (
+      id TEXT PRIMARY KEY,
+      paper_id TEXT NOT NULL,
+      page_number INTEGER NOT NULL,
+      image_url TEXT NOT NULL,
+      width INTEGER NOT NULL DEFAULT 0,
+      height INTEGER NOT NULL DEFAULT 0,
+      dpi INTEGER NOT NULL DEFAULT 300,
+      disk_path TEXT,
+      created_at TEXT NOT NULL
     );
 
     -- Question Verifications
@@ -702,6 +886,68 @@ function initializeSchema(db: Database) {
       max_warnings INTEGER DEFAULT 3,
       updated_at TEXT NOT NULL
     );
+
+    -- 39. DYNAMIC MULTI-PAPER GENERATOR TABLES
+    CREATE TABLE IF NOT EXISTS paper_blueprints (
+      id TEXT PRIMARY KEY,
+      org_id TEXT NOT NULL,
+      name TEXT NOT NULL,
+      exam_id TEXT,
+      total_questions INTEGER NOT NULL,
+      subject_rules_json TEXT NOT NULL,
+      difficulty_rules_json TEXT NOT NULL,
+      max_source_contribution_percent REAL NOT NULL DEFAULT 40.0,
+      created_by TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS generated_papers (
+      id TEXT PRIMARY KEY,
+      org_id TEXT NOT NULL,
+      blueprint_id TEXT,
+      title TEXT NOT NULL,
+      exam_id TEXT,
+      version_code TEXT NOT NULL,
+      total_questions INTEGER NOT NULL,
+      source_papers_json TEXT NOT NULL,
+      difficulty_breakdown_json TEXT NOT NULL,
+      subject_breakdown_json TEXT NOT NULL,
+      source_contribution_json TEXT NOT NULL,
+      paper_fingerprint TEXT NOT NULL UNIQUE,
+      generation_seed TEXT NOT NULL,
+      question_sequence_hash TEXT NOT NULL,
+      option_permutation_hash TEXT NOT NULL,
+      status TEXT NOT NULL DEFAULT 'GENERATED',
+      generated_by TEXT NOT NULL,
+      generated_at TEXT NOT NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS generated_paper_questions (
+      id TEXT PRIMARY KEY,
+      generated_paper_id TEXT NOT NULL,
+      question_id TEXT NOT NULL,
+      source_paper_id TEXT,
+      display_order INTEGER NOT NULL,
+      shuffled_options_json TEXT NOT NULL,
+      correct_option_id TEXT NOT NULL,
+      displayed_correct_answer TEXT NOT NULL,
+      marks INTEGER NOT NULL DEFAULT 4,
+      negative_marks REAL NOT NULL DEFAULT 1.0
+    );
+
+    CREATE TABLE IF NOT EXISTS candidate_paper_assignments (
+      id TEXT PRIMARY KEY,
+      org_id TEXT NOT NULL,
+      generated_paper_id TEXT NOT NULL,
+      candidate_id TEXT NOT NULL,
+      candidate_name TEXT,
+      candidate_roll_number TEXT,
+      candidate_group TEXT,
+      exam_session_id TEXT,
+      paper_fingerprint TEXT NOT NULL,
+      assigned_at TEXT NOT NULL
+    );
   `);
 
   // Safe incremental column additions for backwards compatibility
@@ -732,6 +978,19 @@ function initializeSchema(db: Database) {
   safeAddColumn('questions', 'source_file TEXT');
   safeAddColumn('questions', 'source_page INTEGER');
   safeAddColumn('questions', 'question_number TEXT');
+  safeAddColumn('questions', 'diagram_url TEXT');
+  safeAddColumn('questions', 'image_url TEXT');
+  safeAddColumn('questions', 'high_res_page_url TEXT');
+  safeAddColumn('questions', 'crop_coordinates TEXT');
+  safeAddColumn('questions', 'extraction_status TEXT DEFAULT "AUTO_EXTRACTED"');
+  safeAddColumn('questions', 'options_status TEXT DEFAULT "PENDING_REVIEW"');
+  safeAddColumn('questions', 'validation_flags TEXT');
+  safeAddColumn('questions', 'page_width INTEGER');
+  safeAddColumn('questions', 'page_height INTEGER');
+  safeAddColumn('question_papers', 'auto_extracted_count INTEGER DEFAULT 0');
+  safeAddColumn('question_papers', 'needs_review_count INTEGER DEFAULT 0');
+  safeAddColumn('question_papers', 'manually_corrected_count INTEGER DEFAULT 0');
+  safeAddColumn('question_papers', 'pages_dir TEXT');
   safeAddColumn('question_papers', 'cloudinary_url TEXT');
   safeAddColumn('question_papers', 'cloudinary_public_id TEXT');
   safeAddColumn('organization_documents', 'cloudinary_url TEXT');
@@ -754,7 +1013,22 @@ function initializeSchema(db: Database) {
   safeAddColumn('trusted_devices', 'disabled_at TEXT');
   safeAddColumn('trusted_devices', 'replacement_of_device_id TEXT');
 
+  safeAddColumn('organizations', 'state TEXT');
+
   safeAddColumn('examinations', 'proctor_enabled INTEGER DEFAULT 1');
+  safeAddColumn('examinations', 'simulation_status TEXT DEFAULT "NOT_STARTED"');
+  safeAddColumn('examinations', 'simulated_at TEXT');
+  safeAddColumn('examinations', 'simulated_by TEXT');
+  safeAddColumn('examinations', 'max_copies INTEGER DEFAULT 500');
+
+  safeAddColumn('examination_centres', 'org_id TEXT');
+  safeAddColumn('examination_centres', 'state TEXT');
+  safeAddColumn('examination_centres', 'contact_person TEXT');
+  safeAddColumn('examination_centres', 'contact_number TEXT');
+  safeAddColumn('examination_centres', 'email TEXT');
+  safeAddColumn('examination_centres', 'status TEXT DEFAULT "ACTIVE"');
+  safeAddColumn('examination_centres', 'created_by TEXT');
+  safeAddColumn('examination_centres', 'updated_at TEXT');
 
   safeAddColumn('proctor_events', 'session_id TEXT');
   safeAddColumn('proctor_events', 'user_id TEXT');
@@ -987,7 +1261,193 @@ export function executeQuery(db: Database, sql: string, params: any[] = []): any
   }
 }
 
+export function convertSqliteToPostgres(sql: string): string {
+  let paramIndex = 1;
+  let inSingleQuote = false;
+  let inDoubleQuote = false;
+  let out = '';
+
+  let convertedSql = sql
+    .replace(/INSERT\s+OR\s+REPLACE\s+INTO/gi, 'INSERT INTO')
+    .replace(/INSERT\s+OR\s+IGNORE\s+INTO/gi, 'INSERT INTO')
+    .replace(/=\s*"([^"]+)"/g, "= '$1'")
+    .replace(/datetime\('now'\)/gi, 'NOW()');
+
+  const hasReplace = /INSERT\s+OR\s+REPLACE\s+INTO/i.test(sql);
+  const hasIgnore = /INSERT\s+OR\s+IGNORE\s+INTO/i.test(sql);
+
+  for (let i = 0; i < convertedSql.length; i++) {
+    const char = convertedSql[i];
+    if (char === "'" && (i === 0 || convertedSql[i - 1] !== '\\')) {
+      inSingleQuote = !inSingleQuote;
+      out += char;
+    } else if (char === '"' && (i === 0 || convertedSql[i - 1] !== '\\')) {
+      inDoubleQuote = !inDoubleQuote;
+      out += char;
+    } else if (char === '?' && !inSingleQuote && !inDoubleQuote) {
+      out += `$${paramIndex++}`;
+    } else {
+      out += char;
+    }
+  }
+
+  const isInsert = /^\s*INSERT\s+INTO\s+/i.test(out);
+  if (isInsert && !/ON\s+CONFLICT/i.test(out)) {
+    if (/\busers\b/i.test(out) && !/authorized_users/i.test(out)) {
+      out += ` ON CONFLICT (email) DO UPDATE SET 
+        org_id = EXCLUDED.org_id, 
+        password_hash = EXCLUDED.password_hash, 
+        full_name = EXCLUDED.full_name, 
+        role = EXCLUDED.role, 
+        status = EXCLUDED.status, 
+        authorization_status = EXCLUDED.authorization_status, 
+        authorized_by = EXCLUDED.authorized_by, 
+        authorized_at = EXCLUDED.authorized_at, 
+        centre_id = EXCLUDED.centre_id, 
+        last_login_at = EXCLUDED.last_login_at`;
+    } else if (/authorized_users/i.test(out)) {
+      out += ` ON CONFLICT (id) DO UPDATE SET 
+        org_id = EXCLUDED.org_id, 
+        full_name = EXCLUDED.full_name, 
+        official_email = EXCLUDED.official_email, 
+        contact_number = EXCLUDED.contact_number, 
+        designation = EXCLUDED.designation, 
+        assigned_role = EXCLUDED.assigned_role, 
+        authorized_by = EXCLUDED.authorized_by, 
+        authorization_status = EXCLUDED.authorization_status`;
+    } else if (/\borganizations\b/i.test(out) && !/organization_/i.test(out)) {
+      out += ` ON CONFLICT (id) DO UPDATE SET 
+        name = EXCLUDED.name, 
+        type = EXCLUDED.type, 
+        status = EXCLUDED.status, 
+        verification_status = EXCLUDED.verification_status, 
+        updated_at = EXCLUDED.updated_at`;
+    } else if (/system_settings/i.test(out)) {
+      out += ` ON CONFLICT (setting_key) DO UPDATE SET setting_value = EXCLUDED.setting_value`;
+    } else if (/proctor_settings/i.test(out)) {
+      out += ` ON CONFLICT (id) DO UPDATE SET org_id = EXCLUDED.org_id, updated_at = EXCLUDED.updated_at`;
+    } else if (/trusted_devices/i.test(out)) {
+      out += ` ON CONFLICT (id) DO UPDATE SET user_id = EXCLUDED.user_id, status = EXCLUDED.status, last_seen_at = EXCLUDED.last_seen_at`;
+    } else {
+      out += ` ON CONFLICT (id) DO NOTHING`;
+    }
+  }
+
+  return out;
+}
+
+export function writeThroughToPostgres(sql: string, params: any[] = []): void {
+  const pool = getPostgresPool();
+  if (!pool) return;
+
+  // Asynchronously execute write-through in background without delaying HTTP request
+  setImmediate(async () => {
+    try {
+      if (!pgInitialized) {
+        await initPostgres();
+      }
+      const pgSql = convertSqliteToPostgres(sql);
+      const pgParams = params.map((p) => {
+        if (p === undefined) return null;
+        return p;
+      });
+      await pool.query(pgSql, pgParams);
+    } catch (err: any) {
+      // Non-blocking write-through warning
+      console.warn('PostgreSQL write-through notice:', err.message, '| Query:', sql.substring(0, 80));
+    }
+  });
+}
+
 export function executeRun(db: Database, sql: string, params: any[] = []): void {
   db.run(sql, params);
   saveDb();
+  writeThroughToPostgres(sql, params);
 }
+
+export async function queryPostgres(sql: string, params: any[] = []): Promise<any[]> {
+  const pool = getPostgresPool();
+  if (!pool) return [];
+  try {
+    const res = await pool.query(sql, params);
+    return res.rows;
+  } catch (err) {
+    console.error('queryPostgres error:', err);
+    return [];
+  }
+}
+
+export async function runPostgres(sql: string, params: any[] = []): Promise<void> {
+  const pool = getPostgresPool();
+  if (!pool) return;
+  try {
+    await pool.query(sql, params);
+  } catch (err) {
+    console.error('runPostgres error:', err);
+  }
+}
+
+export async function lookupUserInPostgres(identifier: string): Promise<any | null> {
+  const pool = getPostgresPool();
+  if (!pool || !pgInitialized) return null;
+
+  try {
+    const normalized = identifier.trim().toLowerCase();
+    const res = await pool.query(
+      'SELECT * FROM users WHERE LOWER(email) = $1 OR LOWER(username) = $1 LIMIT 1',
+      [normalized]
+    );
+    if (res.rows.length > 0) {
+      const user = res.rows[0];
+      if (dbInstance) {
+        const keys = Object.keys(user);
+        const values = Object.values(user).map((v) => {
+          if (v instanceof Date) return v.toISOString();
+          if (typeof v === 'object' && v !== null) return JSON.stringify(v);
+          return v;
+        });
+        const placeholders = keys.map(() => '?').join(', ');
+        try {
+          dbInstance.run(`INSERT OR REPLACE INTO users (${keys.join(', ')}) VALUES (${placeholders})`, values as any[]);
+        } catch {}
+      }
+      return user;
+    }
+  } catch (e) {
+    console.error('lookupUserInPostgres error:', e);
+  }
+  return null;
+}
+
+export async function lookupAuthorizedUserInPostgres(identifier: string): Promise<any | null> {
+  const pool = getPostgresPool();
+  if (!pool || !pgInitialized) return null;
+
+  try {
+    const normalized = identifier.trim().toLowerCase();
+    const res = await pool.query(
+      'SELECT * FROM authorized_users WHERE LOWER(official_email) = $1 LIMIT 1',
+      [normalized]
+    );
+    if (res.rows.length > 0) {
+      const authUser = res.rows[0];
+      if (dbInstance) {
+        const keys = Object.keys(authUser);
+        const values = Object.values(authUser).map((v) => {
+          if (v instanceof Date) return v.toISOString();
+          if (typeof v === 'object' && v !== null) return JSON.stringify(v);
+          return v;
+        });
+        const placeholders = keys.map(() => '?').join(', ');
+        try {
+          dbInstance.run(`INSERT OR REPLACE INTO authorized_users (${keys.join(', ')}) VALUES (${placeholders})`, values as any[]);
+        } catch {}
+      }
+      return authUser;
+    }
+  } catch (e) {
+    console.error('lookupAuthorizedUserInPostgres error:', e);
+  }
+  return null;
+}
+

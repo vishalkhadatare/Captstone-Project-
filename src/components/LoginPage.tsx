@@ -223,7 +223,33 @@ export const LoginPage: React.FC<LoginPageProps> = ({
   };
 
   return (
-    <div className="min-h-screen cyber-mesh-bg relative flex flex-col justify-center py-10 px-4 sm:px-6 lg:px-8 font-sans overflow-hidden">
+    <div className="min-h-screen cyber-mesh-bg relative flex flex-col justify-center py-10 px-4 sm:px-6 lg:px-8 font-['Figtree',sans-serif] overflow-hidden selection:bg-[#00cc5f] selection:text-black">
+      {/* Background Ambient Glowing Wave Curves */}
+      <div
+        className="fixed inset-0 pointer-events-none overflow-hidden z-0"
+        style={{
+          filter: 'blur(12px) drop-shadow(0 0 25px rgba(0,255,119,0.25))',
+          opacity: 0.22,
+        }}
+      >
+        <div
+          className="absolute inset-0 w-full h-full"
+          style={{
+            backgroundImage: 'url(/curve-secondary.svg)',
+            backgroundRepeat: 'repeat',
+            backgroundPosition: '0 0',
+          }}
+        />
+        <div
+          className="absolute inset-0 w-full h-full"
+          style={{
+            backgroundImage: 'url(/curve-primary.svg)',
+            backgroundRepeat: 'repeat',
+            backgroundPosition: '0 0',
+          }}
+        />
+      </div>
+
       {/* Background Ambient Decorative Lights */}
       <div className="cyber-grid pointer-events-none absolute inset-0 opacity-40" />
       <div className="absolute -top-32 -left-32 w-96 h-96 bg-emerald-500/10 rounded-full blur-3xl pointer-events-none" />
@@ -235,43 +261,43 @@ export const LoginPage: React.FC<LoginPageProps> = ({
         <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 mb-6">
           <button
             onClick={onBackToLanding}
-            className="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-full bg-white/90 border border-slate-200/90 text-xs font-semibold text-slate-600 hover:text-emerald-800 hover:border-emerald-300 shadow-xs backdrop-blur-sm transition-all group cursor-pointer"
+            className="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-full bg-white/70 dark:bg-white/[0.05] border border-slate-200/90 dark:border-white/10 text-xs font-semibold text-slate-600 dark:text-slate-300 hover:text-emerald-500 hover:border-emerald-300 shadow-xs backdrop-blur-xl transition-all group cursor-pointer"
           >
             <ArrowLeft className="w-4 h-4 transition-transform group-hover:-translate-x-1" />
             <span>Back to Portal Overview</span>
           </button>
 
-          <div className="inline-flex items-center gap-2.5 px-3 py-1 rounded-full bg-emerald-50/90 border border-emerald-200/90 text-[11px] font-bold text-emerald-900 shadow-2xs backdrop-blur-sm">
+          <div className="inline-flex items-center gap-2.5 px-3.5 py-1.5 rounded-full bg-emerald-50/90 dark:bg-[#00cc5f]/10 border border-emerald-200/90 dark:border-[#00cc5f]/30 text-[11px] font-bold text-emerald-900 dark:text-[#00cc5f] shadow-2xs backdrop-blur-xl">
             <span className="relative flex h-2 w-2">
               <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
-              <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-600"></span>
+              <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-600 dark:bg-[#00cc5f]"></span>
             </span>
             <span className="tracking-wide">FIPS 140-2 LEVEL 4 VALIDATED ENCLAVE</span>
-            <span className="text-emerald-300">|</span>
-            <span className="font-mono text-emerald-700 text-[10px]">AES-256-GCM</span>
+            <span className="text-emerald-300 dark:text-emerald-500/40">|</span>
+            <span className="font-mono text-emerald-700 dark:text-[#00cc5f] text-[10px]">AES-256-GCM</span>
           </div>
         </div>
 
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-start">
           {/* Left Column: Login Form & Terminal Binding */}
           <div className="lg:col-span-5 space-y-4">
-            <div className="bg-white/95 backdrop-blur-xl border border-slate-200/90 rounded-3xl p-6 sm:p-8 shadow-[0_20px_50px_-10px_rgba(15,23,42,0.07)] space-y-5 relative overflow-hidden">
+            <div className="bg-white/80 dark:bg-[#0B0F17]/65 backdrop-blur-2xl border border-slate-200/90 dark:border-white/15 rounded-3xl p-6 sm:p-8 shadow-[0_20px_50px_-10px_rgba(15,23,42,0.07)] dark:shadow-[0_25px_60px_rgba(0,0,0,0.8),0_0_30px_rgba(0,204,95,0.1)] space-y-5 relative overflow-hidden">
               {/* Top Accent Gradient Bar */}
               <div className="absolute top-0 left-0 right-0 h-1.5 bg-gradient-to-r from-emerald-600 via-teal-500 to-cyan-500" />
 
               <div className="space-y-2">
-                <div className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-emerald-50 text-emerald-800 border border-emerald-200 text-[10px] font-bold uppercase tracking-wider">
-                  <ShieldCheck className="w-3.5 h-3.5 text-emerald-600" />
+                <div className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-emerald-50 dark:bg-[#00cc5f]/15 text-emerald-800 dark:text-[#00cc5f] border border-emerald-200 dark:border-[#00cc5f]/30 text-[10px] font-bold uppercase tracking-wider backdrop-blur-md">
+                  <ShieldCheck className="w-3.5 h-3.5 text-emerald-600 dark:text-[#00cc5f]" />
                   <span>Authentication Gateway</span>
                 </div>
 
                 <div className="flex items-center gap-3.5 pt-1">
                   <ZeroLeakLogo variant="icon" size="sm" imgHeightClass="h-10 w-10" />
                   <div>
-                    <h1 className="text-xl font-black text-slate-950 tracking-tight leading-tight">
+                    <h1 className="text-xl font-black text-slate-950 dark:text-white tracking-tight leading-tight">
                       ZeroLeak Enclave Sign In
                     </h1>
-                    <p className="text-[11px] text-slate-500 font-medium leading-normal mt-0.5">
+                    <p className="text-[11px] text-slate-500 dark:text-slate-400 font-medium leading-normal mt-0.5">
                       National High-Assurance Examination Network
                     </p>
                   </div>
@@ -428,44 +454,44 @@ export const LoginPage: React.FC<LoginPageProps> = ({
 
           {/* Right Column: All 6 Role Credentials & Quick-Login Cards */}
           <div className="lg:col-span-7 space-y-4">
-            <div className="bg-white/95 backdrop-blur-xl p-6 sm:p-8 border border-slate-200/90 rounded-3xl shadow-[0_20px_50px_-10px_rgba(15,23,42,0.07)] relative overflow-hidden">
+            <div className="bg-white/80 dark:bg-[#0B0F17]/65 backdrop-blur-2xl p-6 sm:p-8 border border-slate-200/90 dark:border-white/15 rounded-3xl shadow-[0_20px_50px_-10px_rgba(15,23,42,0.07)] dark:shadow-[0_25px_60px_rgba(0,0,0,0.8),0_0_30px_rgba(0,204,95,0.1)] relative overflow-hidden">
               {/* Top Accent Gradient Bar */}
               <div className="absolute top-0 left-0 right-0 h-1.5 bg-gradient-to-r from-amber-500 via-emerald-500 to-rose-500" />
 
-              <div className="flex items-center justify-between border-b border-slate-100 pb-3.5 mb-4">
+              <div className="flex items-center justify-between border-b border-slate-100 dark:border-white/10 pb-3.5 mb-4">
                 <div>
-                  <h2 className="text-sm font-bold text-slate-900 flex items-center gap-2">
-                    <Sparkles className="w-4 h-4 text-emerald-600" />
+                  <h2 className="text-sm font-bold text-slate-900 dark:text-white flex items-center gap-2">
+                    <Sparkles className="w-4 h-4 text-[#00cc5f]" />
                     <span>Instant Institutional Test Accounts</span>
                   </h2>
-                  <p className="text-[11px] text-slate-500 mt-0.5">
+                  <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-0.5">
                     Select any role below to test the complete end-to-end examination lifecycle.
                   </p>
                 </div>
-                <span className="px-2.5 py-1 rounded-full text-[10px] font-bold bg-emerald-50 text-emerald-800 border border-emerald-200 uppercase tracking-wider">
+                <span className="px-2.5 py-1 rounded-full text-[10px] font-bold bg-emerald-50 dark:bg-[#00cc5f]/15 text-emerald-800 dark:text-[#00cc5f] border border-emerald-200 dark:border-[#00cc5f]/30 uppercase tracking-wider backdrop-blur-md">
                   6 Roles Active
                 </span>
               </div>
 
               {onOpenPersonnelRegister && (
-                <div className="mb-4 p-3.5 rounded-2xl bg-gradient-to-r from-blue-50/90 via-indigo-50/70 to-teal-50/80 border border-blue-200/90 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 shadow-2xs">
+                <div className="mb-4 p-3.5 rounded-2xl bg-gradient-to-r from-blue-50/90 via-indigo-50/70 to-teal-50/80 dark:from-blue-950/40 dark:via-indigo-950/30 dark:to-teal-950/40 border border-blue-200/90 dark:border-blue-500/30 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 shadow-2xs backdrop-blur-md">
                   <div className="flex items-center gap-2.5">
                     <div className="p-2 rounded-xl bg-blue-600 text-white shadow-xs shrink-0">
                       <FileCheck2 className="w-4 h-4" />
                     </div>
                     <div>
-                      <span className="text-xs font-bold text-slate-900 block">
-                        New Personnel Registration (SME, Translator & Centre Operator)
+                      <span className="font-bold text-xs text-blue-950 dark:text-white block">
+                        Join Institutional Personnel
                       </span>
-                      <span className="text-[11px] text-slate-600">
-                        Appointed as SME, Linguistic Translator, or Centre Superintendent? Register your terminal on the dedicated page.
+                      <span className="text-[11px] text-blue-800 dark:text-blue-300">
+                        Register as SME, Linguistic Translator, or Centre Operator.
                       </span>
                     </div>
                   </div>
                   <button
                     type="button"
                     onClick={() => onOpenPersonnelRegister()}
-                    className="px-3 py-1.5 rounded-xl bg-blue-700 hover:bg-blue-800 text-white text-[11px] font-bold shrink-0 shadow-xs hover:shadow-sm transition-all cursor-pointer whitespace-nowrap"
+                    className="px-3 py-1.5 rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-bold text-xs shadow-xs transition-colors shrink-0 cursor-pointer"
                   >
                     Open Registration &rarr;
                   </button>
@@ -478,40 +504,40 @@ export const LoginPage: React.FC<LoginPageProps> = ({
                   return (
                     <div
                       key={acc.role}
-                      className={`p-4 rounded-2xl border transition-all flex flex-col justify-between text-xs relative ${acc.accent} shadow-2xs hover:shadow-md hover:-translate-y-0.5`}
+                      className={`p-4 rounded-2xl border transition-all flex flex-col justify-between text-xs relative ${acc.accent} dark:bg-white/[0.03] dark:border-white/10 dark:hover:border-[#00cc5f]/50 shadow-2xs hover:shadow-md hover:-translate-y-0.5 backdrop-blur-xl`}
                     >
                       <div className="space-y-2">
                         <div className="flex items-center justify-between">
                           <div className="flex items-center gap-2">
-                            <div className="p-1.5 rounded-xl bg-white shadow-xs">
+                            <div className="p-1.5 rounded-xl bg-white dark:bg-white/10 shadow-xs">
                               {acc.icon}
                             </div>
-                            <span className="font-bold text-slate-900 text-xs">
+                            <span className="font-bold text-slate-900 dark:text-white text-xs">
                               {acc.title}
                             </span>
                           </div>
-                          <span className="text-[9px] font-bold px-2 py-0.5 rounded-full bg-white border border-slate-200/80 text-slate-700 shadow-2xs">
+                          <span className="text-[9px] font-bold px-2 py-0.5 rounded-full bg-white dark:bg-white/10 border border-slate-200/80 dark:border-white/10 text-slate-700 dark:text-slate-300 shadow-2xs backdrop-blur-sm">
                             {acc.badge}
                           </span>
                         </div>
 
-                        <p className="text-[11px] text-slate-600 leading-relaxed line-clamp-2">
+                        <p className="text-[11px] text-slate-600 dark:text-slate-400 leading-relaxed line-clamp-2">
                           {acc.description}
                         </p>
 
-                        <div className="bg-white/95 p-2.5 rounded-xl border border-slate-200/80 font-mono text-[10px] space-y-1 mt-2 shadow-2xs">
-                          <div className="flex items-center justify-between text-slate-700">
+                        <div className="bg-white/95 dark:bg-white/[0.04] p-2.5 rounded-xl border border-slate-200/80 dark:border-white/10 font-mono text-[10px] space-y-1 mt-2 shadow-2xs backdrop-blur-md">
+                          <div className="flex items-center justify-between text-slate-700 dark:text-slate-300">
                             <span className="text-slate-400">User:</span>
-                            <span className="font-bold text-slate-900 truncate max-w-[170px]">{acc.email}</span>
+                            <span className="font-bold text-slate-900 dark:text-white truncate max-w-[170px]">{acc.email}</span>
                           </div>
-                          <div className="flex items-center justify-between text-slate-700">
+                          <div className="flex items-center justify-between text-slate-700 dark:text-slate-300">
                             <span className="text-slate-400">Pass:</span>
-                            <span className="font-bold text-emerald-800">{acc.password}</span>
+                            <span className="font-bold text-emerald-800 dark:text-[#00cc5f]">{acc.password}</span>
                           </div>
                         </div>
                       </div>
 
-                      <div className="flex items-center gap-2 mt-3.5 pt-2.5 border-t border-slate-200/60">
+                      <div className="flex items-center gap-2 mt-3.5 pt-2.5 border-t border-slate-200/60 dark:border-white/10">
                         <button
                           type="button"
                           onClick={() => handleQuickLogin(acc)}

@@ -20,6 +20,7 @@ import {
   Activity,
   LogOut,
   ShieldCheck,
+  Shuffle,
 } from 'lucide-react';
 import { UserRole } from '../types';
 
@@ -43,6 +44,7 @@ export type NavSubTab =
   | 'question_pools'
   | 'blueprint_pattern'
   | 'paper_generation'
+  | 'multi_paper_generator'
   | 'paper_versions'
   | 'examination_centres'
   // SME
@@ -139,6 +141,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
             title: 'Paper Generation',
             items: [
               { id: 'paper_generation', label: 'Paper Generation', icon: Lock },
+              { id: 'multi_paper_generator', label: 'Multi-Paper Generator', icon: Shuffle },
               { id: 'paper_versions', label: 'Paper Versions', icon: Layers },
             ],
           },
@@ -235,26 +238,26 @@ export const Sidebar: React.FC<SidebarProps> = ({
   const sections = getNavSections();
 
   return (
-    <aside className="w-full lg:w-72 bg-white/95 backdrop-blur-md border-r border-slate-200/90 flex flex-col justify-between shrink-0 shadow-[1px_0_12px_rgba(15,23,42,0.03)] z-20">
+    <aside className="w-full lg:w-72 bg-white/70 dark:bg-[#080B11]/50 backdrop-blur-2xl border-r border-slate-200/80 dark:border-white/[0.08] flex flex-col justify-between shrink-0 shadow-[1px_0_12px_rgba(15,23,42,0.03)] dark:shadow-[4px_0_30px_rgba(0,0,0,0.5)] z-20">
       <div className="p-4 space-y-5 overflow-y-auto">
         {/* Role Domain Header Banner */}
-        <div className="p-4 bg-gradient-to-br from-emerald-50/90 via-teal-50/50 to-slate-50 border border-emerald-200/90 rounded-2xl shadow-xs relative overflow-hidden">
+        <div className="p-4 bg-gradient-to-br from-[#00cc5f]/12 via-[#00cc5f]/5 to-transparent border border-[#00cc5f]/30 rounded-2xl shadow-xs relative overflow-hidden backdrop-blur-md">
           <div className="flex items-center justify-between">
-            <span className="text-[10px] uppercase font-black text-slate-500 tracking-wider">
+            <span className="text-[10px] uppercase font-black text-slate-500 dark:text-slate-400 tracking-wider">
               Enclave Boundary
             </span>
             <span className="relative flex h-2.5 w-2.5">
-              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
-              <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-emerald-600"></span>
+              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-[#00cc5f] opacity-75"></span>
+              <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-[#00cc5f]"></span>
             </span>
           </div>
-          <p className="font-black text-emerald-950 text-xs mt-1.5 tracking-tight flex items-center gap-1.5">
-            <ShieldCheck className="w-4 h-4 text-emerald-700 shrink-0" />
+          <p className="font-black text-slate-900 dark:text-white text-xs mt-1.5 tracking-tight flex items-center gap-1.5">
+            <ShieldCheck className="w-4 h-4 text-[#00cc5f] shrink-0" />
             <span>{userRole ? userRole.replace(/_/g, ' ') : 'UNAUTHENTICATED'}</span>
           </p>
-          <div className="mt-2 pt-2 border-t border-emerald-200/60 flex items-center justify-between text-[10px] text-emerald-800 font-mono">
+          <div className="mt-2 pt-2 border-t border-[#00cc5f]/20 dark:border-white/10 flex items-center justify-between text-[10px] text-[#00873d] dark:text-[#00cc5f] font-mono">
             <span>FIPS-140-2</span>
-            <span className="font-bold text-emerald-700">AES-256</span>
+            <span className="font-bold text-[#00873d] dark:text-[#00cc5f]">AES-256</span>
           </div>
         </div>
 
@@ -262,7 +265,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
         <div className="space-y-4">
           {sections.map(section => (
             <div key={section.title} className="space-y-1">
-              <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest px-3 py-1">
+              <p className="text-[10px] font-black text-slate-400 dark:text-slate-400 uppercase tracking-widest px-3 py-1">
                 {section.title}
               </p>
               <div className="space-y-1">
@@ -273,18 +276,18 @@ export const Sidebar: React.FC<SidebarProps> = ({
                     <button
                       key={item.id}
                       onClick={() => onSelectSubTab(item.id)}
-                      className={`w-full flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-xs font-semibold transition-all relative cursor-pointer ${
+                      className={`w-full flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-xs font-semibold transition-all relative cursor-pointer backdrop-blur-md ${
                         isActive
-                          ? 'bg-gradient-to-r from-emerald-50 via-teal-50/70 to-white text-emerald-950 font-bold border border-emerald-300/90 shadow-2xs'
-                          : 'text-slate-600 hover:bg-slate-50 hover:text-slate-950 border border-transparent hover:translate-x-0.5'
+                          ? 'bg-[#00cc5f]/12 dark:bg-[#00cc5f]/18 text-[#00873d] dark:text-[#00cc5f] font-bold border border-[#00cc5f]/40 dark:border-[#00cc5f]/50 shadow-[0_2px_12px_rgba(0,204,95,0.12)] dark:shadow-[0_0_20px_rgba(0,204,95,0.25)]'
+                          : 'text-slate-600 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-white/[0.04] hover:text-slate-950 dark:hover:text-white border border-transparent hover:translate-x-0.5'
                       }`}
                     >
                       {isActive && (
-                        <span className="absolute left-1 top-1/2 -translate-y-1/2 w-1.5 h-4.5 rounded-full bg-emerald-600 shadow-xs" />
+                        <span className="absolute left-1 top-1/2 -translate-y-1/2 w-1.5 h-4.5 rounded-full bg-[#00cc5f] shadow-[0_0_8px_#00cc5f]" />
                       )}
                       <Icon
                         className={`w-4 h-4 shrink-0 transition-colors ${
-                          isActive ? 'text-emerald-700' : 'text-slate-400'
+                          isActive ? 'text-[#00cc5f]' : 'text-slate-400'
                         }`}
                       />
                       <span className="truncate">{item.label}</span>
@@ -298,17 +301,17 @@ export const Sidebar: React.FC<SidebarProps> = ({
       </div>
 
       {/* Account & Session Controls */}
-      <div className="p-4 border-t border-slate-200/90 bg-slate-50/70 space-y-2">
+      <div className="p-4 border-t border-slate-200/90 dark:border-white/10 bg-slate-50/70 dark:bg-black/20 backdrop-blur-md space-y-2">
         <div className="flex items-center justify-between px-2">
           <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">
             Terminal Session
           </span>
-          <span className="inline-block w-1.5 h-1.5 rounded-full bg-emerald-500" />
+          <span className="inline-block w-1.5 h-1.5 rounded-full bg-emerald-500 shadow-[0_0_6px_#10B981]" />
         </div>
 
         <button
           onClick={() => onLogout?.()}
-          className="w-full flex items-center justify-center gap-2 px-3 py-2.5 rounded-xl text-xs font-bold text-rose-700 hover:bg-rose-50 border border-rose-200/60 hover:border-rose-300 transition-all cursor-pointer shadow-2xs hover:shadow-xs bg-white"
+          className="w-full flex items-center justify-center gap-2 px-3 py-2.5 rounded-xl text-xs font-bold text-rose-700 dark:text-rose-400 hover:bg-rose-50 dark:hover:bg-rose-950/30 border border-rose-200/60 dark:border-rose-900/40 hover:border-rose-300 dark:hover:border-rose-700 transition-all cursor-pointer shadow-2xs hover:shadow-xs bg-white/80 dark:bg-white/[0.03] backdrop-blur-md"
         >
           <LogOut className="w-4 h-4" />
           <span>Sign Out of Enclave</span>
