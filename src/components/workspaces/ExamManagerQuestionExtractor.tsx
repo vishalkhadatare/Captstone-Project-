@@ -38,6 +38,7 @@ import {
 import { User, ExtractedQuestion, Organization, QuestionAssignment } from '../../types';
 import { api } from '../../api';
 import { QuestionBoundaryEditor } from './QuestionBoundaryEditor';
+import { LaTeXText } from '../common/LaTeXText';
 
 interface ExamManagerQuestionExtractorProps {
   smes: User[];
@@ -2225,9 +2226,9 @@ export const ExamManagerQuestionExtractor: React.FC<ExamManagerQuestionExtractor
                         </div>
 
                         {/* Question Preview Snippet */}
-                        <p className="text-slate-700 line-clamp-2 text-[11px] leading-relaxed">
-                          {q.content_text}
-                        </p>
+                        <div className="text-slate-700 line-clamp-2 text-[11px] leading-relaxed">
+                          <LaTeXText text={q.content_text} />
+                        </div>
 
                         {/* Diagram Indicator Badge */}
                         {(q.diagram_url || q.diagram_data) && (
@@ -2380,15 +2381,32 @@ export const ExamManagerQuestionExtractor: React.FC<ExamManagerQuestionExtractor
 
                   {/* Question Content Editor */}
                   <div className="space-y-1.5 text-xs">
-                    <label className="block text-slate-700 font-bold">
-                      Question Statement *
-                    </label>
+                    <div className="flex items-center justify-between">
+                      <label className="block text-slate-700 font-bold">
+                        Question Statement *
+                      </label>
+                      {activeQuestion.content_text.includes('$') && (
+                        <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-indigo-100 text-indigo-800 font-bold">
+                          LaTeX Math Active
+                        </span>
+                      )}
+                    </div>
                     <textarea
                       rows={3}
                       value={activeQuestion.content_text}
                       onChange={e => updateActiveQuestion({ content_text: e.target.value })}
                       className="w-full px-3 py-2 rounded-xl bg-slate-50 border border-slate-300 text-slate-900 text-xs focus:bg-white focus:border-emerald-800 focus:outline-hidden"
                     />
+                    {activeQuestion.content_text.includes('$') && (
+                      <div className="p-2.5 rounded-xl bg-indigo-50/60 border border-indigo-200 text-xs text-slate-900 space-y-1">
+                        <span className="text-[10px] font-bold text-indigo-700 uppercase tracking-wider block">
+                          LaTeX Rendered Math Preview
+                        </span>
+                        <div className="text-xs text-slate-800 leading-relaxed">
+                          <LaTeXText text={activeQuestion.content_text} />
+                        </div>
+                      </div>
+                    )}
                   </div>
 
                   {/* Diagram / Visual Figure Asset */}
@@ -2436,7 +2454,7 @@ export const ExamManagerQuestionExtractor: React.FC<ExamManagerQuestionExtractor
                     {(() => {
                       const rawUrl = activeQuestion.diagram_url || (activeQuestion.question_images && activeQuestion.question_images[0]) || activeQuestion.diagram_data;
                       const displayImageUrl = rawUrl && typeof rawUrl === 'string' && (rawUrl.startsWith('/questions/') || rawUrl.startsWith('public/questions/')) && !rawUrl.includes('?')
-                        ? `${rawUrl}?v=clean300dpi`
+                        ? `${rawUrl}?v=clean300dpi_v5`
                         : rawUrl;
                       return displayImageUrl ? (
                         <div className="space-y-2">
