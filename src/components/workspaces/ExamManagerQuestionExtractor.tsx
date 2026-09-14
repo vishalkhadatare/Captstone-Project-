@@ -425,7 +425,7 @@ export const ExamManagerQuestionExtractor: React.FC<ExamManagerQuestionExtractor
 
     const filesWithJobs = filesToProcess.map((file, idx) => {
       const pNum = file.paperNumber || (idx + 1);
-      const isInitialActive = idx < 2;
+      const isInitialActive = idx < 1;
       return {
         ...file,
         paperNumber: pNum,
@@ -501,7 +501,7 @@ export const ExamManagerQuestionExtractor: React.FC<ExamManagerQuestionExtractor
     }, 300);
 
     try {
-      const MAX_CONCURRENCY = 2;
+      const MAX_CONCURRENCY = 1;
       const results: Array<{
         fileId: string;
         paperNumber: number;
