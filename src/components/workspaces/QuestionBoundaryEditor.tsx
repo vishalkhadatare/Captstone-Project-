@@ -28,6 +28,7 @@ import {
   Edit2
 } from 'lucide-react';
 import { api } from '../../api';
+import { runPuterOcr, parsePuterOcrText } from '../../utils/puterOcr';
 
 export interface BoundaryQuestion {
   id: string;
@@ -518,6 +519,33 @@ export const QuestionBoundaryEditor: React.FC<QuestionBoundaryEditorProps> = ({
     }
   };
 
+  const [puterOcrRunning, setPuterOcrRunning] = useState(false);
+
+  const handleRunPuterOcrOnCrop = async () => {
+    if (!livePreviewCanvasRef.current) return;
+    setPuterOcrRunning(true);
+    try {
+      const dataUrl = livePreviewCanvasRef.current.toDataURL('image/png');
+      const text = await runPuterOcr(dataUrl, { provider: 'aws-textract' });
+      if (text) {
+        const parsed = parsePuterOcrText(text);
+        if (parsed.contentText) {
+          setEditedText(parsed.contentText);
+        }
+        if (parsed.options && parsed.options.length > 0) {
+          setEditedOptions(parsed.options);
+        }
+        showToast(`Extracted ${text.length} chars with Puter.js AI OCR!`, 'success');
+      } else {
+        showToast('Puter OCR returned empty text for this crop.', 'error');
+      }
+    } catch (err: any) {
+      showToast(`Puter OCR Error: ${err.message || err}`, 'error');
+    } finally {
+      setPuterOcrRunning(false);
+    }
+  };
+
   const handleResetToAuto = () => {
     if (initialCoords) {
       setCoords({ ...initialCoords });
@@ -931,6 +959,18 @@ export const QuestionBoundaryEditor: React.FC<QuestionBoundaryEditorProps> = ({
                   className="max-w-full max-h-[280px] object-contain"
                 />
               </div>
+
+              {/* Puter.js AI OCR Extraction Button */}
+              <button
+                type="button"
+                onClick={handleRunPuterOcrOnCrop}
+                disabled={puterOcrRunning}
+                className="w-full py-2 px-3 rounded-xl bg-gradient-to-r from-indigo-600 via-indigo-700 to-purple-700 hover:brightness-110 text-white font-bold text-xs flex items-center justify-center gap-2 shadow-md cursor-pointer transition disabled:opacity-50"
+                title="Extract text and options from this cropped box using Puter.js AI OCR (AWS Textract)"
+              >
+                <Sparkles className="w-3.5 h-3.5 text-amber-300" />
+                <span>{puterOcrRunning ? 'Running Puter.js AI OCR...' : 'Run Puter.js AI OCR on Crop'}</span>
+              </button>
             </div>
 
             {/* 2. Validation & Boundary Health Status */}

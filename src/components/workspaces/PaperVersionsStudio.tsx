@@ -26,6 +26,7 @@ import {
 } from 'lucide-react';
 import { api } from '../../api';
 import { Examination, PaperVersion, User } from '../../types';
+import { QuestionPaperPdfModal } from './QuestionPaperPdfModal';
 
 interface PaperVersionsStudioProps {
   examinations: Examination[];
@@ -64,6 +65,7 @@ export const PaperVersionsStudio: React.FC<PaperVersionsStudioProps> = ({
   const [copiedKey, setCopiedKey] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState<string>('');
   const [statusMessage, setStatusMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
+  const [pdfModalVersionId, setPdfModalVersionId] = useState<string | null>(null);
 
   // Inspection Modal State
   const [inspectingVersion, setInspectingVersion] = useState<{
@@ -481,6 +483,16 @@ export const PaperVersionsStudio: React.FC<PaperVersionsStudioProps> = ({
 
                     <button
                       type="button"
+                      onClick={() => setPdfModalVersionId(version.id)}
+                      className="px-3.5 py-2 rounded-xl bg-rose-50 hover:bg-rose-100 text-rose-800 font-bold text-xs flex items-center gap-1.5 border border-rose-200 transition-all cursor-pointer shadow-2xs"
+                      title="View & Print Official Question Paper PDF"
+                    >
+                      <FileText className="w-3.5 h-3.5 text-rose-600" />
+                      <span>View PDF</span>
+                    </button>
+
+                    <button
+                      type="button"
                       onClick={() => handleOpenInspection(version)}
                       disabled={loadingInspection}
                       className="px-3.5 py-2 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-800 font-bold text-xs flex items-center gap-1.5 border border-slate-300 transition-all cursor-pointer"
@@ -724,6 +736,15 @@ export const PaperVersionsStudio: React.FC<PaperVersionsStudioProps> = ({
             </div>
           </div>
         </div>
+      )}
+
+      {/* Official Question Paper PDF Viewer Modal */}
+      {pdfModalVersionId && selectedExam && (
+        <QuestionPaperPdfModal
+          exam={selectedExam}
+          initialVersionId={pdfModalVersionId}
+          onClose={() => setPdfModalVersionId(null)}
+        />
       )}
     </div>
   );

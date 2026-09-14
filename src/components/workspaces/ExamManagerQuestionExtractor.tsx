@@ -39,6 +39,7 @@ import { User, ExtractedQuestion, Organization, QuestionAssignment } from '../..
 import { api } from '../../api';
 import { QuestionBoundaryEditor } from './QuestionBoundaryEditor';
 import { LaTeXText } from '../common/LaTeXText';
+import { runPuterOcr, parsePuterOcrText } from '../../utils/puterOcr';
 
 interface ExamManagerQuestionExtractorProps {
   smes: User[];
@@ -241,7 +242,43 @@ export const ExamManagerQuestionExtractor: React.FC<ExamManagerQuestionExtractor
   const [activeDebugView, setActiveDebugView] = useState<string | null>(null);
   const [currentPaperId, setCurrentPaperId] = useState<string | null>(null);
   const [boundaryEditorOpen, setBoundaryEditorOpen] = useState(false);
+  const [isPuterOcrLoading, setIsPuterOcrLoading] = useState(false);
   const diagramInputRef = useRef<HTMLInputElement | null>(null);
+
+  const handlePuterOcrForQuestion = async (q: ExtractedQuestion) => {
+    const targetSource = q.image_url || q.diagram_url;
+    if (!targetSource) {
+      setStatusMessage({ type: 'error', text: 'No cropped question image available for Puter OCR.' });
+      return;
+    }
+    setIsPuterOcrLoading(true);
+    try {
+      const text = await runPuterOcr(targetSource, { provider: 'aws-textract' });
+      if (text) {
+        const parsed = parsePuterOcrText(text);
+        setExtractedQuestions(prev =>
+          prev.map(item => {
+            if (item.tempId === q.tempId) {
+              return {
+                ...item,
+                content_text: parsed.contentText || item.content_text,
+                options: parsed.options && parsed.options.length > 0 ? parsed.options.map(o => `${o.label}) ${o.text}`) : item.options,
+                correct_answer: parsed.suggestedAnswer || item.correct_answer,
+              };
+            }
+            return item;
+          })
+        );
+        setStatusMessage({ type: 'success', text: `Extracted ${text.length} chars with Puter.js AI OCR!` });
+      } else {
+        setStatusMessage({ type: 'error', text: 'Puter OCR returned empty text for this question.' });
+      }
+    } catch (err: any) {
+      setStatusMessage({ type: 'error', text: `Puter OCR Error: ${err.message || err}` });
+    } finally {
+      setIsPuterOcrLoading(false);
+    }
+  };
 
   const handleDiagramUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -1215,9 +1252,9 @@ export const ExamManagerQuestionExtractor: React.FC<ExamManagerQuestionExtractor
               <span>Load Sample 10-Q Master PDF</span>
             </button>
 
-            <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[11px] font-bold bg-emerald-50 text-emerald-800 border border-emerald-200">
-              <Sparkles className="w-3.5 h-3.5 text-emerald-600" />
-              <span>Gemini 3.7 Flash Engine</span>
+            <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-[11px] font-bold bg-indigo-50 text-indigo-900 border border-indigo-200">
+              <Sparkles className="w-3.5 h-3.5 text-indigo-600" />
+              <span>Puter.js AI OCR + Gemini Flash Engine</span>
             </span>
           </div>
         </div>
@@ -2235,6 +2272,17 @@ export const ExamManagerQuestionExtractor: React.FC<ExamManagerQuestionExtractor
                       >
                         <Crop className="w-3.5 h-3.5 text-emerald-200" />
                         <span>Edit Boundary</span>
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => handlePuterOcrForQuestion(activeQuestion)}
+                        disabled={isPuterOcrLoading}
+                        className="px-2.5 py-1.5 rounded-lg bg-indigo-700 hover:bg-indigo-600 text-white font-bold text-xs flex items-center gap-1 shadow-xs transition cursor-pointer mr-1"
+                        title="Extract & recognized text from question image using Puter.js AI OCR"
+                      >
+                        <Sparkles className="w-3.5 h-3.5 text-indigo-200" />
+                        <span>{isPuterOcrLoading ? 'Puter OCR...' : 'Puter OCR'}</span>
                       </button>
 
                       <button

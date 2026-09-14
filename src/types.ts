@@ -404,6 +404,7 @@ export interface ExtractedQuestion {
   images?: ExtractedDiagramImage[];
   diagram_url?: string;
   diagram_data?: string;
+  image_url?: string;
   has_diagram?: boolean;
   source_paper_id?: string;
   source_file?: string;

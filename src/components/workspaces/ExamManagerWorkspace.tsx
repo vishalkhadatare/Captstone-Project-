@@ -57,6 +57,7 @@ import { ExamSimulationModal } from './ExamSimulationModal';
 import { AddCentreModal } from './AddCentreModal';
 import { EmergencyRegenModal } from './EmergencyRegenModal';
 import { PaperVersionsStudio } from './PaperVersionsStudio';
+import { QuestionPaperPdfModal } from './QuestionPaperPdfModal';
 
 interface ExamManagerWorkspaceProps {
   currentUser: User | null;
@@ -391,6 +392,7 @@ export const ExamManagerWorkspace: React.FC<ExamManagerWorkspaceProps> = ({
   // Generation status
   const [generating, setGenerating] = useState(false);
   const [zoomDiagramUrl, setZoomDiagramUrl] = useState<string | null>(null);
+  const [pdfViewExam, setPdfViewExam] = useState<Examination | null>(null);
 
   useEffect(() => {
     loadData();
@@ -1327,6 +1329,15 @@ export const ExamManagerWorkspace: React.FC<ExamManagerWorkspaceProps> = ({
                           className="px-2.5 py-1.5 rounded-lg border border-slate-200 hover:bg-slate-50 text-slate-700 text-xs font-medium cursor-pointer"
                         >
                           Centres
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setPdfViewExam(ex)}
+                          className="px-2.5 py-1.5 rounded-lg border border-rose-200 bg-rose-50 hover:bg-rose-100 text-rose-800 text-xs font-semibold flex items-center gap-1 cursor-pointer transition-all shadow-2xs"
+                          title="View & Print Official Question Paper PDF"
+                        >
+                          <FileText className="w-3.5 h-3.5 text-rose-600" />
+                          <span>PDF</span>
                         </button>
                       </div>
 
@@ -2848,6 +2859,19 @@ Total Marks: 100. Negative marking applicable on Section 1.`
                             <Layers className="w-3.5 h-3.5 text-slate-600" />
                             <span>Versions</span>
                           </button>
+
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setPdfViewExam(ex);
+                            }}
+                            className="px-3.5 py-2 bg-rose-50 hover:bg-rose-100 text-rose-800 border border-rose-200 rounded-lg font-bold text-xs flex items-center gap-1.5 cursor-pointer transition-all shadow-2xs"
+                            title="View & Print Official Generated Question Paper PDF"
+                          >
+                            <FileText className="w-3.5 h-3.5 text-rose-600" />
+                            <span>View PDF</span>
+                          </button>
                         </div>
                       </div>
                     </div>
@@ -3356,6 +3380,14 @@ Total Marks: 100. Negative marking applicable on Section 1.`
           isOpen={Boolean(emergencyRegenModalExam)}
           onClose={() => setEmergencyRegenModalExam(null)}
           onSuccess={handleEmergencyRegenCompleted}
+        />
+      )}
+
+      {/* Official Question Paper PDF Viewer Modal */}
+      {pdfViewExam && (
+        <QuestionPaperPdfModal
+          exam={pdfViewExam}
+          onClose={() => setPdfViewExam(null)}
         />
       )}
     </div>
