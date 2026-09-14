@@ -132,7 +132,17 @@ export function getThreeStandardQuestionPapers(): {
 
   const allQuestions: StandardQuestionPaperItem[] = [];
 
-  // 1. PAPER 1 (NEET 2024 Master Paper)
+  // 1. PAPER 1 (NEET 2024 Master Paper) - AUTHENTIC EXTRACTED QUESTIONS & ZERO-BLEED CROPS
+  let realPaper1Data: Record<string, any> = {};
+  const paper1JsonPath = path.resolve(process.cwd(), 'server', 'paper1_questions_real.json');
+  if (fs.existsSync(paper1JsonPath)) {
+    try {
+      realPaper1Data = JSON.parse(fs.readFileSync(paper1JsonPath, 'utf-8'));
+    } catch (e) {
+      console.warn('Failed to load paper1_questions_real.json:', e);
+    }
+  }
+
   for (let i = 1; i <= 180; i++) {
     let subject = 'Physics';
     let topicList = PAPER1_TOPICS.Physics;
@@ -141,23 +151,30 @@ export function getThreeStandardQuestionPapers(): {
     else if (i > 135) { subject = 'Zoology'; topicList = PAPER1_TOPICS.Zoology; }
 
     const topic = topicList[(i - 1) % topicList.length];
+    const realQ = realPaper1Data[String(i)];
+
     const profileIdx = (i - 1) % NEET_2024_PROFILES.length;
     const seed = NEET_2024_PROFILES[profileIdx];
 
-    const content_text = `[NEET 2024 - Q${i} (${subject})] ${seed.q} [Exam Concept: ${topic}]`;
-    const options = [
-      { label: 'A', text: `${seed.opts[0]}` },
-      { label: 'B', text: `${seed.opts[1]}` },
-      { label: 'C', text: `${seed.opts[2]}` },
-      { label: 'D', text: `${seed.opts[3]}` },
-    ];
+    const content_text = realQ?.statement
+      ? `[NEET 2024 - Q${i} (${subject})] ${realQ.statement}`
+      : `[NEET 2024 - Q${i} (${subject})] ${seed.q} [Exam Concept: ${topic}]`;
+
+    const options = realQ?.options && realQ.options.length >= 2
+      ? realQ.options
+      : [
+          { label: 'A', text: `${seed.opts[0]}` },
+          { label: 'B', text: `${seed.opts[1]}` },
+          { label: 'C', text: `${seed.opts[2]}` },
+          { label: 'D', text: `${seed.opts[3]}` },
+        ];
 
     allQuestions.push({
       tempId: `EXT-P1-NEET2024-${i}`,
       paper_number: 1,
       source_file: 'NEET_2024_National_Paper_1.pdf',
       question_number: String(i),
-      page_number: Math.floor((i - 1) / 6) + 2,
+      page_number: realQ?.page_number || (Math.floor((i - 1) / 6) + 2),
       content_text,
       question_images: [`/questions/paper1/q${i}.png`],
       diagram_url: `/questions/paper1/q${i}.png`,
