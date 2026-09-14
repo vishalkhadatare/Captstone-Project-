@@ -446,6 +446,34 @@ export const api = {
       body: payload ? JSON.stringify(payload) : undefined,
     }),
   getPaperVersions: (examId: string) => request<{ versions: PaperVersion[] }>(`/api/examinations/${examId}/paper-versions`),
+  getPaperVersionDetails: (examId: string, versionId: string) =>
+    request<{
+      success: boolean;
+      version: PaperVersion & { iv_hex?: string; auth_tag_hex?: string; checksum_sha256?: string; key_fingerprint?: string };
+      questions: Array<{
+        paper_question_id: string;
+        section_name: string;
+        order_index: number;
+        question_marks: number;
+        id: string;
+        content_text: string;
+        options_json?: string;
+        options?: any[];
+        correct_answer?: string;
+        difficulty?: string;
+        subject?: string;
+        topic?: string;
+        diagram_url?: string;
+        image_url?: string;
+        question_type?: string;
+      }>;
+      exam: Examination;
+      shamirDetails: {
+        threshold: number;
+        totalShares: number;
+        status: string;
+      };
+    }>(`/api/examinations/${examId}/paper-versions/${versionId}/details`),
   setActivePaperVersion: (examId: string, versionId: string) =>
     request<{ message: string; activeVersion: PaperVersion }>(`/api/examinations/${examId}/set-active-version`, {
       method: 'POST',

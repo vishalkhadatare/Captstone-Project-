@@ -54,12 +54,14 @@ import { DynamicMultiPaperGenerator } from './DynamicMultiPaperGenerator';
 import { ExamSimulationModal } from './ExamSimulationModal';
 import { AddCentreModal } from './AddCentreModal';
 import { EmergencyRegenModal } from './EmergencyRegenModal';
+import { PaperVersionsStudio } from './PaperVersionsStudio';
 
 interface ExamManagerWorkspaceProps {
   currentUser: User | null;
   activeSubTab: NavSubTab;
   onRefresh: () => void;
   onLaunchCandidateSimulator?: (examId?: string) => void;
+  onSelectSubTab?: (tab: NavSubTab) => void;
 }
 
 interface UploadedQuestionFile {
@@ -220,6 +222,7 @@ export const ExamManagerWorkspace: React.FC<ExamManagerWorkspaceProps> = ({
   activeSubTab,
   onRefresh,
   onLaunchCandidateSimulator,
+  onSelectSubTab,
 }) => {
   const [org, setOrg] = useState<Organization | null>(null);
   const [examinations, setExaminations] = useState<Examination[]>([]);
@@ -2567,6 +2570,24 @@ export const ExamManagerWorkspace: React.FC<ExamManagerWorkspaceProps> = ({
                             <RotateCcw className="w-3.5 h-3.5" />
                             <span>Emergency Re-Gen</span>
                           </button>
+
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setSelectedGenExamId(ex.id);
+                              if (onSelectSubTab) {
+                                onSelectSubTab('paper_versions');
+                              } else {
+                                window.location.hash = 'paper-versions';
+                              }
+                            }}
+                            className="px-3 py-2 bg-slate-100 hover:bg-slate-200 text-slate-800 border border-slate-300 rounded-lg font-bold text-xs flex items-center gap-1.5 cursor-pointer transition-all"
+                            title="View encrypted paper versions and release sets"
+                          >
+                            <Layers className="w-3.5 h-3.5 text-slate-600" />
+                            <span>Versions</span>
+                          </button>
                         </div>
                       </div>
                     </div>
@@ -2629,6 +2650,23 @@ export const ExamManagerWorkspace: React.FC<ExamManagerWorkspaceProps> = ({
                     >
                       <Lock className="w-4 h-4" />
                       <span>{generating ? 'Processing Cryptographic Pipeline...' : `Execute ${currentType} Paper Generation`}</span>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setSelectedGenExamId(currentExam.id);
+                        if (onSelectSubTab) {
+                          onSelectSubTab('paper_versions');
+                        } else {
+                          window.location.hash = 'paper-versions';
+                        }
+                      }}
+                      className="px-4 py-2.5 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-lg font-bold text-xs border border-slate-700 shadow-md transition-all flex items-center gap-2 cursor-pointer"
+                      title="Inspect encrypted sets and active release"
+                    >
+                      <Layers className="w-4 h-4 text-slate-400" />
+                      <span>View Paper Versions</span>
                     </button>
                   </div>
                 </div>
@@ -2763,28 +2801,15 @@ export const ExamManagerWorkspace: React.FC<ExamManagerWorkspaceProps> = ({
 
       {/* PAPER VERSIONS */}
       {activeSubTab === 'paper_versions' && (
-        <div className="p-6 rounded-xl bg-white border border-slate-200 shadow-xs space-y-4">
-          <h3 className="text-base font-bold text-slate-900">Encrypted Paper Version Artifacts</h3>
-          <p className="text-xs text-slate-500">
-            All generated examination papers are stored as ciphertext with unique version hashes and key fingerprints.
-          </p>
-
-          <div className="space-y-3">
-            {examinations.map(ex => (
-              <div key={ex.id} className="p-3 rounded-lg bg-slate-50 border border-slate-200 text-xs flex justify-between items-center">
-                <div>
-                  <span className="font-bold text-slate-900">{ex.name}</span>
-                  <div className="text-[10px] text-slate-500 font-mono">
-                    Time Lock: {ex.unlock_time} • Plaintext status: 🔒 ENCRYPTED (Locked until unlock minute)
-                  </div>
-                </div>
-                <span className="px-2.5 py-1 rounded text-[10px] font-bold bg-emerald-100 text-emerald-800">
-                  AES-256 GCM
-                </span>
-              </div>
-            ))}
-          </div>
-        </div>
+        <PaperVersionsStudio
+          examinations={examinations}
+          selectedExamId={selectedGenExamId || (examinations[0]?.id || '')}
+          currentUser={currentUser}
+          onSimulateExam={handleSimulateExam}
+          onEmergencyRegen={(ex) => setEmergencyRegenModalExam(ex)}
+          onNavigateToGenerator={() => onSelectSubTab ? onSelectSubTab('paper_generation') : (window.location.hash = 'paper-generation')}
+          onNavigateToMultiPaper={() => onSelectSubTab ? onSelectSubTab('multi_paper_generator') : (window.location.hash = 'multi-paper-generator')}
+        />
       )}
 
       {/* EXAMINATION CENTRES */}

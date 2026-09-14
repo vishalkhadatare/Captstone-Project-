@@ -5145,6 +5145,70 @@ async function startServer() {
     }
   });
 
+  // Get Paper Version Detailed Payload with Questions & Cipher Envelope
+  app.get('/api/examinations/:id/paper-versions/:versionId/details', authenticateToken, requireApprovedDevice, async (req: Request, res: Response) => {
+    try {
+      const db = await getDb();
+      const exam = executeQuery(db, 'SELECT * FROM examinations WHERE id = ? AND org_id = ?', [req.params.id, req.user!.org_id])[0];
+      if (!exam) return res.status(404).json({ error: 'Examination not found.' });
+
+      const version = executeQuery(
+        db,
+        `SELECT pv.*, ep.checksum_sha256, ep.key_fingerprint, ep.encrypted_at, ep.iv_hex, ep.auth_tag_hex
+         FROM paper_versions pv
+         LEFT JOIN encrypted_papers ep ON pv.id = ep.paper_version_id
+         WHERE pv.id = ? AND pv.exam_id = ?`,
+        [req.params.versionId, exam.id]
+      )[0];
+      if (!version) return res.status(404).json({ error: 'Paper version not found.' });
+
+      const questions = executeQuery(
+        db,
+        `SELECT pq.id as paper_question_id, pq.section_name, pq.order_index, pq.marks as question_marks,
+                q.id, q.content_text, q.options_json, q.correct_answer, q.difficulty, q.subject, q.topic,
+                q.diagram_url, q.image_url, q.question_type
+         FROM paper_questions pq
+         JOIN questions q ON pq.question_id = q.id
+         WHERE pq.paper_version_id = ?
+         ORDER BY pq.order_index ASC`,
+        [req.params.versionId]
+      );
+
+      const parsedQuestions = questions.map(q => {
+        let opts: any[] = [];
+        try {
+          opts = q.options_json ? JSON.parse(q.options_json) : [];
+        } catch {
+          opts = [];
+        }
+        return {
+          ...q,
+          options: opts,
+        };
+      });
+
+      const sharesCount = executeQuery(
+        db,
+        'SELECT COUNT(*) as count FROM key_shares WHERE paper_version_id = ?',
+        [req.params.versionId]
+      )[0]?.count || 5;
+
+      return res.json({
+        success: true,
+        version,
+        questions: parsedQuestions,
+        exam,
+        shamirDetails: {
+          threshold: 3,
+          totalShares: Number(sharesCount),
+          status: 'ARMORED_ENCLAVE',
+        },
+      });
+    } catch (e: any) {
+      return res.status(500).json({ error: e.message });
+    }
+  });
+
   // Set Active Paper Version (e.g. for University 3-Paper selection)
   app.post('/api/examinations/:id/set-active-version', authenticateToken, requireApprovedDevice, requireRole(['EXAM_MANAGER', 'ORG_OWNER']), async (req: Request, res: Response) => {
     try {
@@ -5207,7 +5271,7 @@ async function startServer() {
       } else if (exam.category === 'JEE' || (exam.name && exam.name.toUpperCase().includes('JEE'))) {
         targetSubjects = ['Physics', 'Chemistry', 'Mathematics'];
       } else {
-        const orgSubjects = executeQuery(db, 'SELECT DISTINCT subject FROM questions WHERE org_id = ? AND status = "ELIGIBLE_FOR_PAPER"', [orgId]);
+        const orgSubjects = executeQuery(db, 'SELECT DISTINCT subject FROM questions WHERE org_id = ? AND status IN ("ELIGIBLE_FOR_PAPER", "VERIFIED")', [orgId]);
         targetSubjects = orgSubjects.map(s => s.subject);
         if (!targetSubjects.includes(exam.subject)) {
           targetSubjects.push(exam.subject);
@@ -5218,7 +5282,7 @@ async function startServer() {
       eligibleQuestions = executeQuery(
         db,
         `SELECT * FROM questions
-         WHERE org_id = ? AND status = 'ELIGIBLE_FOR_PAPER' AND subject IN (${placeholders})
+         WHERE org_id = ? AND status IN ('ELIGIBLE_FOR_PAPER', 'VERIFIED') AND subject IN (${placeholders})
          ORDER BY subject ASC, difficulty ASC`,
         [orgId, ...targetSubjects]
       );
@@ -5227,7 +5291,17 @@ async function startServer() {
         eligibleQuestions = executeQuery(
           db,
           `SELECT * FROM questions
-           WHERE org_id = ? AND status = 'ELIGIBLE_FOR_PAPER'
+           WHERE org_id = ? AND status IN ('ELIGIBLE_FOR_PAPER', 'VERIFIED')
+           ORDER BY subject ASC, difficulty ASC`,
+          [orgId]
+        );
+      }
+
+      if (eligibleQuestions.length === 0) {
+        eligibleQuestions = executeQuery(
+          db,
+          `SELECT * FROM questions
+           WHERE org_id = ? AND status NOT IN ('QUARANTINED', 'COMPROMISED')
            ORDER BY subject ASC, difficulty ASC`,
           [orgId]
         );
@@ -5248,7 +5322,7 @@ async function startServer() {
       eligibleQuestions = executeQuery(
         db,
         `SELECT * FROM questions
-         WHERE org_id = ? AND (subject = ? OR subject LIKE ?) AND status = 'ELIGIBLE_FOR_PAPER'
+         WHERE org_id = ? AND (subject = ? OR subject LIKE ?) AND status IN ('ELIGIBLE_FOR_PAPER', 'VERIFIED')
          ORDER BY difficulty ASC`,
         [orgId, exam.subject, `%${exam.subject.split(' ')[0]}%`]
       );
@@ -5257,7 +5331,17 @@ async function startServer() {
         eligibleQuestions = executeQuery(
           db,
           `SELECT * FROM questions
-           WHERE org_id = ? AND status = 'ELIGIBLE_FOR_PAPER'
+           WHERE org_id = ? AND status IN ('ELIGIBLE_FOR_PAPER', 'VERIFIED')
+           ORDER BY difficulty ASC`,
+          [orgId]
+        );
+      }
+
+      if (eligibleQuestions.length < (exam.total_questions || 4)) {
+        eligibleQuestions = executeQuery(
+          db,
+          `SELECT * FROM questions
+           WHERE org_id = ? AND status NOT IN ('QUARANTINED', 'COMPROMISED')
            ORDER BY difficulty ASC`,
           [orgId]
         );
