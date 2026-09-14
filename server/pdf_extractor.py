@@ -270,30 +270,22 @@ def extract_page_text_items_with_ocr(
         except Exception:
             pass
 
-    # 2. Scanned Page Path with RapidOCR
+    # 2. Scanned Page Path with RapidOCR at full 300 DPI
     ocr = get_ocr_engine()
     if not ocr or not os.path.isfile(page_img_path):
         return []
 
     items = []
+    mid_x = page_width // 2
     try:
         with PILImage.open(page_img_path) as full_img:
-            # 150 DPI detection scale: 3x-4x faster than 300 DPI on CPU
-            scale_down = 0.5
-            small_w = max(100, int(round(page_width * scale_down)))
-            small_h = max(100, int(round(page_height * scale_down)))
-            small_img = full_img.resize((small_w, small_h), PILImage.Resampling.BILINEAR)
-            small_mid_x = small_w // 2
-
             if is_two_col:
-                slices = [(0, 0, small_mid_x), (1, small_mid_x, small_w)]
+                slices = [(0, 0, mid_x), (1, mid_x, page_width)]
             else:
-                slices = [(0, 0, small_w)]
-
-            inv_scale = 1.0 / scale_down
+                slices = [(0, 0, page_width)]
 
             for col_idx, slice_x0, slice_x1 in slices:
-                col_img = small_img.crop((slice_x0, 0, slice_x1, small_h))
+                col_img = full_img.crop((slice_x0, 0, slice_x1, page_height))
                 arr = np.array(col_img) if np is not None else None
                 res = ocr(arr) if arr is not None else None
 
@@ -302,10 +294,10 @@ def extract_page_text_items_with_ocr(
                         t = txt.strip()
                         if not t:
                             continue
-                        b_x0 = (min(p[0] for p in box) + slice_x0) * inv_scale
-                        b_y0 = min(p[1] for p in box) * inv_scale
-                        b_x1 = (max(p[0] for p in box) + slice_x0) * inv_scale
-                        b_y1 = max(p[1] for p in box) * inv_scale
+                        b_x0 = min(p[0] for p in box) + slice_x0
+                        b_y0 = min(p[1] for p in box)
+                        b_x1 = max(p[0] for p in box) + slice_x0
+                        b_y1 = max(p[1] for p in box)
                         items.append(TextItem(b_x0, b_y0, b_x1, b_y1, t, float(score), col_idx))
     except Exception as e:
         sys.stderr.write(f"[OCR Extraction Exception] {e}\n")
