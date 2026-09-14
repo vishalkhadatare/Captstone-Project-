@@ -728,3 +728,4 @@ export const PaperVersionsStudio: React.FC<PaperVersionsStudioProps> = ({
     </div>
   );
 };
+

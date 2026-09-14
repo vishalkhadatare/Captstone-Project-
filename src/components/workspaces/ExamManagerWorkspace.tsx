@@ -43,6 +43,8 @@ import {
   Phone,
   Mail,
   ShieldAlert,
+  ShieldCheck,
+  FileSpreadsheet,
   User as UserIcon,
 } from 'lucide-react';
 import { User, Examination, Question, Organization, ExamType, ExtractedQuestion, QuestionAssignment, ExaminationCentre, AddCentreResponse, EmergencyRegenerateResponse } from '../../types';
@@ -239,6 +241,29 @@ export const ExamManagerWorkspace: React.FC<ExamManagerWorkspaceProps> = ({
   const [emergencyRegenModalExam, setEmergencyRegenModalExam] = useState<Examination | null>(null);
   const [allCentresList, setAllCentresList] = useState<ExaminationCentre[]>([]);
   const [centresFilterExamId, setCentresFilterExamId] = useState<string>('ALL');
+  const [newlyCreatedExam, setNewlyCreatedExam] = useState<{ id: string; name: string; subject: string; category: string } | null>(null);
+  const [bulkVerifying, setBulkVerifying] = useState(false);
+
+  const handleBulkVerifySelected = async () => {
+    if (poolSelectedIds.size === 0) return;
+    setBulkVerifying(true);
+    try {
+      const res = await api.bulkVerifyQuestions({
+        question_ids: Array.from(poolSelectedIds),
+        status: 'VERIFIED',
+      });
+      setStatusMessage({
+        type: 'success',
+        text: `${res.message} Selected questions are now immediately eligible for Blueprinting & Paper Generation!`,
+      });
+      setPoolSelectedIds(new Set());
+      await loadData();
+    } catch (err: any) {
+      setStatusMessage({ type: 'error', text: err.message || 'Failed to verify questions.' });
+    } finally {
+      setBulkVerifying(false);
+    }
+  };
 
   const handleSimulateExam = (ex: Examination) => {
     if (ex.simulation_status === 'COMPLETED') {
@@ -673,7 +698,17 @@ export const ExamManagerWorkspace: React.FC<ExamManagerWorkspaceProps> = ({
         duration_minutes: durationMins,
       });
 
-      setStatusMessage({ type: 'success', text: res.message });
+      const createdExamData = {
+        id: res.examId,
+        name: examName,
+        subject,
+        category,
+      };
+      setNewlyCreatedExam(createdExamData);
+      setStatusMessage({
+        type: 'success',
+        text: `Enclave created successfully: "${examName}". Follow the workflow pipeline below to proceed.`,
+      });
       setExamName('');
       setSubject('');
       setSelectedPresetId(null);
@@ -826,6 +861,49 @@ export const ExamManagerWorkspace: React.FC<ExamManagerWorkspaceProps> = ({
       {/* DASHBOARD */}
       {activeSubTab === 'dashboard' && (
         <div className="space-y-6">
+          {/* End-to-End Interconnected Workflow Pipeline Banner */}
+          <div className="p-5 rounded-2xl bg-gradient-to-r from-slate-950 via-slate-900 to-indigo-950 text-white shadow-md space-y-3 relative overflow-hidden">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-white/10 pb-2.5">
+              <div className="flex items-center gap-2">
+                <Sparkles className="w-4 h-4 text-[#00cc5f]" />
+                <span className="text-xs font-black uppercase tracking-wider text-[#00cc5f]">
+                  Interactive Examination Lifecycle Pipeline
+                </span>
+              </div>
+              <span className="text-[11px] text-slate-300 font-medium">
+                Click any stage to navigate the connected exam process
+              </span>
+            </div>
+
+            <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-7 gap-2.5 text-xs">
+              {[
+                { id: 'create_examination', label: '1. Create Exam', icon: Award, desc: `${examinations.length} Enclaves` },
+                { id: 'question_workflow', label: '2. Upload Qs', icon: Upload, desc: 'AI Crop & Parse' },
+                { id: 'question_pools', label: '3. Question Bank', icon: Users, desc: `${verifiedCount} Verified` },
+                { id: 'blueprint_pattern', label: '4. Blueprint', icon: FileSpreadsheet, desc: 'Rules & Sections' },
+                { id: 'paper_generation', label: '5. Single Paper', icon: Lock, desc: 'AES-256 Vault' },
+                { id: 'multi_paper_generator', label: '6. Multi-Sets', icon: Layers, desc: 'Sets A/B/C/D' },
+                { id: 'paper_versions', label: '7. Key Release', icon: ShieldCheck, desc: 'Shamir Threshold' },
+              ].map(step => {
+                const Icon = step.icon;
+                return (
+                  <button
+                    key={step.id}
+                    type="button"
+                    onClick={() => onSelectSubTab && onSelectSubTab(step.id as any)}
+                    className="p-2.5 rounded-xl bg-white/5 hover:bg-white/15 border border-white/10 hover:border-[#00cc5f]/50 text-left transition-all cursor-pointer group hover:scale-[1.02] shadow-2xs"
+                  >
+                    <div className="flex items-center gap-1.5 font-bold text-white text-xs group-hover:text-[#00cc5f]">
+                      <Icon className="w-3.5 h-3.5 text-[#00cc5f] shrink-0" />
+                      <span className="truncate">{step.label}</span>
+                    </div>
+                    <span className="text-[10px] text-slate-400 block mt-1 truncate">{step.desc}</span>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+
           <div className="modern-card p-6 rounded-2xl bg-white border border-slate-200 shadow-sm space-y-5">
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-100 pb-4">
               <div>
@@ -1329,6 +1407,76 @@ export const ExamManagerWorkspace: React.FC<ExamManagerWorkspaceProps> = ({
                         </button>
                       </div>
                     </div>
+
+                    {/* Interconnected Workflow Steps Bar */}
+                    <div className="flex flex-wrap items-center gap-1.5 pt-2 border-t border-slate-100 text-xs bg-slate-50/50 p-2 rounded-xl">
+                      <span className="text-[10px] font-black text-slate-400 uppercase tracking-wider mr-1">
+                        Workflow Pipeline:
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => onSelectSubTab && onSelectSubTab('question_workflow')}
+                        className="px-2.5 py-1 rounded-lg bg-white border border-slate-200 hover:bg-emerald-50 hover:border-emerald-300 text-slate-700 hover:text-emerald-900 font-bold text-[11px] flex items-center gap-1 cursor-pointer transition-all shadow-2xs"
+                      >
+                        <Upload className="w-3 h-3 text-slate-500" />
+                        <span>1. Upload Qs</span>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setSelectedGenExamId(ex.id);
+                          if (onSelectSubTab) onSelectSubTab('blueprint_pattern');
+                        }}
+                        className="px-2.5 py-1 rounded-lg bg-white border border-slate-200 hover:bg-amber-50 hover:border-amber-300 text-slate-700 hover:text-amber-900 font-bold text-[11px] flex items-center gap-1 cursor-pointer transition-all shadow-2xs"
+                      >
+                        <FileSpreadsheet className="w-3 h-3 text-amber-500" />
+                        <span>2. Blueprint</span>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setSelectedGenExamId(ex.id);
+                          if (onSelectSubTab) onSelectSubTab('paper_generation');
+                        }}
+                        className="px-2.5 py-1 rounded-lg bg-white border border-slate-200 hover:bg-blue-50 hover:border-blue-300 text-slate-700 hover:text-blue-900 font-bold text-[11px] flex items-center gap-1 cursor-pointer transition-all shadow-2xs"
+                      >
+                        <Sparkles className="w-3 h-3 text-blue-500" />
+                        <span>3. Single Paper</span>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setSelectedGenExamId(ex.id);
+                          if (onSelectSubTab) onSelectSubTab('multi_paper_generator');
+                        }}
+                        className="px-2.5 py-1 rounded-lg bg-white border border-slate-200 hover:bg-indigo-50 hover:border-indigo-300 text-slate-700 hover:text-indigo-900 font-bold text-[11px] flex items-center gap-1 cursor-pointer transition-all shadow-2xs"
+                      >
+                        <Layers className="w-3 h-3 text-indigo-500" />
+                        <span>4. Sets A/B/C/D</span>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setSelectedGenExamId(ex.id);
+                          if (onSelectSubTab) onSelectSubTab('paper_versions');
+                        }}
+                        className="px-2.5 py-1 rounded-lg bg-white border border-slate-200 hover:bg-emerald-50 hover:border-emerald-300 text-slate-700 hover:text-emerald-900 font-bold text-[11px] flex items-center gap-1 cursor-pointer transition-all shadow-2xs"
+                      >
+                        <ShieldCheck className="w-3 h-3 text-emerald-600" />
+                        <span>5. Releases & Keys</span>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setCentresFilterExamId(ex.id);
+                          if (onSelectSubTab) onSelectSubTab('examination_centres');
+                        }}
+                        className="px-2.5 py-1 rounded-lg bg-white border border-slate-200 hover:bg-teal-50 hover:border-teal-300 text-slate-700 hover:text-teal-900 font-bold text-[11px] flex items-center gap-1 cursor-pointer transition-all shadow-2xs"
+                      >
+                        <Building2 className="w-3 h-3 text-teal-600" />
+                        <span>6. Delivery Centres</span>
+                      </button>
+                    </div>
                   </div>
                 );
               })}
@@ -1350,6 +1498,79 @@ export const ExamManagerWorkspace: React.FC<ExamManagerWorkspaceProps> = ({
               Establish a tamper-proof examination vault with automated question bank pooling, Shamir key-sharing, and verifiable time-locks.
             </p>
           </div>
+
+          {/* Newly Created Examination Quick Actions */}
+          {newlyCreatedExam && (
+            <div className="p-5 rounded-2xl bg-gradient-to-br from-emerald-50 via-emerald-100/40 to-teal-50 border border-emerald-300 shadow-sm space-y-3">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2 text-emerald-950 font-bold text-sm">
+                  <CheckCircle2 className="w-5 h-5 text-emerald-600 shrink-0" />
+                  <span>Examination Created: "{newlyCreatedExam.name}" ({newlyCreatedExam.id})</span>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setNewlyCreatedExam(null)}
+                  className="text-xs text-slate-400 hover:text-slate-700 cursor-pointer"
+                >
+                  ✕
+                </button>
+              </div>
+              <p className="text-xs text-slate-600">
+                The cryptographic enclave has been initialized. Proceed through the connected workflow pipeline:
+              </p>
+              <div className="flex flex-wrap gap-2 pt-1">
+                <button
+                  type="button"
+                  onClick={() => onSelectSubTab && onSelectSubTab('question_workflow')}
+                  className="px-3 py-1.5 rounded-xl bg-emerald-700 hover:bg-emerald-800 text-white font-bold text-xs flex items-center gap-1.5 shadow-2xs cursor-pointer transition-all"
+                >
+                  <Upload className="w-3.5 h-3.5" />
+                  <span>1. Upload / Extract Questions</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setSelectedGenExamId(newlyCreatedExam.id);
+                    if (onSelectSubTab) onSelectSubTab('blueprint_pattern');
+                  }}
+                  className="px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-900 text-white font-bold text-xs flex items-center gap-1.5 shadow-2xs cursor-pointer transition-all"
+                >
+                  <FileSpreadsheet className="w-3.5 h-3.5 text-amber-400" />
+                  <span>2. Blueprint & Pattern</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setSelectedGenExamId(newlyCreatedExam.id);
+                    if (onSelectSubTab) onSelectSubTab('multi_paper_generator');
+                  }}
+                  className="px-3 py-1.5 rounded-xl bg-indigo-700 hover:bg-indigo-800 text-white font-bold text-xs flex items-center gap-1.5 shadow-2xs cursor-pointer transition-all"
+                >
+                  <Layers className="w-3.5 h-3.5" />
+                  <span>3. Multi-Paper Generator</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setCentresFilterExamId(newlyCreatedExam.id);
+                    if (onSelectSubTab) onSelectSubTab('examination_centres');
+                  }}
+                  className="px-3 py-1.5 rounded-xl bg-teal-700 hover:bg-teal-800 text-white font-bold text-xs flex items-center gap-1.5 shadow-2xs cursor-pointer transition-all"
+                >
+                  <Building2 className="w-3.5 h-3.5" />
+                  <span>4. Assign Delivery Centres</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => onSelectSubTab && onSelectSubTab('all_examinations')}
+                  className="px-3 py-1.5 rounded-xl bg-white border border-slate-300 hover:bg-slate-100 text-slate-700 font-bold text-xs flex items-center gap-1.5 shadow-2xs cursor-pointer transition-all"
+                >
+                  <Eye className="w-3.5 h-3.5 text-slate-500" />
+                  <span>View in Catalog</span>
+                </button>
+              </div>
+            </div>
+          )}
 
           {/* Quick Real Exam Presets */}
           <div className="p-5 rounded-2xl bg-gradient-to-r from-slate-950 via-slate-900 to-indigo-950 text-white shadow-md space-y-3 relative overflow-hidden">
@@ -1638,6 +1859,7 @@ export const ExamManagerWorkspace: React.FC<ExamManagerWorkspaceProps> = ({
               org={org}
               currentUser={currentUser}
               onAssignmentsUpdated={loadData}
+              onNavigateSubTab={onSelectSubTab}
             />
           )}
 
@@ -2216,7 +2438,7 @@ export const ExamManagerWorkspace: React.FC<ExamManagerWorkspaceProps> = ({
                 </p>
               </div>
 
-              <div className="flex items-center gap-2">
+              <div className="flex flex-wrap items-center gap-2">
                 <button
                   type="button"
                   onClick={() => {
@@ -2226,21 +2448,43 @@ export const ExamManagerWorkspace: React.FC<ExamManagerWorkspaceProps> = ({
                       setPoolSelectedIds(new Set(questions.map(q => q.id)));
                     }
                   }}
-                  className="px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg font-bold text-xs"
+                  className="px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg font-bold text-xs cursor-pointer"
                 >
                   {poolSelectedIds.size === questions.length ? 'Deselect All' : `Select All (${questions.length})`}
                 </button>
 
                 {poolSelectedIds.size > 0 && (
-                  <button
-                    type="button"
-                    onClick={() => setPoolBulkModalOpen(true)}
-                    className="px-4 py-1.5 bg-emerald-900 hover:bg-emerald-800 text-white rounded-lg font-bold text-xs shadow-xs flex items-center gap-1.5"
-                  >
-                    <Send className="w-3.5 h-3.5" />
-                    <span>Assign Selected ({poolSelectedIds.size})</span>
-                  </button>
+                  <>
+                    <button
+                      type="button"
+                      onClick={handleBulkVerifySelected}
+                      disabled={bulkVerifying}
+                      className="px-3.5 py-1.5 bg-emerald-700 hover:bg-emerald-600 text-white rounded-lg font-bold text-xs shadow-xs flex items-center gap-1.5 cursor-pointer disabled:opacity-50 transition-all"
+                      title="Directly mark selected questions as VERIFIED & eligible for paper generation"
+                    >
+                      <CheckCircle2 className="w-3.5 h-3.5 text-emerald-200" />
+                      <span>{bulkVerifying ? 'Approving...' : `Direct Approve (${poolSelectedIds.size})`}</span>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => setPoolBulkModalOpen(true)}
+                      className="px-3.5 py-1.5 bg-slate-800 hover:bg-slate-700 text-white rounded-lg font-bold text-xs shadow-xs flex items-center gap-1.5 cursor-pointer transition-all"
+                    >
+                      <Send className="w-3.5 h-3.5" />
+                      <span>Assign Selected ({poolSelectedIds.size})</span>
+                    </button>
+                  </>
                 )}
+
+                <button
+                  type="button"
+                  onClick={() => onSelectSubTab && onSelectSubTab('paper_generation')}
+                  className="px-3 py-1.5 bg-[#00cc5f] hover:bg-[#00b855] text-black font-black rounded-lg text-xs shadow-xs flex items-center gap-1.5 cursor-pointer transition-all"
+                >
+                  <span>Go to Paper Generation</span>
+                  <ArrowRight className="w-3.5 h-3.5" />
+                </button>
               </div>
             </div>
 
@@ -2399,10 +2643,103 @@ export const ExamManagerWorkspace: React.FC<ExamManagerWorkspaceProps> = ({
 
       {/* BLUEPRINT & PATTERN */}
       {activeSubTab === 'blueprint_pattern' && (
-        <div className="p-6 rounded-xl bg-white border border-slate-200 shadow-xs space-y-4">
-          <h3 className="text-base font-bold text-slate-900 border-b pb-2">
-            Theory Pattern & Blueprint Configuration
-          </h3>
+        <div className="p-6 rounded-2xl bg-white border border-slate-200/90 shadow-sm space-y-5">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-100 pb-4">
+            <div>
+              <span className="text-[10px] font-black uppercase tracking-wider text-emerald-800 bg-emerald-50 px-2.5 py-0.5 rounded-full border border-emerald-200">
+                AI Pattern Engine
+              </span>
+              <h3 className="text-xl font-black text-slate-900 mt-1">
+                Theory Pattern & Blueprint Configuration
+              </h3>
+              <p className="text-xs text-slate-500">
+                Structure multi-section theory papers, question weights, and evaluation rubrics using Gemini AI.
+              </p>
+            </div>
+
+            <button
+              type="button"
+              onClick={() => onSelectSubTab && onSelectSubTab('paper_generation')}
+              className="px-3.5 py-2 bg-[#00cc5f] hover:bg-[#00b855] text-black font-black rounded-xl text-xs shadow-xs flex items-center gap-1.5 cursor-pointer transition-all self-start sm:self-center"
+            >
+              <span>Go to Paper Generation</span>
+              <ArrowRight className="w-3.5 h-3.5" />
+            </button>
+          </div>
+
+          {/* Exam Selection Dropdown */}
+          <div className="p-4 rounded-xl bg-slate-50 border border-slate-200 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+            <div>
+              <span className="text-[10px] font-black text-slate-400 uppercase tracking-wider block">
+                Target Examination Enclave
+              </span>
+              <span className="text-xs font-bold text-slate-800">
+                {examinations.find(e => e.id === selectedGenExamId)?.name || 'Select an Examination'}
+              </span>
+            </div>
+
+            <select
+              value={selectedGenExamId}
+              onChange={e => setSelectedGenExamId(e.target.value)}
+              className="px-3 py-2 rounded-xl bg-white border border-slate-300 text-xs font-medium text-slate-800 focus:outline-hidden focus:border-emerald-500"
+            >
+              {examinations.map(e => (
+                <option key={e.id} value={e.id}>
+                  {e.name} ({e.subject} • {e.category})
+                </option>
+              ))}
+            </select>
+          </div>
+
+          {/* Quick Blueprint Template Presets */}
+          <div className="space-y-2">
+            <label className="block text-slate-700 font-bold text-xs">
+              Quick Blueprint Draft Presets (Click to Load Template):
+            </label>
+            <div className="flex flex-wrap gap-2">
+              <button
+                type="button"
+                onClick={() =>
+                  setRefDraftText(
+                    `Section A: 10 Compulsory Short Objective Questions carrying 2 marks each. Total: 20 Marks.
+Section B: 5 Analytical Questions carrying 6 marks each (Attempt any 4). Total: 24 Marks.
+Section C: 4 Comprehensive Descriptive/Proof Questions carrying 14 marks each (Attempt any 4). Total: 56 Marks.
+Total Marks: 100. Duration: 3 Hours.`
+                  )
+                }
+                className="px-3 py-1.5 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-semibold cursor-pointer transition-all"
+              >
+                AICTE University 3-Section (100 Marks)
+              </button>
+              <button
+                type="button"
+                onClick={() =>
+                  setRefDraftText(
+                    `Part I: General Engineering & Aptitude - 15 Questions of 1 mark each. Total: 15 Marks.
+Part II: Core Technical & Cryptography - 50 Questions (25 of 1 mark, 25 of 2 marks). Total: 75 Marks.
+Negative Marking: -0.33 for 1M questions, -0.66 for 2M questions.
+Total Marks: 90. Duration: 180 Minutes.`
+                  )
+                }
+                className="px-3 py-1.5 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-semibold cursor-pointer transition-all"
+              >
+                Competitive Technical Entrance (90 Marks)
+              </button>
+              <button
+                type="button"
+                onClick={() =>
+                  setRefDraftText(
+                    `Section 1: Multiple Choice Questions (20 Qs x 4 Marks = 80 Marks).
+Section 2: Numerical Value / Fill-in Questions (10 Qs, attempt any 5 x 4 Marks = 20 Marks).
+Total Marks: 100. Negative marking applicable on Section 1.`
+                  )
+                }
+                className="px-3 py-1.5 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-semibold cursor-pointer transition-all"
+              >
+                National Entrance Hybrid Pattern (100 Marks)
+              </button>
+            </div>
+          </div>
 
           <div className="space-y-3 text-xs">
             <label className="block text-slate-700 font-bold">
@@ -2413,30 +2750,43 @@ export const ExamManagerWorkspace: React.FC<ExamManagerWorkspaceProps> = ({
               value={refDraftText}
               onChange={e => setRefDraftText(e.target.value)}
               placeholder="e.g. Section A: 5 compulsory questions of 2 marks each. Section B: Attempt 3 out of 5 long theory questions of 10 marks each..."
-              className="w-full px-3 py-2 rounded-lg bg-slate-50 border border-slate-300 text-slate-900"
+              className="w-full px-3.5 py-2.5 rounded-xl bg-slate-50 border border-slate-300 text-slate-900 font-mono text-xs focus:bg-white focus:outline-hidden"
             />
 
             <button
               onClick={handleAnalyzeTheoryPattern}
               disabled={analyzingPattern || !refDraftText}
-              className="px-4 py-2 bg-emerald-900 hover:bg-emerald-800 text-white rounded-lg font-bold text-xs shadow-xs flex items-center gap-1.5"
+              className="px-4 py-2.5 bg-emerald-900 hover:bg-emerald-800 text-white rounded-xl font-bold text-xs shadow-xs flex items-center gap-1.5 cursor-pointer disabled:opacity-50 transition-all"
             >
               <Cpu className="w-4 h-4" />
               <span>{analyzingPattern ? 'Extracting Pattern...' : 'Extract Pattern with Gemini AI'}</span>
             </button>
 
             {extractedPattern && (
-              <div className="p-4 rounded-lg bg-emerald-50 border border-emerald-200 text-emerald-900 space-y-3">
-                <div className="font-bold text-sm">Extracted Examination Structure</div>
-                <pre className="text-[11px] font-mono bg-white p-3 rounded border overflow-x-auto text-slate-800">
+              <div className="p-4 rounded-xl bg-emerald-50 border border-emerald-200 text-emerald-900 space-y-3">
+                <div className="font-bold text-sm flex items-center gap-2">
+                  <CheckCircle2 className="w-4 h-4 text-emerald-600" />
+                  <span>Extracted Examination Structure</span>
+                </div>
+                <pre className="text-[11px] font-mono bg-white p-3 rounded-xl border border-emerald-200 overflow-x-auto text-slate-800">
                   {JSON.stringify(extractedPattern, null, 2)}
                 </pre>
-                <button
-                  onClick={handleConfirmPattern}
-                  className="px-4 py-2 bg-emerald-800 hover:bg-emerald-700 text-white rounded-lg font-bold text-xs shadow-xs"
-                >
-                  Confirm & Lock Theory Blueprint
-                </button>
+                <div className="flex flex-wrap items-center gap-2">
+                  <button
+                    onClick={handleConfirmPattern}
+                    className="px-4 py-2 bg-emerald-800 hover:bg-emerald-700 text-white rounded-xl font-bold text-xs shadow-xs cursor-pointer transition-all"
+                  >
+                    Confirm & Lock Theory Blueprint
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => onSelectSubTab && onSelectSubTab('paper_generation')}
+                    className="px-4 py-2 bg-slate-900 hover:bg-slate-800 text-white rounded-xl font-bold text-xs shadow-xs flex items-center gap-1.5 cursor-pointer transition-all"
+                  >
+                    <span>Proceed to Paper Generation</span>
+                    <ArrowRight className="w-3.5 h-3.5 text-amber-400" />
+                  </button>
+                </div>
               </div>
             )}
           </div>
@@ -2569,6 +2919,24 @@ export const ExamManagerWorkspace: React.FC<ExamManagerWorkspaceProps> = ({
                           >
                             <RotateCcw className="w-3.5 h-3.5" />
                             <span>Emergency Re-Gen</span>
+                          </button>
+
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setSelectedGenExamId(ex.id);
+                              if (onSelectSubTab) {
+                                onSelectSubTab('multi_paper_generator');
+                              } else {
+                                window.location.hash = 'multi-paper-generator';
+                              }
+                            }}
+                            className="px-3 py-2 bg-indigo-50 hover:bg-indigo-100 text-indigo-900 border border-indigo-200 rounded-lg font-bold text-xs flex items-center gap-1.5 cursor-pointer transition-all"
+                            title="Generate Sets A, B, C, D with balanced candidate pool quotas"
+                          >
+                            <Sparkles className="w-3.5 h-3.5 text-indigo-600" />
+                            <span>Multi-Sets</span>
                           </button>
 
                           <button
@@ -2796,6 +3164,7 @@ export const ExamManagerWorkspace: React.FC<ExamManagerWorkspaceProps> = ({
         <DynamicMultiPaperGenerator
           examinations={examinations}
           selectedExamId={selectedGenExamId || (examinations[0]?.id || '')}
+          onNavigateSubTab={onSelectSubTab}
         />
       )}
 
@@ -3002,6 +3371,23 @@ export const ExamManagerWorkspace: React.FC<ExamManagerWorkspaceProps> = ({
                           </p>
                         )}
                       </div>
+
+                      {exam && (
+                        <div className="flex items-center justify-between pt-1 border-t border-slate-100 text-xs">
+                          <span className="text-[11px] text-slate-500 font-medium">Vault Release:</span>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setSelectedGenExamId(exam.id);
+                              if (onSelectSubTab) onSelectSubTab('paper_versions');
+                            }}
+                            className="px-2.5 py-1 rounded-lg bg-emerald-50 hover:bg-emerald-100 text-emerald-900 border border-emerald-200 font-bold text-[11px] flex items-center gap-1 cursor-pointer transition-all shadow-2xs"
+                          >
+                            <ShieldCheck className="w-3.5 h-3.5 text-emerald-700" />
+                            <span>View Enclave Releases & Keys</span>
+                          </button>
+                        </div>
+                      )}
                     </div>
                   );
                 })}

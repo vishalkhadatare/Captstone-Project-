@@ -19,6 +19,8 @@ import {
   Plus,
   Trash2,
   Database,
+  Lock,
+  Building2,
   X,
 } from 'lucide-react';
 import { api } from '../../api';
@@ -35,11 +37,13 @@ import {
 interface DynamicMultiPaperGeneratorProps {
   examinations?: Examination[];
   selectedExamId?: string;
+  onNavigateSubTab?: (subTab: string) => void;
 }
 
 export const DynamicMultiPaperGenerator: React.FC<DynamicMultiPaperGeneratorProps> = ({
   examinations = [],
   selectedExamId: initialExamId,
+  onNavigateSubTab,
 }) => {
   // Navigation & Sub-views
   const [activeView, setActiveView] = useState<'generate' | 'papers' | 'dispatch' | 'forensics'>('generate');
@@ -531,6 +535,29 @@ export const DynamicMultiPaperGenerator: React.FC<DynamicMultiPaperGeneratorProp
               <Search className="w-3.5 h-3.5" /> Forensic Leak Tracer
             </button>
           </div>
+
+          {onNavigateSubTab && (
+            <div className="flex flex-wrap items-center gap-2 border-t md:border-t-0 md:border-l border-white/10 md:pl-3 pt-2 md:pt-0">
+              <button
+                type="button"
+                onClick={() => onNavigateSubTab('paper_versions')}
+                className="px-3 py-1.5 rounded-lg bg-emerald-700/80 hover:bg-emerald-600 text-white font-bold text-xs flex items-center gap-1.5 transition-all shadow-2xs cursor-pointer"
+                title="Open Paper Versions Studio to inspect cryptographic release sets & Shamir keys"
+              >
+                <Lock className="w-3.5 h-3.5 text-emerald-300" />
+                <span>Paper Versions</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => onNavigateSubTab('examination_centres')}
+                className="px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-white font-bold text-xs flex items-center gap-1.5 transition-all shadow-2xs cursor-pointer"
+                title="Configure Delivery Centres & Copy Control quotas"
+              >
+                <Building2 className="w-3.5 h-3.5 text-slate-300" />
+                <span>Centres</span>
+              </button>
+            </div>
+          )}
         </div>
       </div>
 

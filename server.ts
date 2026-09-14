@@ -4379,7 +4379,7 @@ async function startServer() {
   // Bulk Create Extracted Questions into Secure Question Bank
   app.post('/api/questions/bulk-create', authenticateToken, requireRole(['EXAM_MANAGER', 'ORG_OWNER']), async (req: Request, res: Response) => {
     try {
-      const { questions, auto_assign_sme_id, auto_assign_translator_id, target_language, assignment_notes } = req.body;
+      const { questions, auto_assign_sme_id, auto_assign_translator_id, target_language, assignment_notes, initial_status } = req.body;
       if (!Array.isArray(questions) || questions.length === 0) {
         return res.status(400).json({ error: 'No questions provided for import.' });
       }
@@ -4405,7 +4405,7 @@ async function startServer() {
 
       for (const q of questions) {
         const questionId = `Q-${uuidv4().substring(0, 8).toUpperCase()}`;
-        const initialStatus = auto_assign_sme_id ? 'UNDER_VERIFICATION' : 'DRAFT';
+        const initialStatus = initial_status || (auto_assign_sme_id ? 'UNDER_VERIFICATION' : 'VERIFIED');
 
         executeRun(
           db,
@@ -4569,6 +4569,59 @@ async function startServer() {
       });
     } catch (e: any) {
       console.error('Bulk assign error:', e);
+      return res.status(500).json({ error: e.message });
+    }
+  });
+
+  // Bulk Verify / Change Question Status (Exam Manager / Org Owner Direct Approval)
+  app.post('/api/questions/bulk-verify', authenticateToken, requireRole(['EXAM_MANAGER', 'ORG_OWNER']), async (req: Request, res: Response) => {
+    try {
+      const { question_ids, status = 'VERIFIED' } = req.body;
+      if (!Array.isArray(question_ids) || question_ids.length === 0) {
+        return res.status(400).json({ error: 'question_ids array is required.' });
+      }
+
+      const db = await getDb();
+      const ownedQuestions = executeQuery(
+        db,
+        'SELECT id FROM questions WHERE org_id = ? AND id IN (' + question_ids.map(() => '?').join(',') + ')',
+        [req.user!.org_id, ...question_ids]
+      );
+      if (ownedQuestions.length === 0) {
+        return res.status(404).json({ error: 'No matching questions found in your organization.' });
+      }
+
+      const ownedIds = ownedQuestions.map(q => q.id);
+      const now = new Date().toISOString();
+      const placeholders = ownedIds.map(() => '?').join(',');
+
+      executeRun(
+        db,
+        `UPDATE questions SET status = ?, updated_at = ? WHERE org_id = ? AND id IN (${placeholders})`,
+        [status, now, req.user!.org_id, ...ownedIds]
+      );
+
+      if (status === 'VERIFIED' || status === 'ELIGIBLE_FOR_PAPER') {
+        executeRun(
+          db,
+          `UPDATE question_assignments SET status = 'COMPLETED' WHERE org_id = ? AND question_id IN (${placeholders})`,
+          [req.user!.org_id, ...ownedIds]
+        );
+      }
+
+      await logAuditEvent({
+        event_type: 'QUESTIONS_BULK_VERIFIED',
+        user_id: req.user!.id,
+        org_id: req.user!.org_id,
+        details: { count: ownedIds.length, target_status: status },
+      });
+
+      return res.json({
+        message: `Successfully updated ${ownedIds.length} question(s) to status ${status}.`,
+        updatedCount: ownedIds.length,
+      });
+    } catch (e: any) {
+      console.error('Bulk verify error:', e);
       return res.status(500).json({ error: e.message });
     }
   });

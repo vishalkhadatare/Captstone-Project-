@@ -46,6 +46,7 @@ interface ExamManagerQuestionExtractorProps {
   org: Organization | null;
   currentUser: User | null;
   onAssignmentsUpdated: () => void;
+  onNavigateSubTab?: (subTab: string) => void;
 }
 
 interface UploadedQuestionFile {
@@ -185,6 +186,7 @@ export const ExamManagerQuestionExtractor: React.FC<ExamManagerQuestionExtractor
   org,
   currentUser,
   onAssignmentsUpdated,
+  onNavigateSubTab,
 }) => {
   // Upload & Extraction Input State
   const [pdfFileName, setPdfFileName] = useState('');
@@ -223,7 +225,9 @@ export const ExamManagerQuestionExtractor: React.FC<ExamManagerQuestionExtractor
   const [assignModalOpen, setAssignModalOpen] = useState(false);
   const [assignMode, setAssignMode] = useState<'SELECTED' | 'BY_COUNT'>('SELECTED');
   const [assignCountInput, setAssignCountInput] = useState<number>(5);
-  const [assignTargetRole, setAssignTargetRole] = useState<'SME' | 'TRANSLATOR' | 'BOTH'>('SME');
+  const [assignTargetRole, setAssignTargetRole] = useState<'SME' | 'TRANSLATOR' | 'BOTH' | 'DIRECT'>(
+    smes.length > 0 ? 'SME' : 'DIRECT'
+  );
   const [assignTargetSmeId, setAssignTargetSmeId] = useState<string>(smes[0]?.id || '');
   const [assignTargetTranslatorId, setAssignTargetTranslatorId] = useState<string>(translators[0]?.id || '');
   const [assignTargetLanguage, setAssignTargetLanguage] = useState<string>('Hindi');
@@ -1050,8 +1054,9 @@ export const ExamManagerQuestionExtractor: React.FC<ExamManagerQuestionExtractor
     }
 
     // Role validation
-    const needSme = assignTargetRole === 'SME' || assignTargetRole === 'BOTH';
-    const needTranslator = assignTargetRole === 'TRANSLATOR' || assignTargetRole === 'BOTH';
+    const isDirect = assignTargetRole === 'DIRECT';
+    const needSme = !isDirect && (assignTargetRole === 'SME' || assignTargetRole === 'BOTH');
+    const needTranslator = !isDirect && (assignTargetRole === 'TRANSLATOR' || assignTargetRole === 'BOTH');
 
     if (needSme && !assignTargetSmeId) {
       setStatusMessage({ type: 'error', text: 'Please select an SME from your organization.' });
@@ -1075,7 +1080,8 @@ export const ExamManagerQuestionExtractor: React.FC<ExamManagerQuestionExtractor
         auto_assign_sme_id: needSme ? assignTargetSmeId : undefined,
         auto_assign_translator_id: needTranslator ? assignTargetTranslatorId : undefined,
         target_language: needTranslator ? assignTargetLanguage : undefined,
-        assignment_notes: assignNotes || undefined,
+        assignment_notes: assignNotes || (isDirect ? 'Directly verified & approved by Exam Manager' : undefined),
+        initial_status: isDirect ? 'VERIFIED' : undefined,
       });
 
       // Update local assignment tags for real-time sidebar feedback
@@ -1083,7 +1089,7 @@ export const ExamManagerQuestionExtractor: React.FC<ExamManagerQuestionExtractor
       targetQuestionList.forEach(q => {
         updatedAssignments[q.tempId] = {
           smeId: needSme ? assignTargetSmeId : updatedAssignments[q.tempId]?.smeId,
-          smeName: needSme ? targetSme?.full_name || 'Assigned SME' : updatedAssignments[q.tempId]?.smeName,
+          smeName: isDirect ? 'Verified & Ready' : (needSme ? targetSme?.full_name || 'Assigned SME' : updatedAssignments[q.tempId]?.smeName),
           translatorId: needTranslator ? assignTargetTranslatorId : updatedAssignments[q.tempId]?.translatorId,
           translatorName: needTranslator ? targetTranslator?.full_name || 'Assigned Translator' : updatedAssignments[q.tempId]?.translatorName,
           targetLanguage: needTranslator ? assignTargetLanguage : updatedAssignments[q.tempId]?.targetLanguage,
@@ -1092,7 +1098,9 @@ export const ExamManagerQuestionExtractor: React.FC<ExamManagerQuestionExtractor
       setLocalAssignments(updatedAssignments);
 
       let assignmentDesc = '';
-      if (needSme && needTranslator) {
+      if (isDirect) {
+        assignmentDesc = 'directly verified and made eligible for Paper Generation';
+      } else if (needSme && needTranslator) {
         assignmentDesc = `assigned to SME ${targetSme?.full_name} and Translator ${targetTranslator?.full_name} (${assignTargetLanguage})`;
       } else if (needSme) {
         assignmentDesc = `assigned to SME ${targetSme?.full_name}`;
@@ -1102,7 +1110,7 @@ export const ExamManagerQuestionExtractor: React.FC<ExamManagerQuestionExtractor
 
       setStatusMessage({
         type: 'success',
-        text: `Successfully created ${res.createdCount} questions in secure question repository and ${assignmentDesc}.`,
+        text: `Successfully imported ${res.createdCount} question(s) into question repository (${assignmentDesc}).`,
       });
 
       setAssignModalOpen(false);
@@ -1149,12 +1157,34 @@ export const ExamManagerQuestionExtractor: React.FC<ExamManagerQuestionExtractor
             )}
             <span className="font-medium">{statusMessage.text}</span>
           </div>
-          <button
-            onClick={() => setStatusMessage(null)}
-            className="p-1 text-slate-400 hover:text-slate-700 rounded"
-          >
-            <X className="w-3.5 h-3.5" />
-          </button>
+          <div className="flex items-center gap-2 shrink-0">
+            {statusMessage.type === 'success' && onNavigateSubTab && (
+              <>
+                <button
+                  type="button"
+                  onClick={() => onNavigateSubTab('question_pools')}
+                  className="px-2.5 py-1 rounded-lg bg-emerald-700 hover:bg-emerald-800 text-white font-bold text-[11px] flex items-center gap-1 cursor-pointer transition-all shadow-2xs"
+                >
+                  <span>Question Pools</span>
+                  <ArrowRight className="w-3 h-3" />
+                </button>
+                <button
+                  type="button"
+                  onClick={() => onNavigateSubTab('paper_generation')}
+                  className="px-2.5 py-1 rounded-lg bg-slate-900 hover:bg-slate-800 text-white font-bold text-[11px] flex items-center gap-1 cursor-pointer transition-all shadow-2xs"
+                >
+                  <span>Paper Generator</span>
+                  <ArrowRight className="w-3 h-3" />
+                </button>
+              </>
+            )}
+            <button
+              onClick={() => setStatusMessage(null)}
+              className="p-1 text-slate-400 hover:text-slate-700 rounded cursor-pointer"
+            >
+              <X className="w-3.5 h-3.5" />
+            </button>
+          </div>
         </div>
       )}
 
@@ -2696,11 +2726,24 @@ export const ExamManagerQuestionExtractor: React.FC<ExamManagerQuestionExtractor
               </label>
 
               {/* Role Toggle Tabs */}
-              <div className="grid grid-cols-3 gap-2">
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                <button
+                  type="button"
+                  onClick={() => setAssignTargetRole('DIRECT')}
+                  className={`py-2 px-2.5 rounded-lg font-bold text-xs flex items-center justify-center gap-1.5 transition-colors cursor-pointer ${
+                    assignTargetRole === 'DIRECT'
+                      ? 'bg-emerald-600 text-white shadow-xs'
+                      : 'bg-slate-800 text-slate-300 hover:bg-slate-700'
+                  }`}
+                >
+                  <CheckCircle2 className="w-3.5 h-3.5" />
+                  <span>Direct Approve</span>
+                </button>
+
                 <button
                   type="button"
                   onClick={() => setAssignTargetRole('SME')}
-                  className={`py-2 px-3 rounded-lg font-bold text-xs flex items-center justify-center gap-1.5 transition-colors ${
+                  className={`py-2 px-2.5 rounded-lg font-bold text-xs flex items-center justify-center gap-1.5 transition-colors cursor-pointer ${
                     assignTargetRole === 'SME'
                       ? 'bg-blue-600 text-white'
                       : 'bg-slate-800 text-slate-300 hover:bg-slate-700'
@@ -2713,7 +2756,7 @@ export const ExamManagerQuestionExtractor: React.FC<ExamManagerQuestionExtractor
                 <button
                   type="button"
                   onClick={() => setAssignTargetRole('TRANSLATOR')}
-                  className={`py-2 px-3 rounded-lg font-bold text-xs flex items-center justify-center gap-1.5 transition-colors ${
+                  className={`py-2 px-2.5 rounded-lg font-bold text-xs flex items-center justify-center gap-1.5 transition-colors cursor-pointer ${
                     assignTargetRole === 'TRANSLATOR'
                       ? 'bg-purple-600 text-white'
                       : 'bg-slate-800 text-slate-300 hover:bg-slate-700'
@@ -2726,16 +2769,29 @@ export const ExamManagerQuestionExtractor: React.FC<ExamManagerQuestionExtractor
                 <button
                   type="button"
                   onClick={() => setAssignTargetRole('BOTH')}
-                  className={`py-2 px-3 rounded-lg font-bold text-xs flex items-center justify-center gap-1.5 transition-colors ${
+                  className={`py-2 px-2.5 rounded-lg font-bold text-xs flex items-center justify-center gap-1.5 transition-colors cursor-pointer ${
                     assignTargetRole === 'BOTH'
-                      ? 'bg-emerald-600 text-white'
+                      ? 'bg-emerald-700 text-white'
                       : 'bg-slate-800 text-slate-300 hover:bg-slate-700'
                   }`}
                 >
                   <Users className="w-3.5 h-3.5" />
-                  <span>Both (SME + Trans)</span>
+                  <span>Both (SME+Trans)</span>
                 </button>
               </div>
+
+              {/* Direct Approval Info Banner */}
+              {assignTargetRole === 'DIRECT' && (
+                <div className="p-3 rounded-xl bg-emerald-950/40 border border-emerald-500/30 text-xs text-emerald-200 space-y-1">
+                  <div className="font-bold flex items-center gap-1.5 text-emerald-300">
+                    <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
+                    <span>Direct Repository Approval (No SME Required)</span>
+                  </div>
+                  <p className="text-[11px] text-emerald-200/90 leading-relaxed">
+                    Questions will be directly stored as <strong>VERIFIED</strong>. They will immediately become eligible in Question Pools, Blueprint configuration, and Paper Generation without requiring SME review.
+                  </p>
+                </div>
+              )}
 
               {/* SME User Selection */}
               {(assignTargetRole === 'SME' || assignTargetRole === 'BOTH') && (
