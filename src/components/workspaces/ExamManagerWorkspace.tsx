@@ -861,46 +861,32 @@ export const ExamManagerWorkspace: React.FC<ExamManagerWorkspaceProps> = ({
       {/* DASHBOARD */}
       {activeSubTab === 'dashboard' && (
         <div className="space-y-6">
-          {/* End-to-End Interconnected Workflow Pipeline Banner */}
-          <div className="p-5 rounded-2xl bg-gradient-to-r from-slate-950 via-slate-900 to-indigo-950 text-white shadow-md space-y-3 relative overflow-hidden">
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-white/10 pb-2.5">
-              <div className="flex items-center gap-2">
-                <Sparkles className="w-4 h-4 text-[#00cc5f]" />
-                <span className="text-xs font-black uppercase tracking-wider text-[#00cc5f]">
-                  Interactive Examination Lifecycle Pipeline
-                </span>
-              </div>
-              <span className="text-[11px] text-slate-300 font-medium">
-                Click any stage to navigate the connected exam process
-              </span>
+          {/* Clean, Simple Workflow Quick-Bar */}
+          <div className="p-4 rounded-xl bg-white border border-slate-200/90 shadow-2xs flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+            <div className="flex items-center gap-2 text-xs font-bold text-slate-800 shrink-0">
+              <span className="w-2 h-2 rounded-full bg-emerald-500" />
+              <span>Exam Lifecycle:</span>
             </div>
 
-            <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-7 gap-2.5 text-xs">
+            <div className="flex flex-wrap items-center gap-1.5 text-xs">
               {[
-                { id: 'create_examination', label: '1. Create Exam', icon: Award, desc: `${examinations.length} Enclaves` },
-                { id: 'question_workflow', label: '2. Upload Qs', icon: Upload, desc: 'AI Crop & Parse' },
-                { id: 'question_pools', label: '3. Question Bank', icon: Users, desc: `${verifiedCount} Verified` },
-                { id: 'blueprint_pattern', label: '4. Blueprint', icon: FileSpreadsheet, desc: 'Rules & Sections' },
-                { id: 'paper_generation', label: '5. Single Paper', icon: Lock, desc: 'AES-256 Vault' },
-                { id: 'multi_paper_generator', label: '6. Multi-Sets', icon: Layers, desc: 'Sets A/B/C/D' },
-                { id: 'paper_versions', label: '7. Key Release', icon: ShieldCheck, desc: 'Shamir Threshold' },
-              ].map(step => {
-                const Icon = step.icon;
-                return (
+                { id: 'create_examination', label: '1. Create Exam' },
+                { id: 'question_workflow', label: '2. Upload Questions' },
+                { id: 'question_pools', label: '3. Question Bank' },
+                { id: 'paper_generation', label: '4. Generate Paper' },
+                { id: 'examination_centres', label: '5. Delivery Centres' },
+              ].map((step, idx, arr) => (
+                <React.Fragment key={step.id}>
                   <button
-                    key={step.id}
                     type="button"
                     onClick={() => onSelectSubTab && onSelectSubTab(step.id as any)}
-                    className="p-2.5 rounded-xl bg-white/5 hover:bg-white/15 border border-white/10 hover:border-[#00cc5f]/50 text-left transition-all cursor-pointer group hover:scale-[1.02] shadow-2xs"
+                    className="px-2.5 py-1 rounded-lg bg-slate-50 hover:bg-emerald-50 hover:text-emerald-900 text-slate-700 font-semibold text-xs transition-colors cursor-pointer border border-slate-200"
                   >
-                    <div className="flex items-center gap-1.5 font-bold text-white text-xs group-hover:text-[#00cc5f]">
-                      <Icon className="w-3.5 h-3.5 text-[#00cc5f] shrink-0" />
-                      <span className="truncate">{step.label}</span>
-                    </div>
-                    <span className="text-[10px] text-slate-400 block mt-1 truncate">{step.desc}</span>
+                    {step.label}
                   </button>
-                );
-              })}
+                  {idx < arr.length - 1 && <span className="text-slate-300 font-normal">→</span>}
+                </React.Fragment>
+              ))}
             </div>
           </div>
 
@@ -1215,267 +1201,151 @@ export const ExamManagerWorkspace: React.FC<ExamManagerWorkspaceProps> = ({
                 return (
                   <div
                     key={ex.id}
-                    className="p-5 rounded-2xl bg-white border border-slate-200/90 shadow-sm hover:shadow-md hover:border-slate-300 transition-all space-y-4 relative overflow-hidden"
+                    className="p-5 rounded-xl bg-white border border-slate-200/90 shadow-2xs hover:shadow-xs hover:border-slate-300 transition-all space-y-3"
                   >
-                    <div className="flex flex-wrap items-start justify-between gap-3">
-                      <div className="space-y-1">
-                        <div className="flex flex-wrap items-center gap-2">
-                          <span className="font-mono font-black text-[11px] text-slate-500 bg-slate-100 px-2.5 py-0.5 rounded-md">
+                    {/* Header: Title & Badges */}
+                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-slate-100 pb-3">
+                      <div>
+                        <div className="flex items-center gap-2">
+                          <span className="font-mono font-bold text-[11px] text-slate-500 bg-slate-100 px-2 py-0.5 rounded">
                             {ex.id}
                           </span>
-                          <span className={`px-2 py-0.5 rounded text-[10px] font-black border ${typeBadgeClass}`}>
-                            {type === 'MCQ' ? '⚡ MCQ (OMR/CBT)' : type === 'THEORY' ? '📝 THEORY (Descriptive)' : type === 'MIXED' ? '🔀 MIXED (Hybrid)' : '💻 PRACTICAL'}
+                          <span className={`px-2 py-0.5 rounded text-[10px] font-bold border ${typeBadgeClass}`}>
+                            {type}
                           </span>
-                          <span className="text-[10px] font-bold text-slate-600 bg-slate-100 px-2 py-0.5 rounded-md">
+                          <span className="text-[10px] font-semibold text-slate-500">
                             {ex.category}
                           </span>
                         </div>
-                        <h4 className="text-base font-black text-slate-900 leading-snug">
+                        <h4 className="text-base font-bold text-slate-900 mt-1">
                           {ex.name}
                         </h4>
-                        <div className="flex items-center gap-1.5 text-xs text-slate-600 font-medium">
-                          <GraduationCap className="w-4 h-4 text-emerald-700 shrink-0" />
+                        <div className="text-xs text-slate-500 flex items-center gap-1 mt-0.5">
                           <span>{ex.subject}</span>
+                          <span>•</span>
+                          <span className="font-medium text-slate-700">Scheduled: {ex.exam_date} @ {ex.exam_time}</span>
                         </div>
                       </div>
 
-                      <div className="flex items-center gap-2">
+                      <div className="flex items-center gap-2 self-start sm:self-center">
                         <span
-                          className={`px-3 py-1 rounded-full text-[10px] font-black tracking-wider uppercase border flex items-center gap-1.5 ${
+                          className={`px-2.5 py-1 rounded-full text-[10px] font-bold tracking-wider uppercase border flex items-center gap-1.5 ${
                             ex.status === 'GENERATED' || ex.status === 'READY'
-                              ? 'bg-emerald-50 text-emerald-950 border-emerald-300'
-                              : ex.status === 'UNLOCKED'
-                              ? 'bg-purple-50 text-purple-950 border-purple-300'
-                              : 'bg-amber-50 text-amber-950 border-amber-300'
+                              ? 'bg-emerald-50 text-emerald-900 border-emerald-300'
+                              : 'bg-amber-50 text-amber-900 border-amber-300'
                           }`}
                         >
                           <span className={`w-2 h-2 rounded-full ${
-                            ex.status === 'GENERATED' || ex.status === 'READY' ? 'bg-emerald-600 animate-pulse' : 'bg-amber-600'
+                            ex.status === 'GENERATED' || ex.status === 'READY' ? 'bg-emerald-600' : 'bg-amber-600'
                           }`} />
                           {ex.status}
                         </span>
                       </div>
                     </div>
 
-                    {/* Metadata Grid */}
-                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-xs bg-slate-50/80 p-3.5 rounded-xl border border-slate-100">
-                      <div className="space-y-0.5">
-                        <span className="text-[10px] font-bold text-slate-400 block uppercase">Structure</span>
-                        <div className="font-black text-slate-900 flex items-center gap-1.5">
-                          <Award className="w-3.5 h-3.5 text-amber-700 shrink-0" />
-                          <span>{ex.total_marks} Marks</span>
-                          <span className="text-slate-400 font-normal">({ex.total_questions} Qs)</span>
-                        </div>
-                      </div>
-
-                      <div className="space-y-0.5">
-                        <span className="text-[10px] font-bold text-slate-400 block uppercase">Duration</span>
-                        <div className="font-black text-slate-900 flex items-center gap-1.5">
-                          <Clock className="w-3.5 h-3.5 text-blue-700 shrink-0" />
-                          <span>{ex.duration_minutes} Minutes</span>
-                        </div>
-                      </div>
-
-                      <div className="space-y-0.5">
-                        <span className="text-[10px] font-bold text-slate-400 block uppercase">Scheduled Test</span>
-                        <div className="font-mono text-slate-900 font-bold flex items-center gap-1.5">
-                          <Calendar className="w-3.5 h-3.5 text-teal-700 shrink-0" />
-                          <span>{ex.exam_date} @ {ex.exam_time}</span>
-                        </div>
-                      </div>
-
-                      <div className="space-y-0.5">
-                        <span className="text-[10px] font-bold text-slate-400 block uppercase">Time-Lock Unlock</span>
-                        <div className="font-mono text-emerald-950 font-black flex items-center gap-1.5">
-                          <Lock className="w-3.5 h-3.5 text-emerald-700 shrink-0" />
-                          <span>{ex.unlock_time}</span>
-                          <span className="text-[9px] text-emerald-800 font-sans font-bold">(Shamir 3-Key)</span>
-                        </div>
-                      </div>
-                    </div>
-
-                    {/* Delivery Centres & Copy Control Summary */}
+                    {/* Single-line Key Summary Strip */}
                     {(() => {
                       const examCentres = allCentresList.filter(c => c.exam_id === ex.id);
-                      const hasAnyMismatch = examCentres.some(c => c.hasMismatch);
-                      const managerCap = ex.max_copies || 500;
-
                       return (
-                        <div className="flex flex-wrap items-center justify-between gap-2 py-2 px-3 rounded-xl bg-slate-50 border border-slate-200/80 text-xs">
-                          <div className="flex items-center gap-2">
-                            <Building2 className="w-3.5 h-3.5 text-slate-500" />
-                            <span className="font-semibold text-slate-700">
-                              {examCentres.length === 0
-                                ? 'No delivery centres assigned'
-                                : `${examCentres.length} Centre${examCentres.length > 1 ? 's' : ''} Assigned`}
-                            </span>
-                            <span className="text-slate-400 font-mono text-[11px]">
-                              • Manager Cap: <strong className="text-slate-800">{managerCap}</strong>
-                            </span>
-                          </div>
-
-                          <div className="flex items-center gap-2">
-                            {hasAnyMismatch && (
-                              <span
-                                className="px-2 py-0.5 rounded-md bg-amber-100 text-amber-900 border border-amber-300 font-bold text-[10px] flex items-center gap-1"
-                                title="Quota Mismatch: A centre requested more copies than the Manager Authorized Cap. Final copies are restricted."
-                              >
-                                <AlertTriangle className="w-3 h-3 text-amber-600" />
-                                <span>Quota Mismatch</span>
-                              </span>
-                            )}
-                            {examCentres.length > 0 && (
-                              <span className="text-[11px] font-mono text-slate-600 font-medium">
-                                Enforced Copies:{' '}
-                                <strong className="text-emerald-800">
-                                  {Math.min(...examCentres.map(c => c.finalAllowed ?? Math.min(managerCap, c.max_copies)))}
-                                </strong>
-                              </span>
-                            )}
-                          </div>
+                        <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-slate-600 bg-slate-50 p-2.5 rounded-lg border border-slate-100 font-medium">
+                          <span>Marks: <strong className="text-slate-900">{ex.total_marks}</strong> ({ex.total_questions} Qs)</span>
+                          <span>•</span>
+                          <span>Duration: <strong className="text-slate-900">{ex.duration_minutes} mins</strong></span>
+                          <span>•</span>
+                          <span>Time-Lock: <strong className="text-slate-900 font-mono">{ex.unlock_time}</strong></span>
+                          <span>•</span>
+                          <span>Delivery Centres: <strong className="text-slate-900">{examCentres.length}</strong></span>
                         </div>
                       );
                     })()}
 
-                    {/* Action Bar */}
-                    <div className="flex flex-wrap items-center justify-between gap-2 pt-1 border-t border-slate-100">
-                      <div className="flex items-center gap-2">
+                    {/* Unified Single Action Row */}
+                    <div className="flex flex-wrap items-center justify-between gap-2 pt-1">
+                      <div className="flex flex-wrap items-center gap-2">
+                        {/* Primary: Generate Paper */}
+                        <button
+                          type="button"
+                          onClick={() => handleGeneratePaper(ex.id)}
+                          disabled={generating || org?.status !== 'VERIFIED'}
+                          className="px-3.5 py-1.5 rounded-lg bg-slate-900 hover:bg-slate-800 text-white text-xs font-bold flex items-center gap-1.5 shadow-2xs cursor-pointer disabled:opacity-50"
+                        >
+                          <Sparkles className="w-3.5 h-3.5 text-amber-400" />
+                          <span>{ex.status === 'GENERATED' ? 'Re-Generate Paper' : 'Generate Paper'}</span>
+                        </button>
+
+                        {/* Secondary: Simulate Exam */}
                         {ex.simulation_status === 'COMPLETED' ? (
-                          <span
-                            className="px-3.5 py-1.5 rounded-xl bg-emerald-50 text-emerald-800 border border-emerald-300 font-bold text-xs flex items-center gap-1.5 shadow-2xs"
-                            title="Simulation already completed. The final question paper cannot be viewed again in simulation mode."
-                          >
+                          <span className="px-3 py-1.5 rounded-lg bg-emerald-50 text-emerald-800 border border-emerald-200 text-xs font-bold flex items-center gap-1">
                             <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
-                            <span>Simulation Completed ✓</span>
+                            <span>Simulated ✓</span>
                           </span>
                         ) : (
                           <button
                             type="button"
                             onClick={() => handleSimulateExam(ex)}
-                            className="px-3.5 py-1.5 rounded-xl bg-emerald-700 hover:bg-emerald-600 text-white font-bold text-xs flex items-center gap-1.5 shadow-xs cursor-pointer transition-all"
-                            title="Start Proctored Final Paper Simulation"
+                            className="px-3 py-1.5 rounded-lg bg-emerald-700 hover:bg-emerald-600 text-white text-xs font-bold flex items-center gap-1 cursor-pointer"
                           >
                             <Camera className="w-3.5 h-3.5" />
-                            <span>Simulate Exam</span>
+                            <span>Simulate</span>
                           </button>
                         )}
 
+                        {/* Quick links to other options */}
                         <button
                           type="button"
-                          onClick={() => handleGeneratePaper(ex.id)}
-                          disabled={generating || org?.status !== 'VERIFIED'}
-                          className={`px-3.5 py-1.5 rounded-xl font-bold text-xs flex items-center gap-1.5 shadow-xs disabled:opacity-50 cursor-pointer ${
-                            ex.simulation_status === 'COMPLETED'
-                              ? 'bg-slate-900 hover:bg-slate-800 text-white ring-2 ring-emerald-500/30'
-                              : 'bg-slate-900 hover:bg-slate-800 text-white'
-                          }`}
+                          onClick={() => onSelectSubTab && onSelectSubTab('question_workflow')}
+                          className="px-2.5 py-1.5 rounded-lg border border-slate-200 hover:bg-slate-50 text-slate-700 text-xs font-medium cursor-pointer"
                         >
-                          <Sparkles className="w-3.5 h-3.5 text-amber-400" />
-                          <span>{ex.status === 'GENERATED' ? 'Re-Generate & Encrypt' : 'Generate Encrypted Paper'}</span>
+                          Upload Qs
                         </button>
-
-                        {onLaunchCandidateSimulator && (
-                          <button
-                            type="button"
-                            onClick={() => onLaunchCandidateSimulator(ex.id)}
-                            className="px-3 py-1.5 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 border border-slate-200 font-medium text-xs flex items-center gap-1.5 cursor-pointer"
-                            title="Open candidate portal testing simulator"
-                          >
-                            <Play className="w-3 h-3 text-slate-500 fill-current" />
-                            <span>Candidate Simulator</span>
-                          </button>
-                        )}
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setSelectedGenExamId(ex.id);
+                            if (onSelectSubTab) onSelectSubTab('blueprint_pattern');
+                          }}
+                          className="px-2.5 py-1.5 rounded-lg border border-slate-200 hover:bg-slate-50 text-slate-700 text-xs font-medium cursor-pointer"
+                        >
+                          Blueprint
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setSelectedGenExamId(ex.id);
+                            if (onSelectSubTab) onSelectSubTab('multi_paper_generator');
+                          }}
+                          className="px-2.5 py-1.5 rounded-lg border border-slate-200 hover:bg-slate-50 text-slate-700 text-xs font-medium cursor-pointer"
+                        >
+                          Sets (A/B/C/D)
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setCentresFilterExamId(ex.id);
+                            if (onSelectSubTab) onSelectSubTab('examination_centres');
+                          }}
+                          className="px-2.5 py-1.5 rounded-lg border border-slate-200 hover:bg-slate-50 text-slate-700 text-xs font-medium cursor-pointer"
+                        >
+                          Centres
+                        </button>
                       </div>
 
-                      <div className="flex items-center gap-2">
+                      <div className="flex items-center gap-1">
                         <button
                           type="button"
                           onClick={() => setAddCentreModalExam(ex)}
-                          className="text-slate-600 hover:text-slate-900 text-xs font-semibold px-2 py-1 rounded hover:bg-slate-100 cursor-pointer flex items-center gap-1"
+                          className="text-slate-500 hover:text-slate-800 text-xs font-medium px-2 py-1 rounded hover:bg-slate-100 cursor-pointer"
                         >
-                          <Building2 className="w-3 h-3 text-slate-500" />
-                          <span>Add Centre</span>
+                          + Add Centre
                         </button>
-
                         <button
                           type="button"
                           onClick={() => setEmergencyRegenModalExam(ex)}
-                          className="text-rose-600 hover:text-rose-800 text-xs font-semibold px-2 py-1 rounded hover:bg-rose-50 cursor-pointer flex items-center gap-1"
+                          className="text-rose-600 hover:text-rose-800 text-xs font-medium px-2 py-1 rounded hover:bg-rose-50 cursor-pointer"
                         >
-                          <RotateCcw className="w-3 h-3 text-rose-500" />
-                          <span>Emergency Re-Gen</span>
+                          Emergency Re-Gen
                         </button>
                       </div>
-                    </div>
-
-                    {/* Interconnected Workflow Steps Bar */}
-                    <div className="flex flex-wrap items-center gap-1.5 pt-2 border-t border-slate-100 text-xs bg-slate-50/50 p-2 rounded-xl">
-                      <span className="text-[10px] font-black text-slate-400 uppercase tracking-wider mr-1">
-                        Workflow Pipeline:
-                      </span>
-                      <button
-                        type="button"
-                        onClick={() => onSelectSubTab && onSelectSubTab('question_workflow')}
-                        className="px-2.5 py-1 rounded-lg bg-white border border-slate-200 hover:bg-emerald-50 hover:border-emerald-300 text-slate-700 hover:text-emerald-900 font-bold text-[11px] flex items-center gap-1 cursor-pointer transition-all shadow-2xs"
-                      >
-                        <Upload className="w-3 h-3 text-slate-500" />
-                        <span>1. Upload Qs</span>
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setSelectedGenExamId(ex.id);
-                          if (onSelectSubTab) onSelectSubTab('blueprint_pattern');
-                        }}
-                        className="px-2.5 py-1 rounded-lg bg-white border border-slate-200 hover:bg-amber-50 hover:border-amber-300 text-slate-700 hover:text-amber-900 font-bold text-[11px] flex items-center gap-1 cursor-pointer transition-all shadow-2xs"
-                      >
-                        <FileSpreadsheet className="w-3 h-3 text-amber-500" />
-                        <span>2. Blueprint</span>
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setSelectedGenExamId(ex.id);
-                          if (onSelectSubTab) onSelectSubTab('paper_generation');
-                        }}
-                        className="px-2.5 py-1 rounded-lg bg-white border border-slate-200 hover:bg-blue-50 hover:border-blue-300 text-slate-700 hover:text-blue-900 font-bold text-[11px] flex items-center gap-1 cursor-pointer transition-all shadow-2xs"
-                      >
-                        <Sparkles className="w-3 h-3 text-blue-500" />
-                        <span>3. Single Paper</span>
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setSelectedGenExamId(ex.id);
-                          if (onSelectSubTab) onSelectSubTab('multi_paper_generator');
-                        }}
-                        className="px-2.5 py-1 rounded-lg bg-white border border-slate-200 hover:bg-indigo-50 hover:border-indigo-300 text-slate-700 hover:text-indigo-900 font-bold text-[11px] flex items-center gap-1 cursor-pointer transition-all shadow-2xs"
-                      >
-                        <Layers className="w-3 h-3 text-indigo-500" />
-                        <span>4. Sets A/B/C/D</span>
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setSelectedGenExamId(ex.id);
-                          if (onSelectSubTab) onSelectSubTab('paper_versions');
-                        }}
-                        className="px-2.5 py-1 rounded-lg bg-white border border-slate-200 hover:bg-emerald-50 hover:border-emerald-300 text-slate-700 hover:text-emerald-900 font-bold text-[11px] flex items-center gap-1 cursor-pointer transition-all shadow-2xs"
-                      >
-                        <ShieldCheck className="w-3 h-3 text-emerald-600" />
-                        <span>5. Releases & Keys</span>
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setCentresFilterExamId(ex.id);
-                          if (onSelectSubTab) onSelectSubTab('examination_centres');
-                        }}
-                        className="px-2.5 py-1 rounded-lg bg-white border border-slate-200 hover:bg-teal-50 hover:border-teal-300 text-slate-700 hover:text-teal-900 font-bold text-[11px] flex items-center gap-1 cursor-pointer transition-all shadow-2xs"
-                      >
-                        <Building2 className="w-3 h-3 text-teal-600" />
-                        <span>6. Delivery Centres</span>
-                      </button>
                     </div>
                   </div>
                 );
@@ -1499,33 +1369,29 @@ export const ExamManagerWorkspace: React.FC<ExamManagerWorkspaceProps> = ({
             </p>
           </div>
 
-          {/* Newly Created Examination Quick Actions */}
+          {/* Newly Created Examination Quick Alert */}
           {newlyCreatedExam && (
-            <div className="p-5 rounded-2xl bg-gradient-to-br from-emerald-50 via-emerald-100/40 to-teal-50 border border-emerald-300 shadow-sm space-y-3">
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-2 text-emerald-950 font-bold text-sm">
-                  <CheckCircle2 className="w-5 h-5 text-emerald-600 shrink-0" />
-                  <span>Examination Created: "{newlyCreatedExam.name}" ({newlyCreatedExam.id})</span>
+            <div className="p-4 rounded-xl bg-emerald-50 border border-emerald-200 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs">
+              <div className="flex items-center gap-2.5">
+                <CheckCircle2 className="w-5 h-5 text-emerald-600 shrink-0" />
+                <div>
+                  <span className="font-bold text-slate-900 block">
+                    Created: "{newlyCreatedExam.name}"
+                  </span>
+                  <span className="text-[11px] text-slate-500 font-mono">
+                    ID: {newlyCreatedExam.id} • {newlyCreatedExam.subject}
+                  </span>
                 </div>
-                <button
-                  type="button"
-                  onClick={() => setNewlyCreatedExam(null)}
-                  className="text-xs text-slate-400 hover:text-slate-700 cursor-pointer"
-                >
-                  ✕
-                </button>
               </div>
-              <p className="text-xs text-slate-600">
-                The cryptographic enclave has been initialized. Proceed through the connected workflow pipeline:
-              </p>
-              <div className="flex flex-wrap gap-2 pt-1">
+
+              <div className="flex items-center gap-2 self-end sm:self-auto">
                 <button
                   type="button"
                   onClick={() => onSelectSubTab && onSelectSubTab('question_workflow')}
-                  className="px-3 py-1.5 rounded-xl bg-emerald-700 hover:bg-emerald-800 text-white font-bold text-xs flex items-center gap-1.5 shadow-2xs cursor-pointer transition-all"
+                  className="px-3 py-1.5 rounded-lg bg-emerald-700 hover:bg-emerald-800 text-white font-bold text-xs flex items-center gap-1.5 shadow-2xs cursor-pointer"
                 >
                   <Upload className="w-3.5 h-3.5" />
-                  <span>1. Upload / Extract Questions</span>
+                  <span>Upload Questions</span>
                 </button>
                 <button
                   type="button"
@@ -1533,55 +1399,40 @@ export const ExamManagerWorkspace: React.FC<ExamManagerWorkspaceProps> = ({
                     setSelectedGenExamId(newlyCreatedExam.id);
                     if (onSelectSubTab) onSelectSubTab('blueprint_pattern');
                   }}
-                  className="px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-900 text-white font-bold text-xs flex items-center gap-1.5 shadow-2xs cursor-pointer transition-all"
+                  className="px-3 py-1.5 rounded-lg border border-slate-300 hover:bg-slate-100 text-slate-700 font-medium text-xs cursor-pointer"
                 >
-                  <FileSpreadsheet className="w-3.5 h-3.5 text-amber-400" />
-                  <span>2. Blueprint & Pattern</span>
-                </button>
-                <button
-                  type="button"
-                  onClick={() => {
-                    setSelectedGenExamId(newlyCreatedExam.id);
-                    if (onSelectSubTab) onSelectSubTab('multi_paper_generator');
-                  }}
-                  className="px-3 py-1.5 rounded-xl bg-indigo-700 hover:bg-indigo-800 text-white font-bold text-xs flex items-center gap-1.5 shadow-2xs cursor-pointer transition-all"
-                >
-                  <Layers className="w-3.5 h-3.5" />
-                  <span>3. Multi-Paper Generator</span>
-                </button>
-                <button
-                  type="button"
-                  onClick={() => {
-                    setCentresFilterExamId(newlyCreatedExam.id);
-                    if (onSelectSubTab) onSelectSubTab('examination_centres');
-                  }}
-                  className="px-3 py-1.5 rounded-xl bg-teal-700 hover:bg-teal-800 text-white font-bold text-xs flex items-center gap-1.5 shadow-2xs cursor-pointer transition-all"
-                >
-                  <Building2 className="w-3.5 h-3.5" />
-                  <span>4. Assign Delivery Centres</span>
+                  Blueprint
                 </button>
                 <button
                   type="button"
                   onClick={() => onSelectSubTab && onSelectSubTab('all_examinations')}
-                  className="px-3 py-1.5 rounded-xl bg-white border border-slate-300 hover:bg-slate-100 text-slate-700 font-bold text-xs flex items-center gap-1.5 shadow-2xs cursor-pointer transition-all"
+                  className="px-3 py-1.5 rounded-lg border border-slate-300 hover:bg-slate-100 text-slate-700 font-medium text-xs cursor-pointer"
                 >
-                  <Eye className="w-3.5 h-3.5 text-slate-500" />
-                  <span>View in Catalog</span>
+                  View in Catalog
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setNewlyCreatedExam(null)}
+                  className="text-slate-400 hover:text-slate-600 px-1 text-sm font-bold cursor-pointer"
+                  title="Dismiss"
+                >
+                  ✕
                 </button>
               </div>
             </div>
           )}
 
           {/* Quick Real Exam Presets */}
-          <div className="p-5 rounded-2xl bg-gradient-to-r from-slate-950 via-slate-900 to-indigo-950 text-white shadow-md space-y-3 relative overflow-hidden">
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
-              <div className="flex items-center gap-2">
-                <Sparkles className="w-4 h-4 text-amber-400" />
-                <span className="font-bold text-xs uppercase tracking-wider text-amber-300">
-                  Quick Real Exam Presets (1-Click Real Blueprint Auto Fill)
+          <div className="p-4 rounded-xl bg-slate-50 border border-slate-200/90 space-y-2.5">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-1">
+              <div className="flex items-center gap-1.5 text-xs font-bold text-slate-800">
+                <Sparkles className="w-3.5 h-3.5 text-amber-500" />
+                <span>Quick Real Exam Templates</span>
+                <span className="text-[10px] font-normal text-slate-500">
+                  (1-Click Auto-Fill)
                 </span>
               </div>
-              <span className="text-[11px] text-slate-300 font-medium">
+              <span className="text-[11px] text-slate-400 font-medium">
                 Authentic AICTE, NTA & University configurations
               </span>
             </div>
@@ -1594,14 +1445,14 @@ export const ExamManagerWorkspace: React.FC<ExamManagerWorkspaceProps> = ({
                     key={preset.id}
                     type="button"
                     onClick={() => handleApplyPreset(preset)}
-                    className={`px-3 py-2 rounded-xl text-xs font-bold transition-all flex items-center gap-2 cursor-pointer ${
+                    className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all flex items-center gap-1.5 cursor-pointer ${
                       isSelected
-                        ? 'bg-amber-400 text-slate-950 ring-2 ring-white shadow-md scale-105'
-                        : 'bg-white/10 hover:bg-white/20 text-white border border-white/10'
+                        ? 'bg-emerald-900 text-white shadow-2xs'
+                        : 'bg-white hover:bg-slate-100 text-slate-700 border border-slate-200'
                     }`}
                   >
                     <span>{preset.shortTag}</span>
-                    <span className="text-[10px] opacity-80 font-normal">
+                    <span className={`text-[10px] ${isSelected ? 'text-emerald-200' : 'text-slate-400'}`}>
                       ({preset.totalMarks}M • {preset.totalQuestions}Q)
                     </span>
                   </button>
@@ -1610,16 +1461,16 @@ export const ExamManagerWorkspace: React.FC<ExamManagerWorkspaceProps> = ({
             </div>
 
             {selectedPresetId && (
-              <div className="text-[11px] text-amber-200 bg-white/10 p-2.5 rounded-xl border border-white/15 flex items-center justify-between">
+              <div className="text-xs text-slate-600 bg-white p-2.5 rounded-lg border border-slate-200 flex items-center justify-between">
                 <span>
-                  Preset Applied: <strong className="text-white">{REAL_EXAM_PRESETS.find(p => p.id === selectedPresetId)?.name}</strong> — {REAL_EXAM_PRESETS.find(p => p.id === selectedPresetId)?.description}
+                  Template Applied: <strong className="text-slate-900">{REAL_EXAM_PRESETS.find(p => p.id === selectedPresetId)?.name}</strong> — {REAL_EXAM_PRESETS.find(p => p.id === selectedPresetId)?.description}
                 </span>
                 <button
                   type="button"
                   onClick={() => setSelectedPresetId(null)}
-                  className="text-[10px] text-slate-300 hover:text-white underline cursor-pointer"
+                  className="text-[11px] text-slate-500 hover:text-slate-800 underline cursor-pointer"
                 >
-                  Clear Preset
+                  Clear
                 </button>
               </div>
             )}
@@ -2694,7 +2545,7 @@ export const ExamManagerWorkspace: React.FC<ExamManagerWorkspaceProps> = ({
           {/* Quick Blueprint Template Presets */}
           <div className="space-y-2">
             <label className="block text-slate-700 font-bold text-xs">
-              Quick Blueprint Draft Presets (Click to Load Template):
+              Quick Blueprint Templates:
             </label>
             <div className="flex flex-wrap gap-2">
               <button
@@ -2707,7 +2558,7 @@ Section C: 4 Comprehensive Descriptive/Proof Questions carrying 14 marks each (A
 Total Marks: 100. Duration: 3 Hours.`
                   )
                 }
-                className="px-3 py-1.5 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-semibold cursor-pointer transition-all"
+                className="px-3 py-1.5 rounded-lg bg-white border border-slate-200 hover:bg-slate-50 text-slate-700 text-xs font-medium cursor-pointer transition-all"
               >
                 AICTE University 3-Section (100 Marks)
               </button>
@@ -2721,7 +2572,7 @@ Negative Marking: -0.33 for 1M questions, -0.66 for 2M questions.
 Total Marks: 90. Duration: 180 Minutes.`
                   )
                 }
-                className="px-3 py-1.5 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-semibold cursor-pointer transition-all"
+                className="px-3 py-1.5 rounded-lg bg-white border border-slate-200 hover:bg-slate-50 text-slate-700 text-xs font-medium cursor-pointer transition-all"
               >
                 Competitive Technical Entrance (90 Marks)
               </button>
@@ -2734,7 +2585,7 @@ Section 2: Numerical Value / Fill-in Questions (10 Qs, attempt any 5 x 4 Marks =
 Total Marks: 100. Negative marking applicable on Section 1.`
                   )
                 }
-                className="px-3 py-1.5 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-semibold cursor-pointer transition-all"
+                className="px-3 py-1.5 rounded-lg bg-white border border-slate-200 hover:bg-slate-50 text-slate-700 text-xs font-medium cursor-pointer transition-all"
               >
                 National Entrance Hybrid Pattern (100 Marks)
               </button>
@@ -2763,25 +2614,66 @@ Total Marks: 100. Negative marking applicable on Section 1.`
             </button>
 
             {extractedPattern && (
-              <div className="p-4 rounded-xl bg-emerald-50 border border-emerald-200 text-emerald-900 space-y-3">
-                <div className="font-bold text-sm flex items-center gap-2">
-                  <CheckCircle2 className="w-4 h-4 text-emerald-600" />
-                  <span>Extracted Examination Structure</span>
+              <div className="p-4 rounded-xl bg-emerald-50/70 border border-emerald-200 text-slate-800 space-y-3">
+                <div className="flex items-center justify-between">
+                  <div className="font-bold text-xs flex items-center gap-1.5 text-emerald-900">
+                    <CheckCircle2 className="w-4 h-4 text-emerald-600" />
+                    <span>Extracted Examination Structure</span>
+                  </div>
+                  <span className="text-[11px] text-emerald-800 font-semibold">
+                    Pattern Extracted Successfully
+                  </span>
                 </div>
-                <pre className="text-[11px] font-mono bg-white p-3 rounded-xl border border-emerald-200 overflow-x-auto text-slate-800">
-                  {JSON.stringify(extractedPattern, null, 2)}
-                </pre>
-                <div className="flex flex-wrap items-center gap-2">
+
+                {/* Clean Summary Card */}
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-xs">
+                  <div className="bg-white p-2.5 rounded-lg border border-emerald-100">
+                    <div className="text-[10px] text-slate-400 uppercase font-bold">Total Marks</div>
+                    <div className="text-base font-black text-slate-900 font-mono">
+                      {extractedPattern.total_marks || extractedPattern.totalMarks || '—'}
+                    </div>
+                  </div>
+                  <div className="bg-white p-2.5 rounded-lg border border-emerald-100">
+                    <div className="text-[10px] text-slate-400 uppercase font-bold">Total Sections</div>
+                    <div className="text-base font-black text-slate-900 font-mono">
+                      {Array.isArray(extractedPattern.sections) ? extractedPattern.sections.length : '—'}
+                    </div>
+                  </div>
+                  <div className="bg-white p-2.5 rounded-lg border border-emerald-100">
+                    <div className="text-[10px] text-slate-400 uppercase font-bold">Duration</div>
+                    <div className="text-base font-black text-slate-900 font-mono">
+                      {extractedPattern.duration_minutes || extractedPattern.duration || '—'} mins
+                    </div>
+                  </div>
+                  <div className="bg-white p-2.5 rounded-lg border border-emerald-100">
+                    <div className="text-[10px] text-slate-400 uppercase font-bold">Total Questions</div>
+                    <div className="text-base font-black text-slate-900 font-mono">
+                      {extractedPattern.total_questions || extractedPattern.totalQuestions || '—'}
+                    </div>
+                  </div>
+                </div>
+
+                {/* Optional Expandable Technical JSON */}
+                <details className="text-[11px] group">
+                  <summary className="cursor-pointer text-emerald-800 hover:text-emerald-950 font-semibold select-none">
+                    ▸ View Technical Blueprint Schema (JSON)
+                  </summary>
+                  <pre className="mt-2 text-[11px] font-mono bg-white p-3 rounded-lg border border-emerald-200 overflow-x-auto text-slate-800 max-h-60">
+                    {JSON.stringify(extractedPattern, null, 2)}
+                  </pre>
+                </details>
+
+                <div className="flex flex-wrap items-center gap-2 pt-1">
                   <button
                     onClick={handleConfirmPattern}
-                    className="px-4 py-2 bg-emerald-800 hover:bg-emerald-700 text-white rounded-xl font-bold text-xs shadow-xs cursor-pointer transition-all"
+                    className="px-4 py-2 bg-emerald-800 hover:bg-emerald-700 text-white rounded-lg font-bold text-xs shadow-2xs cursor-pointer transition-all"
                   >
                     Confirm & Lock Theory Blueprint
                   </button>
                   <button
                     type="button"
                     onClick={() => onSelectSubTab && onSelectSubTab('paper_generation')}
-                    className="px-4 py-2 bg-slate-900 hover:bg-slate-800 text-white rounded-xl font-bold text-xs shadow-xs flex items-center gap-1.5 cursor-pointer transition-all"
+                    className="px-4 py-2 bg-slate-900 hover:bg-slate-800 text-white rounded-lg font-bold text-xs shadow-2xs flex items-center gap-1.5 cursor-pointer transition-all"
                   >
                     <span>Proceed to Paper Generation</span>
                     <ArrowRight className="w-3.5 h-3.5 text-amber-400" />
