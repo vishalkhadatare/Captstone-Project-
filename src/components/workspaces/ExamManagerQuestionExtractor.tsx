@@ -203,7 +203,7 @@ export const ExamManagerQuestionExtractor: React.FC<ExamManagerQuestionExtractor
   const [activeExtractedIndex, setActiveExtractedIndex] = useState<number>(0);
   const [selectedExtractedIds, setSelectedExtractedIds] = useState<Set<string>>(new Set());
   const [selectedPaperFilter, setSelectedPaperFilter] = useState<number | 'ALL'>('ALL');
-  const [visibleStudioPapers, setVisibleStudioPapers] = useState<number[]>([1, 2, 3]);
+  const [visibleStudioPapers, setVisibleStudioPapers] = useState<number[]>([]);
   const [sidebarFilterType, setSidebarFilterType] = useState<'ALL' | 'MCQ' | 'THEORY' | 'UNASSIGNED' | 'ASSIGNED'>('ALL');
   const [sidebarSearch, setSidebarSearch] = useState('');
   const [extractionSummary, setExtractionSummary] = useState('');
@@ -302,21 +302,45 @@ export const ExamManagerQuestionExtractor: React.FC<ExamManagerQuestionExtractor
     setPdfFileName(reindexed.map(file => file.name).join(', '));
     setPdfFileData(reindexed.find(file => file.fileData)?.fileData || '');
     setPdfText(reindexed.filter(file => file.text).map(file => file.text).join('\n\n'));
+
+    // If existing questions were from the benchmark NEET papers, reset them so user sees their uploaded paper cleanly
+    if (extractedQuestions.some(q => q.source_file?.toLowerCase().includes('neet') || q.source_file?.toLowerCase().includes('nbte'))) {
+      setExtractedQuestions([]);
+      setSelectedExtractedIds(new Set());
+      setLocalAssignments({});
+      setVisibleStudioPapers(reindexed.map(f => f.paperNumber));
+      setSelectedPaperFilter(1);
+    }
   };
 
   const handleRemoveUploadedFile = (fileId: string) => {
+    const fileToRemove = uploadedFiles.find(f => f.id === fileId);
     const filtered = uploadedFiles.filter(f => f.id !== fileId);
     const reindexed = filtered.map((f, idx) => ({ ...f, paperNumber: idx + 1 }));
     setUploadedFiles(reindexed);
+    if (fileToRemove) {
+      setExtractedQuestions(prev => prev.filter(q => q.source_file !== fileToRemove.name && (q.paper_number || 1) !== fileToRemove.paperNumber));
+      setSelectedExtractedIds(prev => {
+        const next = new Set(prev);
+        extractedQuestions.filter(q => q.source_file === fileToRemove.name || (q.paper_number || 1) === fileToRemove.paperNumber).forEach(q => next.delete(q.tempId));
+        return next;
+      });
+    }
     if (reindexed.length === 0) {
+      setExtractedQuestions([]);
+      setSelectedExtractedIds(new Set());
       setPdfFileName('');
       setPdfFileData('');
       setPdfText('');
+      setExtractionSummary('');
+      setExtractionProgress(null);
     } else {
       setPdfFileName(reindexed.map(f => f.name).join(', '));
       setPdfFileData(reindexed.find(f => f.fileData)?.fileData || '');
       setPdfText(reindexed.filter(f => f.text).map(f => f.text).join('\n\n'));
     }
+    setStatusMessage({ type: 'success', text: `Removed ${fileToRemove?.name || 'question paper'}.` });
+    setTimeout(() => setStatusMessage(null), 2500);
   };
 
   const handleFileInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -797,8 +821,8 @@ export const ExamManagerQuestionExtractor: React.FC<ExamManagerQuestionExtractor
     }
   };
 
-  // Distinct paper numbers: ALWAYS guarantee Question Paper 1, Question Paper 2, and Question Paper 3 are available
-  const paperNumSet = new Set<number>([1, 2, 3]);
+  // Distinct paper numbers: Dynamically computed strictly from uploaded files and extracted questions
+  const paperNumSet = new Set<number>();
   extractedQuestions.forEach(q => {
     if (typeof q.paper_number === 'number' && q.paper_number > 0) {
       paperNumSet.add(q.paper_number);
@@ -809,9 +833,12 @@ export const ExamManagerQuestionExtractor: React.FC<ExamManagerQuestionExtractor
       paperNumSet.add(f.paperNumber);
     }
   });
+  if (paperNumSet.size === 0 && uploadedFiles.length > 0) {
+    paperNumSet.add(1);
+  }
   const availablePaperNumbers: number[] = Array.from(paperNumSet).sort((a, b) => a - b);
 
-  const handleSelectPaperFilter = async (paperNum: number | 'ALL') => {
+  const handleSelectPaperFilter = (paperNum: number | 'ALL') => {
     setSelectedPaperFilter(paperNum);
     const targetQuestions = paperNum === 'ALL'
       ? extractedQuestions
@@ -822,9 +849,6 @@ export const ExamManagerQuestionExtractor: React.FC<ExamManagerQuestionExtractor
       if (firstIdx !== -1) {
         setActiveExtractedIndex(firstIdx);
       }
-    } else {
-      // If questions for this paper are not in state yet, auto-extract all 3 papers (180 Qs each) and select it!
-      await handleExtractThreeStandardPapers(paperNum);
     }
   };
 
@@ -1390,36 +1414,34 @@ export const ExamManagerQuestionExtractor: React.FC<ExamManagerQuestionExtractor
           <div className="flex flex-wrap items-center gap-2.5">
             <button
               type="button"
-              onClick={() => handleExtractThreeStandardPapers(1)}
-              disabled={extracting}
-              className="px-6 py-3.5 bg-gradient-to-r from-emerald-800 via-emerald-700 to-teal-800 hover:from-emerald-700 hover:via-emerald-600 hover:to-teal-700 text-white rounded-xl font-bold text-sm shadow-md hover:shadow-lg flex flex-wrap items-center gap-3 transition-all cursor-pointer border border-emerald-500/40 disabled:opacity-90"
+              onClick={handleExtract}
+              disabled={extracting || (uploadedFiles.length === 0 && !pdfFileData && !pdfText)}
+              className="px-6 py-3.5 bg-gradient-to-r from-emerald-800 via-emerald-700 to-teal-800 hover:from-emerald-700 hover:via-emerald-600 hover:to-teal-700 text-white rounded-xl font-bold text-sm shadow-md hover:shadow-lg flex flex-wrap items-center gap-3 transition-all cursor-pointer border border-emerald-500/40 disabled:opacity-50"
             >
               <Sparkles className={`w-4 h-4 text-amber-300 ${extracting ? 'animate-spin' : ''}`} />
               <span>
                 {extracting
-                  ? '⚡ Extracting All 3 Question Papers (180 Qs Each)...'
-                  : '⚡ Extract Questions (All 3 Question Papers - 180 Qs Each)'}
+                  ? `⚡ Extracting Questions from ${uploadedFiles.length || 1} Question Paper${uploadedFiles.length > 1 ? 's' : ''}...`
+                  : uploadedFiles.length > 0
+                    ? `⚡ Extract Questions (${uploadedFiles.length === 1 ? uploadedFiles[0].name : `${uploadedFiles.length} Question Papers`})`
+                    : '⚡ Extract Questions from Uploaded Paper'}
               </span>
 
               {/* Real-time individual question paper percentages displayed directly on extraction button */}
-              {extracting && (
+              {extracting && uploadedFiles.length > 0 && (
                 <div className="flex items-center gap-1.5 pl-2.5 border-l border-white/20 text-xs font-mono">
-                  <span className="px-2 py-0.5 rounded bg-emerald-950/90 text-emerald-300 border border-emerald-500/50 shadow-xs">
-                    Paper 1: {uploadedFiles.find(f => f.paperNumber === 1)?.progressPercent || 18}%
-                  </span>
-                  <span className="px-2 py-0.5 rounded bg-teal-950/90 text-teal-300 border border-teal-500/50 shadow-xs">
-                    Paper 2: {uploadedFiles.find(f => f.paperNumber === 2)?.progressPercent || 12}%
-                  </span>
-                  <span className="px-2 py-0.5 rounded bg-cyan-950/90 text-cyan-300 border border-cyan-500/50 shadow-xs">
-                    Paper 3: {uploadedFiles.find(f => f.paperNumber === 3)?.progressPercent || 24}%
-                  </span>
+                  {uploadedFiles.map(f => (
+                    <span key={f.id} className="px-2 py-0.5 rounded bg-emerald-950/90 text-emerald-300 border border-emerald-500/50 shadow-xs">
+                      P{f.paperNumber}: {f.progressPercent || 20}%
+                    </span>
+                  ))}
                 </div>
               )}
             </button>
 
             {extractedQuestions.length > 0 && (
               <span className="text-xs font-mono font-bold text-emerald-800 bg-emerald-100 px-3 py-2 rounded-lg border border-emerald-200">
-                {extractedQuestions.length} Questions Extracted (3 Papers)
+                {extractedQuestions.length} Questions Extracted ({uploadedFiles.length || visibleStudioPapers.length || 1} Paper{(uploadedFiles.length || visibleStudioPapers.length) !== 1 ? 's' : ''})
               </span>
             )}
           </div>
@@ -1600,16 +1622,16 @@ export const ExamManagerQuestionExtractor: React.FC<ExamManagerQuestionExtractor
               </div>
               <div>
                 <h3 className="font-bold text-sm sm:text-base text-slate-900">
-                  National Question Paper Studio ({visibleStudioPapers.length} Question Paper{visibleStudioPapers.length !== 1 ? 's' : ''})
+                  Question Paper Studio ({uploadedFiles.length > 0 ? uploadedFiles.length : (extractedQuestions.length > 0 ? 1 : 0)} Question Paper{(uploadedFiles.length > 0 ? uploadedFiles.length : 1) !== 1 ? 's' : ''})
                 </h3>
                 <p className="text-xs text-slate-500">
-                  Each Question Paper contains 180 curriculum-accurate distinct questions with high-resolution diagrams:
+                  Universal multi-examination question paper studio. Upload any examination paper (Computer Networks, Engineering, University Tests, etc.) to extract questions with exact zero-bleed boundaries.
                 </p>
               </div>
             </div>
 
             <div className="flex flex-wrap items-center gap-2 shrink-0">
-              {visibleStudioPapers.length > 0 ? (
+              {uploadedFiles.length > 0 ? (
                 <>
                   <button
                     type="button"
@@ -1623,187 +1645,76 @@ export const ExamManagerQuestionExtractor: React.FC<ExamManagerQuestionExtractor
 
                   <button
                     type="button"
-                    onClick={() => handleExtractThreeStandardPapers('ALL')}
+                    onClick={handleExtract}
                     disabled={extracting}
-                    className="px-5 py-2.5 bg-gradient-to-r from-emerald-800 via-emerald-700 to-teal-800 hover:from-emerald-700 hover:to-teal-700 text-white rounded-xl font-bold text-xs shadow-md flex items-center gap-2 cursor-pointer border border-emerald-600 transition-all shrink-0 active:scale-95"
+                    className="px-5 py-2.5 bg-gradient-to-r from-emerald-800 via-emerald-700 to-teal-800 hover:from-emerald-700 hover:via-emerald-600 hover:to-teal-700 text-white rounded-xl font-bold text-xs shadow-md flex items-center gap-2 cursor-pointer border border-emerald-600 transition-all shrink-0 active:scale-95"
                   >
                     <Sparkles className="w-4 h-4 text-amber-300" />
-                    <span>⚡ Extract Questions ({visibleStudioPapers.length === 3 ? 'All 3 Question Papers' : `${visibleStudioPapers.length} Paper${visibleStudioPapers.length > 1 ? 's' : ''}`})</span>
+                    <span>⚡ Extract Questions ({uploadedFiles.length === 1 ? uploadedFiles[0].name : `${uploadedFiles.length} Paper${uploadedFiles.length > 1 ? 's' : ''}`})</span>
                   </button>
                 </>
-              ) : (
-                <button
-                  type="button"
-                  onClick={handleRestoreStandardPapers}
-                  className="px-4 py-2.5 bg-emerald-700 hover:bg-emerald-800 text-white rounded-xl font-bold text-xs shadow-sm flex items-center gap-1.5 cursor-pointer transition-all active:scale-95"
-                >
-                  <RotateCcw className="w-4 h-4" />
-                  <span>Restore Question Papers</span>
-                </button>
-              )}
+              ) : null}
             </div>
           </div>
 
-          {/* If all question papers were removed, show empty state with restore button */}
-          {visibleStudioPapers.length === 0 ? (
-            <div className="text-center py-10 px-4 bg-slate-50 border border-dashed border-slate-300 rounded-xl space-y-3">
-              <div className="w-12 h-12 rounded-full bg-rose-100 flex items-center justify-center mx-auto text-rose-600">
-                <Trash2 className="w-6 h-6" />
-              </div>
-              <div>
-                <p className="font-bold text-sm text-slate-800">All Question Papers Removed</p>
-                <p className="text-xs text-slate-500 max-w-md mx-auto mt-1">
-                  The studio question papers have been cleared. You can upload custom PDF papers above or restore the national benchmark papers.
-                </p>
-              </div>
-              <button
-                type="button"
-                onClick={handleRestoreStandardPapers}
-                className="px-4 py-2 bg-emerald-800 hover:bg-emerald-700 text-white rounded-xl font-bold text-xs shadow-xs inline-flex items-center gap-2 cursor-pointer transition-all active:scale-95"
-              >
-                <RotateCcw className="w-4 h-4" />
-                <span>Restore National Question Papers</span>
-              </button>
+          {/* Dynamic cards for all uploaded files (1 paper = 1 card, 2 papers = 2 cards) */}
+          {uploadedFiles.length === 0 ? (
+            <div className="text-center py-8 px-4 bg-slate-50 border border-dashed border-slate-300 rounded-xl space-y-2">
+              <p className="font-bold text-xs text-slate-700">No Question Papers Currently Uploaded</p>
+              <p className="text-[11px] text-slate-500 max-w-md mx-auto">
+                Upload your exam PDF above (e.g. cn.pdf, semester exam, or test paper) to extract questions.
+              </p>
             </div>
           ) : (
-            <div className={`grid grid-cols-1 ${visibleStudioPapers.length === 1 ? 'max-w-md mx-auto' : visibleStudioPapers.length === 2 ? 'md:grid-cols-2' : 'md:grid-cols-3'} gap-3`}>
-              {/* Paper 1 Card */}
-              {visibleStudioPapers.includes(1) && (
-                <div className="p-4 rounded-xl border border-emerald-200 bg-emerald-50/40 text-left space-y-2 shadow-2xs relative group">
-                  <div className="flex items-center justify-between">
-                    <span className="px-2.5 py-1 rounded-lg bg-emerald-800 text-white font-bold text-xs">
-                      Question Paper 1
-                    </span>
-                    <div className="flex items-center gap-1.5">
-                      <span className="text-xs font-mono font-bold text-emerald-800 bg-white px-2 py-0.5 rounded border border-emerald-200">
-                        180 Questions
+            <div className={`grid grid-cols-1 ${uploadedFiles.length === 1 ? 'max-w-md mx-auto' : uploadedFiles.length === 2 ? 'md:grid-cols-2' : 'md:grid-cols-3'} gap-3`}>
+              {uploadedFiles.map(file => {
+                const pNum = file.paperNumber;
+                const count = extractedQuestions.filter(q => (q.paper_number || 1) === pNum || q.source_file === file.name).length;
+                return (
+                  <div key={file.id} className="p-4 rounded-xl border border-emerald-200 bg-emerald-50/40 text-left space-y-2 shadow-2xs relative group">
+                    <div className="flex items-center justify-between">
+                      <span className="px-2.5 py-1 rounded-lg bg-emerald-800 text-white font-bold text-xs">
+                        Question Paper {pNum}
                       </span>
+                      <div className="flex items-center gap-1.5">
+                        <span className="text-xs font-mono font-bold text-emerald-800 bg-white px-2 py-0.5 rounded border border-emerald-200">
+                          {count > 0 ? `${count} Questions` : 'Ready to Extract'}
+                        </span>
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            handleRemoveUploadedFile(file.id);
+                          }}
+                          className="p-1 rounded-lg text-slate-400 hover:text-rose-600 hover:bg-rose-100/70 transition-colors cursor-pointer"
+                          title={`Remove ${file.name}`}
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
+                    </div>
+                    <p className="text-xs font-bold text-slate-900 truncate" title={file.name}>
+                      {file.name}
+                    </p>
+                    <p className="text-[11px] text-slate-600">
+                      {paperSubject || 'Academic Examination'} {file.size ? `• ${formatFileSize(file.size)}` : ''}
+                    </p>
+                    <div className="pt-1 text-[11px] font-semibold text-emerald-700 flex items-center justify-between">
+                      <div className="flex items-center gap-1">
+                        <span className={`w-1.5 h-1.5 rounded-full ${count > 0 ? 'bg-emerald-500' : 'bg-amber-400'}`} />
+                        <span>{count > 0 ? `${count} Questions Extracted & Ready` : 'Ready for Zero-Bleed Extraction'}</span>
+                      </div>
                       <button
                         type="button"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          handleRemovePaper(1);
-                        }}
-                        className="p-1 rounded-lg text-slate-400 hover:text-rose-600 hover:bg-rose-100/70 transition-colors cursor-pointer"
-                        title="Remove Question Paper 1"
+                        onClick={() => handleRemoveUploadedFile(file.id)}
+                        className="text-[10px] text-rose-600 hover:text-rose-800 font-bold underline cursor-pointer"
                       >
-                        <Trash2 className="w-3.5 h-3.5" />
+                        Remove
                       </button>
                     </div>
                   </div>
-                  <p className="text-xs font-bold text-slate-900">
-                    NEET 2024 National Master
-                  </p>
-                  <p className="text-[11px] text-slate-600">
-                    Physics (1–45) • Chemistry (46–90) • Botany (91–135) • Zoology (136–180)
-                  </p>
-                  <div className="pt-1 text-[11px] font-semibold text-emerald-700 flex items-center justify-between">
-                    <div className="flex items-center gap-1">
-                      <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
-                      <span>Distinct Questions & High-Res Crops Ready</span>
-                    </div>
-                    <button
-                      type="button"
-                      onClick={() => handleRemovePaper(1)}
-                      className="text-[10px] text-rose-600 hover:text-rose-800 font-bold underline cursor-pointer"
-                    >
-                      Remove
-                    </button>
-                  </div>
-                </div>
-              )}
-
-              {/* Paper 2 Card */}
-              {visibleStudioPapers.includes(2) && (
-                <div className="p-4 rounded-xl border border-teal-200 bg-teal-50/40 text-left space-y-2 shadow-2xs relative group">
-                  <div className="flex items-center justify-between">
-                    <span className="px-2.5 py-1 rounded-lg bg-teal-800 text-white font-bold text-xs">
-                      Question Paper 2
-                    </span>
-                    <div className="flex items-center gap-1.5">
-                      <span className="text-xs font-mono font-bold text-teal-800 bg-white px-2 py-0.5 rounded border border-teal-200">
-                        180 Questions
-                      </span>
-                      <button
-                        type="button"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          handleRemovePaper(2);
-                        }}
-                        className="p-1 rounded-lg text-slate-400 hover:text-rose-600 hover:bg-rose-100/70 transition-colors cursor-pointer"
-                        title="Remove Question Paper 2"
-                      >
-                        <Trash2 className="w-3.5 h-3.5" />
-                      </button>
-                    </div>
-                  </div>
-                  <p className="text-xs font-bold text-slate-900">
-                    NEET 2023 National Master
-                  </p>
-                  <p className="text-[11px] text-slate-600">
-                    Physics (1–45) • Chemistry (46–90) • Botany (91–135) • Zoology (136–180)
-                  </p>
-                  <div className="pt-1 text-[11px] font-semibold text-teal-700 flex items-center justify-between">
-                    <div className="flex items-center gap-1">
-                      <span className="w-1.5 h-1.5 rounded-full bg-teal-500" />
-                      <span>Distinct Questions & High-Res Crops Ready</span>
-                    </div>
-                    <button
-                      type="button"
-                      onClick={() => handleRemovePaper(2)}
-                      className="text-[10px] text-rose-600 hover:text-rose-800 font-bold underline cursor-pointer"
-                    >
-                      Remove
-                    </button>
-                  </div>
-                </div>
-              )}
-
-              {/* Paper 3 Card */}
-              {visibleStudioPapers.includes(3) && (
-                <div className="p-4 rounded-xl border border-cyan-200 bg-cyan-50/40 text-left space-y-2 shadow-2xs relative group">
-                  <div className="flex items-center justify-between">
-                    <span className="px-2.5 py-1 rounded-lg bg-cyan-800 text-white font-bold text-xs">
-                      Question Paper 3
-                    </span>
-                    <div className="flex items-center gap-1.5">
-                      <span className="text-xs font-mono font-bold text-cyan-800 bg-white px-2 py-0.5 rounded border border-cyan-200">
-                        180 Questions
-                      </span>
-                      <button
-                        type="button"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          handleRemovePaper(3);
-                        }}
-                        className="p-1 rounded-lg text-slate-400 hover:text-rose-600 hover:bg-rose-100/70 transition-colors cursor-pointer"
-                        title="Remove Question Paper 3"
-                      >
-                        <Trash2 className="w-3.5 h-3.5" />
-                      </button>
-                    </div>
-                  </div>
-                  <p className="text-xs font-bold text-slate-900">
-                    NEET 2021 Code O1 Official Master
-                  </p>
-                  <p className="text-[11px] text-slate-600">
-                    Physics (1–45) • Chemistry (46–90) • Botany (91–135) • Zoology (136–180)
-                  </p>
-                  <div className="pt-1 text-[11px] font-semibold text-cyan-700 flex items-center justify-between">
-                    <div className="flex items-center gap-1">
-                      <span className="w-1.5 h-1.5 rounded-full bg-cyan-500" />
-                      <span>Authentic National Exam Questions & Diagram Crops</span>
-                    </div>
-                    <button
-                      type="button"
-                      onClick={() => handleRemovePaper(3)}
-                      className="text-[10px] text-rose-600 hover:text-rose-800 font-bold underline cursor-pointer"
-                    >
-                      Remove
-                    </button>
-                  </div>
-                </div>
-              )}
+                );
+              })}
             </div>
           )}
         </div>
@@ -1900,7 +1811,7 @@ export const ExamManagerQuestionExtractor: React.FC<ExamManagerQuestionExtractor
                     Question Paper Selector ({availablePaperNumbers.length} Question Paper{availablePaperNumbers.length > 1 ? 's' : ''})
                   </h4>
                   <p className="text-[11px] text-slate-500">
-                    Click any Question Paper tab to inspect all 180 extracted questions in the sidebar:
+                    Click any Question Paper tab to inspect extracted questions in the sidebar:
                   </p>
                 </div>
               </div>
@@ -1920,13 +1831,13 @@ export const ExamManagerQuestionExtractor: React.FC<ExamManagerQuestionExtractor
 
                 <button
                   type="button"
-                  onClick={() => handleExtractThreeStandardPapers(selectedPaperFilter)}
-                  disabled={extracting}
-                  className="px-3.5 py-1.5 bg-gradient-to-r from-emerald-700 to-teal-700 hover:from-emerald-600 hover:to-teal-600 text-white rounded-xl font-bold text-xs shadow-xs flex items-center gap-1.5 cursor-pointer border border-emerald-600 transition-all"
-                  title="Extract or re-extract all 180 questions for Paper 1, Paper 2, and Paper 3"
+                  onClick={handleExtract}
+                  disabled={extracting || uploadedFiles.length === 0}
+                  className="px-3.5 py-1.5 bg-gradient-to-r from-emerald-700 to-teal-700 hover:from-emerald-600 hover:to-teal-600 text-white rounded-xl font-bold text-xs shadow-xs flex items-center gap-1.5 cursor-pointer border border-emerald-600 transition-all disabled:opacity-50"
+                  title="Extract or re-extract questions for uploaded question paper(s)"
                 >
                   <Sparkles className="w-3.5 h-3.5 text-amber-300" />
-                  <span>⚡ Extract All 3 Question Papers (180 Qs Each)</span>
+                  <span>⚡ Re-Extract Questions</span>
                 </button>
 
                 <div className="flex items-center gap-1.5 text-xs">
@@ -1998,7 +1909,7 @@ export const ExamManagerQuestionExtractor: React.FC<ExamManagerQuestionExtractor
                         isSelected ? 'bg-emerald-950 text-emerald-200 border border-emerald-700' : 'bg-slate-200 text-slate-700'
                       }`}
                     >
-                      {count > 0 ? `${count} Qs` : '180 Qs'}
+                      {count} Qs
                     </span>
                   </button>
                 );
@@ -2124,11 +2035,12 @@ export const ExamManagerQuestionExtractor: React.FC<ExamManagerQuestionExtractor
                     </p>
                     <button
                       type="button"
-                      onClick={() => handleExtractThreeStandardPapers(selectedPaperFilter)}
-                      className="px-4 py-2 bg-emerald-800 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold shadow-xs cursor-pointer inline-flex items-center gap-1.5"
+                      onClick={handleExtract}
+                      disabled={uploadedFiles.length === 0}
+                      className="px-4 py-2 bg-emerald-800 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold shadow-xs cursor-pointer inline-flex items-center gap-1.5 disabled:opacity-50"
                     >
                       <Sparkles className="w-3.5 h-3.5 text-emerald-300" />
-                      <span>Extract 180 Questions for Question Paper {selectedPaperFilter !== 'ALL' ? selectedPaperFilter : '1, 2 & 3'}</span>
+                      <span>Extract Questions for Question Paper {selectedPaperFilter !== 'ALL' ? selectedPaperFilter : 'All Papers'}</span>
                     </button>
                   </div>
                 ) : (
