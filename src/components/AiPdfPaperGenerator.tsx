@@ -28,6 +28,7 @@ import {
 } from 'lucide-react';
 import { api } from '../api';
 import { User, Examination, Question } from '../types';
+import { QuestionPaperPdfModal } from './workspaces/QuestionPaperPdfModal';
 import {
   generatePaperFromPdfText,
   FREE_AI_MODELS,
@@ -49,6 +50,8 @@ export const AiPdfPaperGenerator: React.FC<AiPdfPaperGeneratorProps> = ({
   onRefresh,
   existingExams = [],
 }) => {
+  const [pdfPreviewExam, setPdfPreviewExam] = useState<Examination | null>(null);
+  const [pdfPreviewVersionId, setPdfPreviewVersionId] = useState<string | undefined>(undefined);
   // Source selection state
   const [sourceMode, setSourceMode] = useState<'upload' | 'text' | 'existing'>('upload');
   const [uploadedFile, setUploadedFile] = useState<File | null>(null);
@@ -847,7 +850,7 @@ export const AiPdfPaperGenerator: React.FC<AiPdfPaperGeneratorProps> = ({
                   AES-256-GCM + SHAMIR 3-of-5
                 </span>
               </div>
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 text-[11px] pt-2 border-t border-emerald-900">
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 text-[11px] pt-2 border-t border-emerald-900 items-center">
                 <div>
                   <span className="text-slate-400">Exam ID:</span>
                   <div className="font-bold text-white truncate">{vaultCompiledResult.examId}</div>
@@ -856,9 +859,40 @@ export const AiPdfPaperGenerator: React.FC<AiPdfPaperGeneratorProps> = ({
                   <span className="text-slate-400">Version Code:</span>
                   <div className="font-bold text-amber-300">{vaultCompiledResult.versionCode}</div>
                 </div>
-                <div>
-                  <span className="text-slate-400">Checksum SHA-256:</span>
-                  <div className="text-emerald-300 truncate">{vaultCompiledResult.checksumSHA256}</div>
+                <div className="flex items-center justify-between gap-2">
+                  <div className="truncate">
+                    <span className="text-slate-400">Checksum:</span>
+                    <div className="text-emerald-300 truncate">{vaultCompiledResult.checksumSHA256.substring(0, 10)}...</div>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const dummyExam: Examination = {
+                        id: vaultCompiledResult.examId,
+                        org_id: currentUser?.org_id || '',
+                        name: generatedPaper?.title || 'Examination',
+                        subject: generatedPaper?.subject || '',
+                        category: (generatedPaper?.category as any) || 'University Exam',
+                        exam_type: 'THEORY',
+                        exam_time: '10:00 AM',
+                        created_by: currentUser?.id || 'admin',
+                        total_marks: generatedPaper?.totalMarks || 100,
+                        total_questions: generatedPaper?.totalQuestions || 10,
+                        duration_minutes: generatedPaper?.durationMinutes || 180,
+                        exam_date: new Date().toISOString().split('T')[0],
+                        unlock_time: new Date().toISOString(),
+                        version_code: vaultCompiledResult.versionCode,
+                        status: 'GENERATED_ENCRYPTED',
+                        created_at: new Date().toISOString(),
+                        updated_at: new Date().toISOString(),
+                      };
+                      setPdfPreviewExam(dummyExam);
+                    }}
+                    className="px-3 py-1.5 bg-rose-600 hover:bg-rose-500 text-white rounded-lg font-bold text-xs flex items-center gap-1 shrink-0 cursor-pointer shadow-sm"
+                  >
+                    <FileText className="w-3.5 h-3.5" />
+                    <span>View PDF</span>
+                  </button>
                 </div>
               </div>
             </div>
@@ -1005,6 +1039,18 @@ export const AiPdfPaperGenerator: React.FC<AiPdfPaperGeneratorProps> = ({
             })}
           </div>
         </div>
+      )}
+
+      {/* Official Generated Question Paper PDF Modal */}
+      {pdfPreviewExam && (
+        <QuestionPaperPdfModal
+          exam={pdfPreviewExam}
+          initialVersionId={pdfPreviewVersionId}
+          onClose={() => {
+            setPdfPreviewExam(null);
+            setPdfPreviewVersionId(undefined);
+          }}
+        />
       )}
     </div>
   );

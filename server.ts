@@ -5846,7 +5846,7 @@ async function startServer() {
         return res.status(404).json({ error: 'No paper version could be generated' });
       }
 
-      const questions = executeQuery(
+      let questions = executeQuery(
         db,
         `SELECT pq.id as paper_question_id, pq.section_name, pq.order_index, pq.marks as question_marks,
                 q.id, q.content_text, q.options_json, q.correct_answer, q.difficulty, q.subject, q.topic,
@@ -5858,10 +5858,29 @@ async function startServer() {
         [version.id]
       );
 
+      // Fallback: if paper_questions table has 0 mappings, query real extracted questions directly
+      if (questions.length === 0) {
+        const rawQs = executeQuery(
+          db,
+          `SELECT id, content_text, options_json, correct_answer, difficulty, subject, topic, diagram_url, image_url, question_type, marks
+           FROM questions
+           WHERE org_id = ? AND status NOT IN ('QUARANTINED', 'COMPROMISED')
+           ORDER BY source_page ASC, question_number ASC, created_at ASC`,
+          [exam.org_id || req.user?.org_id || '']
+        );
+        questions = (rawQs.length > 0 ? rawQs : executeQuery(db, `SELECT id, content_text, options_json, correct_answer, difficulty, subject, topic, diagram_url, image_url, question_type, marks FROM questions WHERE status NOT IN ('QUARANTINED', 'COMPROMISED') ORDER BY source_page ASC, question_number ASC, created_at ASC`)).map((q: any, idx: number) => ({
+          paper_question_id: `PQ-${q.id}`,
+          section_name: `Section: ${q.subject || exam.subject || 'Core'}`,
+          order_index: idx + 1,
+          question_marks: q.marks || 4,
+          ...q,
+        }));
+      }
+
       const parsedQuestions = questions.map((q: any) => {
         let opts: any[] = [];
         try {
-          opts = q.options_json ? JSON.parse(q.options_json) : [];
+          opts = q.options_json ? (typeof q.options_json === 'string' ? JSON.parse(q.options_json) : q.options_json) : (Array.isArray(q.options) ? q.options : []);
         } catch {
           opts = [];
         }
@@ -5986,13 +6005,6 @@ async function startServer() {
         `SELECT * FROM questions WHERE org_id = ? AND status = 'ELIGIBLE_FOR_PAPER' ORDER BY subject ASC, difficulty ASC`,
         [orgId]
       );
-      const subjectMap: Record<string, { count: number; totalMarks: number }> = {};
-      eligibleQuestions.forEach(q => {
-        if (!subjectMap[q.subject]) subjectMap[q.subject] = { count: 0, totalMarks: 0 };
-        subjectMap[q.subject].count += 1;
-        subjectMap[q.subject].totalMarks += (q.marks || 0);
-      });
-      subjectBreakdown = Object.entries(subjectMap).map(([subject, stats]) => ({ subject, count: stats.count, totalMarks: stats.totalMarks }));
     } else {
       // First prioritize questions explicitly linked to this exam, source paper, or uploaded question papers
       eligibleQuestions = executeQuery(

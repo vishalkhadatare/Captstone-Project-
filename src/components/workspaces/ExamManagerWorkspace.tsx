@@ -54,12 +54,14 @@ import { ExamSimulationModal } from './ExamSimulationModal';
 import { AddCentreModal } from './AddCentreModal';
 import { EmergencyRegenModal } from './EmergencyRegenModal';
 import { BlueprintPatternModule } from './BlueprintPatternModule';
+import { QuestionPaperPdfModal } from './QuestionPaperPdfModal';
 
 interface ExamManagerWorkspaceProps {
   currentUser: User | null;
   activeSubTab: NavSubTab;
   onRefresh: () => void;
   onLaunchCandidateSimulator?: (examId?: string) => void;
+  onSelectSubTab?: (tab: NavSubTab) => void;
 }
 
 interface UploadedQuestionFile {
@@ -194,7 +196,7 @@ export const REAL_EXAM_PRESETS: ExamPreset[] = [
     defaultDate: '2026-04-18',
     examTime: '09:00',
     unlockTime: '08:30',
-    description: 'State Engineering & Pharmacy Admission Test: 150 Questions, No Negative Marking',
+    description: 'State Engineering & Pharmacy Entrance: High-volume secure distribution standard',
     badgeClass: 'bg-rose-100 text-rose-950 border-rose-200',
   },
   {
@@ -220,6 +222,7 @@ export const ExamManagerWorkspace: React.FC<ExamManagerWorkspaceProps> = ({
   activeSubTab,
   onRefresh,
   onLaunchCandidateSimulator,
+  onSelectSubTab,
 }) => {
   const [org, setOrg] = useState<Organization | null>(null);
   const [examinations, setExaminations] = useState<Examination[]>([]);
@@ -234,6 +237,8 @@ export const ExamManagerWorkspace: React.FC<ExamManagerWorkspaceProps> = ({
   const [simulationExam, setSimulationExam] = useState<Examination | null>(null);
   const [addCentreModalExam, setAddCentreModalExam] = useState<Examination | null>(null);
   const [emergencyRegenModalExam, setEmergencyRegenModalExam] = useState<Examination | null>(null);
+  const [pdfViewExam, setPdfViewExam] = useState<Examination | null>(null);
+  const [pdfViewVersionId, setPdfViewVersionId] = useState<string | undefined>(undefined);
   const [allCentresList, setAllCentresList] = useState<ExaminationCentre[]>([]);
   const [centresFilterExamId, setCentresFilterExamId] = useState<string>('ALL');
 
@@ -3164,6 +3169,18 @@ export const ExamManagerWorkspace: React.FC<ExamManagerWorkspaceProps> = ({
           isOpen={Boolean(emergencyRegenModalExam)}
           onClose={() => setEmergencyRegenModalExam(null)}
           onSuccess={handleEmergencyRegenCompleted}
+        />
+      )}
+
+      {/* Official Generated Question Paper PDF Modal */}
+      {pdfViewExam && (
+        <QuestionPaperPdfModal
+          exam={pdfViewExam}
+          initialVersionId={pdfViewVersionId}
+          onClose={() => {
+            setPdfViewExam(null);
+            setPdfViewVersionId(undefined);
+          }}
         />
       )}
     </div>

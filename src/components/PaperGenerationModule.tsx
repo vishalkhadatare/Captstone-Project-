@@ -24,9 +24,13 @@ import {
   Sparkles,
   Check,
   Trash2,
+  FileText,
+  Printer,
+  Eye,
 } from 'lucide-react';
 
 import { AiPdfPaperGenerator } from './AiPdfPaperGenerator';
+import { QuestionPaperPdfModal } from './workspaces/QuestionPaperPdfModal';
 
 interface PaperGenProps {
   currentUser: User | null;
@@ -44,6 +48,8 @@ export const PaperGenerationModule: React.FC<PaperGenProps> = ({ currentUser, on
   const [generating, setGenerating] = useState(false);
   const [settingActive, setSettingActive] = useState<string | null>(null);
   const [actionMessage, setActionMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
+  const [pdfModalExam, setPdfModalExam] = useState<Examination | null>(null);
+  const [pdfModalVersionId, setPdfModalVersionId] = useState<string | undefined>(undefined);
 
   // Generation options
   const [examMode, setExamMode] = useState<'AUTO' | 'UNIVERSITY_3_SETS' | 'NEET_MULTI_SUBJECT' | 'STANDARD'>('AUTO');
@@ -681,30 +687,47 @@ export const PaperGenerationModule: React.FC<PaperGenProps> = ({ currentUser, on
                       </div>
                     </div>
 
-                    {/* Action to set active */}
-                    {(currentUser?.role === 'EXAM_MANAGER' || currentUser?.role === 'ORG_OWNER') && (
-                      <div className="mt-3 pt-2 border-t border-slate-200 dark:border-slate-800">
-                        {isActive ? (
-                          <div className="text-[11px] font-bold text-amber-400 text-center py-1 bg-amber-950/40 rounded-lg">
-                            ✓ Designated for Centre Decryption
-                          </div>
-                        ) : (
-                          <button
-                            type="button"
-                            disabled={settingActive === version.id}
-                            onClick={() => handleSetActiveVersion(version.id, version.version_code)}
-                            className="w-full py-1.5 px-2.5 rounded-lg bg-slate-800 hover:bg-amber-700 text-white text-xs font-semibold transition-colors flex items-center justify-center gap-1"
-                          >
-                            {settingActive === version.id ? (
-                              <RefreshCw className="w-3 h-3 animate-spin" />
-                            ) : (
-                              <CheckCircle2 className="w-3 h-3 text-amber-400" />
-                            )}
-                            <span>Set as Active Release Paper</span>
-                          </button>
-                        )}
-                      </div>
-                    )}
+                    {/* Action to set active & View PDF */}
+                    <div className="mt-3 pt-2 border-t border-slate-200 dark:border-slate-800 space-y-1.5">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          if (selectedExam) {
+                            setPdfModalExam(selectedExam);
+                            setPdfModalVersionId(version.id);
+                          }
+                        }}
+                        className="w-full py-1.5 px-2.5 rounded-lg bg-rose-50 hover:bg-rose-100 dark:bg-rose-950/40 dark:hover:bg-rose-900/60 text-rose-700 dark:text-rose-300 border border-rose-200 dark:border-rose-800 text-xs font-bold transition-colors flex items-center justify-center gap-1.5 shadow-2xs"
+                        title="View and Print Generated Official Question Paper PDF"
+                      >
+                        <FileText className="w-3.5 h-3.5 text-rose-600" />
+                        <span>View / Print PDF</span>
+                      </button>
+
+                      {(currentUser?.role === 'EXAM_MANAGER' || currentUser?.role === 'ORG_OWNER') && (
+                        <div>
+                          {isActive ? (
+                            <div className="text-[11px] font-bold text-amber-400 text-center py-1 bg-amber-950/40 rounded-lg">
+                              ✓ Designated for Centre Decryption
+                            </div>
+                          ) : (
+                            <button
+                              type="button"
+                              disabled={settingActive === version.id}
+                              onClick={() => handleSetActiveVersion(version.id, version.version_code)}
+                              className="w-full py-1.5 px-2.5 rounded-lg bg-slate-800 hover:bg-amber-700 text-white text-xs font-semibold transition-colors flex items-center justify-center gap-1"
+                            >
+                              {settingActive === version.id ? (
+                                <RefreshCw className="w-3 h-3 animate-spin" />
+                              ) : (
+                                <CheckCircle2 className="w-3 h-3 text-amber-400" />
+                              )}
+                              <span>Set as Active Release Paper</span>
+                            </button>
+                          )}
+                        </div>
+                      )}
+                    </div>
                   </div>
                 );
               })}
@@ -1002,6 +1025,18 @@ export const PaperGenerationModule: React.FC<PaperGenProps> = ({ currentUser, on
         </div>
       )}
         </>
+      )}
+
+      {/* Official Generated Question Paper PDF Modal */}
+      {pdfModalExam && (
+        <QuestionPaperPdfModal
+          exam={pdfModalExam}
+          initialVersionId={pdfModalVersionId}
+          onClose={() => {
+            setPdfModalExam(null);
+            setPdfModalVersionId(undefined);
+          }}
+        />
       )}
     </div>
   );
