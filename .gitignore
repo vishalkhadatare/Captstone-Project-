@@ -4,17 +4,18 @@ dist/
 coverage/
 .DS_Store
 *.log
+.env
 .env.local
 .env.production
 .env*.local
-!.env
 !.env.example
 __pycache__/
 *.py[cod]
 .vite/
 0leakexam-main/
 
-# Local SQLite database & temp files
+# Local database & temp files
+*.db
 *.sqlite
 *.sqlite*
 *.tmp
@@ -30,4 +31,11 @@ public/papers/*
 
 # Scratch and temporary work
 scratch/
+
+# Model weights and artifacts
+models/
+NaviDC-OCR/outputs/
+*.safetensors
+*.bin
+.cache/
 

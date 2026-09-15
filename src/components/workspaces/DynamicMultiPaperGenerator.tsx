@@ -1629,6 +1629,16 @@ export const DynamicMultiPaperGenerator: React.FC<DynamicMultiPaperGeneratorProp
                         <span className="w-7 h-7 rounded-lg bg-emerald-100 text-emerald-900 font-black text-xs flex items-center justify-center">
                           Q{q.display_order}
                         </span>
+                        {(q as any).question_number && (
+                          <span className="px-2 py-0.5 rounded text-[10px] font-mono bg-slate-200 text-slate-700">
+                            Orig #{ (q as any).question_number }
+                          </span>
+                        )}
+                        {(q as any).question_type && (
+                          <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-indigo-100 text-indigo-800">
+                            {(q as any).question_type}
+                          </span>
+                        )}
                         <span className="px-2 py-0.5 rounded text-[11px] font-bold bg-slate-100 text-slate-700">
                           {q.subject || 'General'}
                         </span>
@@ -1653,15 +1663,15 @@ export const DynamicMultiPaperGenerator: React.FC<DynamicMultiPaperGeneratorProp
                     </div>
 
                     {/* Question Text */}
-                    <div className="text-xs text-slate-800 font-medium leading-relaxed">{q.content_text}</div>
+                    <div className="text-xs text-slate-800 font-medium leading-relaxed whitespace-pre-wrap">{q.content_text}</div>
 
                     {/* Preserved Question Image / Diagram */}
-                    {q.diagram_url && (
+                    {(q.diagram_url || (q as any).image_url || (q as any).imageUrl || (q as any).diagramUrl) && (
                       <div className="p-2 rounded-lg bg-slate-50 border border-slate-200 inline-block max-w-md">
                         <img
-                          src={q.diagram_url}
-                          alt={`Question diagram ${q.display_order}`}
-                          className="max-h-64 object-contain rounded"
+                          src={q.diagram_url || (q as any).image_url || (q as any).imageUrl || (q as any).diagramUrl}
+                          alt={`Question crop ${q.display_order}`}
+                          className="max-h-72 object-contain rounded"
                         />
                       </div>
                     )}
