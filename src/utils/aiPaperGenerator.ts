@@ -1,6 +1,7 @@
 import { getPuterSdk } from './puterOcr';
 
 export type AiGenerationMode =
+  | 'EXACT_UPLOADED_PAPER'
   | 'CONCEPT_VARIANTS'
   | 'SYLLABUS_MIRROR'
   | 'ANALYTICAL_HOTS'
@@ -60,12 +61,32 @@ export interface GeneratedAiPaper {
   rawAiResponse?: string;
 }
 
+import { api } from '../api';
+
 export const FREE_AI_MODELS = [
+  {
+    id: 'groq-gpt-oss-120b',
+    name: 'Groq Cloud (GPT-OSS 120B)',
+    description: 'Ultra-fast (~600 tokens/sec), comprehensive 120B parameter reasoning and question synthesis.',
+    recommended: true,
+  },
+  {
+    id: 'ollama-local',
+    name: 'Ollama Engine (Local & Offline)',
+    description: '100% Private & Air-Gapped. Uses your local Llama 3.2, DeepSeek-R1, or Mistral without internet.',
+    recommended: false,
+  },
+  {
+    id: 'groq-gpt-oss-20b',
+    name: 'Groq Cloud (GPT-OSS 20B)',
+    description: 'Instant question generation and strict JSON adherence on Groq LPU.',
+    recommended: false,
+  },
   {
     id: 'claude-3-5-sonnet',
     name: 'Claude 3.5 Sonnet (Puter Free)',
     description: 'Highest analytical accuracy, exceptional mathematical LaTeX and diagram reasoning.',
-    recommended: true,
+    recommended: false,
   },
   {
     id: 'deepseek-chat',
@@ -88,67 +109,109 @@ export const FREE_AI_MODELS = [
 ];
 
 /**
- * Main function: generate brand-new examination paper from PDF content via Puter.js free AI
+ * Main function: generate brand-new examination paper from PDF content via Groq, Ollama, or Puter.js free AI
  */
 export async function generatePaperFromPdfText(
   config: AiPaperGenerationConfig,
   onProgress?: (statusText: string) => void
 ): Promise<GeneratedAiPaper> {
-  const modelToUse = config.model || 'claude-3-5-sonnet';
+  const modelToUse = config.model || 'groq-gpt-oss-120b';
   
-  onProgress?.(`Connecting to Free AI Engine (${modelToUse})...`);
-  const puterSdk = await getPuterSdk();
-  if (!puterSdk?.ai?.chat) {
-    throw new Error('Puter.js AI Engine is not available. Please ensure network access to js.puter.com.');
-  }
-
   onProgress?.(`Analyzing source PDF concepts & structuring prompt...`);
-
-  // Build high-precision pedagogical system and user prompts
   const prompt = buildPaperGenerationPrompt(config);
 
-  onProgress?.(`Synthesizing fresh questions via ${modelToUse}...`);
-
   let responseText = '';
-  try {
-    const rawResponse = await puterSdk.ai.chat(prompt, {
-      model: modelToUse,
-      temperature: 0.2, // Low temperature for factual academic rigor
-    });
 
-    if (typeof rawResponse === 'string') {
-      responseText = rawResponse;
-    } else if (rawResponse?.message?.content) {
-      responseText = typeof rawResponse.message.content === 'string'
-        ? rawResponse.message.content
-        : JSON.stringify(rawResponse.message.content);
-    } else if (rawResponse?.text) {
-      responseText = rawResponse.text;
-    } else {
-      responseText = JSON.stringify(rawResponse);
-    }
-  } catch (chatErr: any) {
-    console.warn(`[ZeroLeak AI Generator] Primary model ${modelToUse} failed:`, chatErr);
-    
-    // Fallback model trial if first model hit rate limit
-    const fallbackModel = modelToUse === 'claude-3-5-sonnet' ? 'deepseek-chat' : 'gpt-4o-mini';
-    onProgress?.(`Switching to backup model ${fallbackModel}...`);
+  // 1. If Ollama model is selected
+  if (modelToUse === 'ollama-local' || modelToUse.startsWith('ollama')) {
+    onProgress?.(`Synthesizing fresh questions via Local Ollama Engine...`);
     try {
-      const rawFallback = await puterSdk.ai.chat(prompt, {
-        model: fallbackModel,
+      const ollamaRes = await api.ollamaChat({
+        messages: [
+          { role: 'system', content: 'You are an expert Academic Examination Controller and Senior Chief Question Paper Setter. Output ONLY valid JSON matching the requested schema.' },
+          { role: 'user', content: prompt },
+        ],
+        temperature: 0.1,
+      });
+
+      responseText = ollamaRes.text || ollamaRes.message?.content || '';
+    } catch (ollamaErr: any) {
+      console.warn(`[ZeroLeak AI Generator] Ollama failed:`, ollamaErr);
+      onProgress?.(`Ollama offline or timed out, falling back to Groq LPU...`);
+    }
+  }
+
+  // 2. If Groq model is selected (or fell back from Ollama)
+  if (!responseText && (modelToUse.startsWith('groq-') || modelToUse.includes('gpt-oss') || modelToUse === 'ollama-local')) {
+    const groqModelName = modelToUse === 'groq-gpt-oss-20b' ? 'openai/gpt-oss-20b' : 'openai/gpt-oss-120b';
+    onProgress?.(`Synthesizing fresh questions via Groq LPU (${groqModelName})...`);
+
+    try {
+      const groqRes = await api.groqChat({
+        messages: [
+          { role: 'system', content: 'You are an expert Academic Examination Controller and Senior Chief Question Paper Setter. Output ONLY valid JSON.' },
+          { role: 'user', content: prompt },
+        ],
+        model: groqModelName,
+        temperature: 0.1,
+      });
+
+      responseText = groqRes.text || groqRes.message?.content || '';
+    } catch (groqErr: any) {
+      console.warn(`[ZeroLeak AI Generator] Groq model ${groqModelName} failed, falling back to Puter:`, groqErr);
+      onProgress?.(`Groq proxy error, switching to backup Puter engine...`);
+    }
+  }
+
+  // 3. If responseText is still empty, use Puter.js free AI
+  if (!responseText) {
+    const puterModel = modelToUse.startsWith('groq-') ? 'claude-3-5-sonnet' : modelToUse;
+    onProgress?.(`Connecting to Free AI Engine (${puterModel})...`);
+    const puterSdk = await getPuterSdk();
+    if (!puterSdk?.ai?.chat) {
+      throw new Error('Puter.js AI Engine is not available. Please ensure network access to js.puter.com.');
+    }
+
+    onProgress?.(`Synthesizing fresh questions via ${puterModel}...`);
+
+    try {
+      const rawResponse = await puterSdk.ai.chat(prompt, {
+        model: puterModel,
         temperature: 0.2,
       });
-      if (typeof rawFallback === 'string') {
-        responseText = rawFallback;
-      } else if (rawFallback?.message?.content) {
-        responseText = typeof rawFallback.message.content === 'string'
-          ? rawFallback.message.content
-          : JSON.stringify(rawFallback.message.content);
-      } else if (rawFallback?.text) {
-        responseText = rawFallback.text;
+
+      if (typeof rawResponse === 'string') {
+        responseText = rawResponse;
+      } else if (rawResponse?.message?.content) {
+        responseText = typeof rawResponse.message.content === 'string'
+          ? rawResponse.message.content
+          : JSON.stringify(rawResponse.message.content);
+      } else if (rawResponse?.text) {
+        responseText = rawResponse.text;
+      } else {
+        responseText = JSON.stringify(rawResponse);
       }
-    } catch (fbErr: any) {
-      throw new Error(`AI generation failed on both primary and fallback models: ${chatErr?.message || fbErr?.message}`);
+    } catch (chatErr: any) {
+      console.warn(`[ZeroLeak AI Generator] Puter model ${puterModel} failed:`, chatErr);
+      const fallbackModel = puterModel === 'claude-3-5-sonnet' ? 'deepseek-chat' : 'gpt-4o-mini';
+      onProgress?.(`Switching to backup model ${fallbackModel}...`);
+      try {
+        const rawFallback = await puterSdk.ai.chat(prompt, {
+          model: fallbackModel,
+          temperature: 0.2,
+        });
+        if (typeof rawFallback === 'string') {
+          responseText = rawFallback;
+        } else if (rawFallback?.message?.content) {
+          responseText = typeof rawFallback.message.content === 'string'
+            ? rawFallback.message.content
+            : JSON.stringify(rawFallback.message.content);
+        } else if (rawFallback?.text) {
+          responseText = rawFallback.text;
+        }
+      } catch (fbErr: any) {
+        throw new Error(`AI generation failed on all models: ${chatErr?.message || fbErr?.message}`);
+      }
     }
   }
 
@@ -165,6 +228,13 @@ export async function generatePaperFromPdfText(
  */
 function buildPaperGenerationPrompt(config: AiPaperGenerationConfig): string {
   const modeInstructions: Record<AiGenerationMode, string> = {
+    EXACT_UPLOADED_PAPER: `
+Generate and extract the EXACT QUESTIONS DIRECTLY from the uploaded source document.
+- Extract EVERY question, sub-question (e.g. Q.1, Q.2(a), Q.2(b)...), problem, and MCQ statement EXACTLY as written in the uploaded source document.
+- Preserve the exact question text, LaTeX equations, options (A, B, C, D), marks, and correct answer keys.
+- Do NOT fabricate, change, or summarize the questions. They MUST be identical to the uploaded exam paper.
+- Retain the exact academic integrity and phrasing of the source question paper.
+`,
     CONCEPT_VARIANTS: `
 Generate CONCEPT-PARALLEL / ISOMORPHIC VARIANT questions.
 - For each concept, theorem, algorithm, or scenario present in the source document, construct a BRAND NEW question.

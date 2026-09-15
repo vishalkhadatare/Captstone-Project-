@@ -30,6 +30,7 @@ import {
   extractQuestionsFromPaperWithOllama,
   checkOllamaHealth,
   runNaviDcOcr,
+  callGroqChat,
 } from './server/ai.ts';
 import {
   evaluateOrganizationVerification,
@@ -3915,6 +3916,93 @@ async function startServer() {
     }
   });
 
+  // Groq AI Chat Proxy Endpoint
+  app.post('/api/ai/groq-chat', authenticateToken, async (req: Request, res: Response) => {
+    try {
+      const { messages, model, temperature, max_tokens, response_format } = req.body;
+      if (!messages || !Array.isArray(messages)) {
+        return res.status(400).json({ error: 'Messages array is required.' });
+      }
+
+      const reply = await callGroqChat(messages, {
+        model,
+        temperature,
+        max_tokens,
+        response_format,
+      });
+
+      return res.json({ success: true, message: { content: reply }, text: reply });
+    } catch (err: any) {
+      console.error('Groq AI chat error:', err);
+      return res.status(500).json({ error: err?.message || 'Groq AI inference failed.' });
+    }
+  });
+
+  // Ollama Chat Proxy Endpoint
+  app.post('/api/ai/ollama-chat', authenticateToken, async (req: Request, res: Response) => {
+    try {
+      const { messages, model, temperature } = req.body;
+      const baseUrl = (process.env.OLLAMA_BASE_URL || 'http://localhost:11434').replace(/\/$/, '');
+      const defaultModel = model || process.env.OLLAMA_MODEL || 'llama3.2:latest';
+      const apiKey = process.env.OLLAMA_API_KEY || '';
+
+      const headers: Record<string, string> = {
+        'Content-Type': 'application/json',
+      };
+      if (apiKey) {
+        headers['Authorization'] = `Bearer ${apiKey}`;
+      }
+
+      const response = await fetch(`${baseUrl}/api/chat`, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({
+          model: defaultModel,
+          messages: messages || [],
+          stream: false,
+          format: 'json',
+          options: {
+            temperature: temperature ?? 0.1,
+          },
+        }),
+        signal: AbortSignal.timeout(120000),
+      });
+
+      if (!response.ok) {
+        const errBody = await response.text();
+        throw new Error(`Ollama returned HTTP ${response.status}: ${errBody}`);
+      }
+
+      const data: any = await response.json();
+      const content = data?.message?.content || data?.response || '';
+      return res.json({ success: true, message: { content }, text: content });
+    } catch (err: any) {
+      console.error('Ollama chat error:', err);
+      return res.status(500).json({
+        error: err?.message || `Ollama is not reachable at ${process.env.OLLAMA_BASE_URL || 'http://localhost:11434'}. Start with "ollama run llama3.2".`,
+      });
+    }
+  });
+
+  // Get Ollama Available Models Endpoint
+  app.get('/api/ai/ollama-models', authenticateToken, async (req: Request, res: Response) => {
+    try {
+      const baseUrl = (process.env.OLLAMA_BASE_URL || 'http://localhost:11434').replace(/\/$/, '');
+      const apiKey = process.env.OLLAMA_API_KEY || '';
+      const headers: Record<string, string> = {};
+      if (apiKey) headers['Authorization'] = `Bearer ${apiKey}`;
+
+      const response = await fetch(`${baseUrl}/api/tags`, { headers, signal: AbortSignal.timeout(5000) });
+      if (!response.ok) {
+        return res.json({ connected: false, models: [] });
+      }
+      const data: any = await response.json();
+      return res.json({ connected: true, models: data.models || [] });
+    } catch {
+      return res.json({ connected: false, models: [] });
+    }
+  });
+
   // Extract Questions from Question Paper PDF / OCR / Text Transcript
   app.post('/api/question-papers/extract', authenticateToken, requireRole(['EXAM_MANAGER', 'ORG_OWNER']), async (req: Request, res: Response) => {
     const { paper_text, file_name, file_data, subject, category, job_id } = req.body;
@@ -5889,7 +5977,7 @@ async function startServer() {
       ))
     );
 
-    // 1. Query real questions belonging to the organization / uploaded papers
+    // 1. Query real questions: prioritize questions directly linked to this exam, source paper, or organization
     let eligibleQuestions: any[] = [];
 
     if (hasManualBlueprint) {
@@ -5905,31 +5993,20 @@ async function startServer() {
         subjectMap[q.subject].totalMarks += (q.marks || 0);
       });
       subjectBreakdown = Object.entries(subjectMap).map(([subject, stats]) => ({ subject, count: stats.count, totalMarks: stats.totalMarks }));
-    } else if (isNeetOrMultiSubjectMCQ) {
-      let targetSubjects: string[] = [];
-      if (Array.isArray(body.subject_pool) && body.subject_pool.length > 0) {
-        targetSubjects = body.subject_pool;
-      } else if (exam.category === 'NEET' || (exam.name && exam.name.toUpperCase().includes('NEET'))) {
-        targetSubjects = ['Physics', 'Chemistry', 'Biology', 'Botany', 'Zoology'];
-      } else if (exam.category === 'JEE' || (exam.name && exam.name.toUpperCase().includes('JEE'))) {
-        targetSubjects = ['Physics', 'Chemistry', 'Mathematics'];
-      } else {
-        const orgSubjects = executeQuery(db, 'SELECT DISTINCT subject FROM questions WHERE (org_id = ? OR org_id = "ORG-ZEROLEAK-NATIONAL") AND status IN ("ELIGIBLE_FOR_PAPER", "VERIFIED")', [orgId]);
-        targetSubjects = orgSubjects.map(s => s.subject);
-        if (!targetSubjects.includes(exam.subject)) {
-          targetSubjects.push(exam.subject);
-        }
-      }
-
-      if (targetSubjects.length > 0) {
-        eligibleQuestions = executeQuery(
-          db,
-          `SELECT * FROM questions WHERE org_id = ? AND status IN ('ELIGIBLE_FOR_PAPER', 'VERIFIED') AND subject IN (${targetSubjects.map(() => '?').join(',')}) ORDER BY subject ASC, difficulty ASC`,
-          [orgId, ...targetSubjects]
-        );
-      }
     } else {
-      // First try: questions explicitly linked to uploaded papers for this exam or organization
+      // First prioritize questions explicitly linked to this exam, source paper, or uploaded question papers
+      eligibleQuestions = executeQuery(
+        db,
+        `SELECT * FROM questions
+         WHERE (question_paper_id = ? OR question_paper_id IN (SELECT id FROM question_papers WHERE subject = ? OR examination_category = ?))
+           AND status NOT IN ('QUARANTINED', 'COMPROMISED')
+         ORDER BY source_page ASC, question_number ASC, created_at ASC`,
+        [exam.id, exam.subject || '', exam.category || '']
+      );
+    }
+
+    // If empty, query all questions for this organization
+    if (eligibleQuestions.length === 0) {
       eligibleQuestions = executeQuery(
         db,
         `SELECT * FROM questions
@@ -5940,7 +6017,7 @@ async function startServer() {
       );
     }
 
-    // If empty, try all non-compromised questions in the DB
+    // If still empty, try all non-compromised questions in the DB
     if (eligibleQuestions.length === 0) {
       eligibleQuestions = executeQuery(
         db,
@@ -5950,7 +6027,7 @@ async function startServer() {
       );
     }
 
-    // Filter by subject if subject pool is specified or exam has a specific subject
+    // Filter by subject if subject pool is specified
     if (isNeetOrMultiSubjectMCQ && Array.isArray(body.subject_pool) && body.subject_pool.length > 0) {
       const filtered = eligibleQuestions.filter(q => body.subject_pool.includes(q.subject));
       if (filtered.length > 0) {
@@ -5960,7 +6037,7 @@ async function startServer() {
       const subjectMatch = eligibleQuestions.filter(q =>
         q.subject && (q.subject.toLowerCase() === exam.subject.toLowerCase() || exam.subject.toLowerCase().includes(q.subject.toLowerCase()))
       );
-      if (subjectMatch.length > 0) {
+      if (subjectMatch.length >= (exam.total_questions || 1)) {
         eligibleQuestions = subjectMatch;
       }
     }
@@ -6027,15 +6104,17 @@ async function startServer() {
           });
         });
         setQuestions = setQuestions.map((question, index) => ({ ...question, blueprintOrder: index + 1 }));
-      } else if (isUniversityExam && numSetsToGenerate > 1) {
+      } else if (setIdx === 1 || !isUniversityExam || numSetsToGenerate === 1) {
+        // Set 1 strictly preserves the EXACT original question sequence from the uploaded paper
+        setQuestions = [...eligibleQuestions];
+      } else {
+        // Sets 2 & 3: Balanced distribution across sets
         const shuffledPool = [...eligibleQuestions].sort((a, b) => {
           const hashA = (a.id + setIdx).split('').reduce((acc, c) => acc + c.charCodeAt(0), 0);
           const hashB = (b.id + setIdx).split('').reduce((acc, c) => acc + c.charCodeAt(0), 0);
           return (hashA % 17) - (hashB % 17);
         });
         setQuestions = shuffledPool;
-      } else {
-        setQuestions = [...eligibleQuestions];
       }
 
       const totalPaperMarks = hasManualBlueprint

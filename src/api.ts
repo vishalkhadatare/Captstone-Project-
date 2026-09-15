@@ -416,6 +416,12 @@ export const api = {
       wordCount: number;
       info?: any;
     }>('/api/pdf/extract-text', { method: 'POST', body: JSON.stringify(payload) }),
+  groqChat: (payload: { messages: Array<{ role: string; content: string }>; model?: string; temperature?: number; max_tokens?: number }) =>
+    request<{ success: boolean; message: { content: string }; text: string }>('/api/ai/groq-chat', { method: 'POST', body: JSON.stringify(payload) }),
+  ollamaChat: (payload: { messages: Array<{ role: string; content: string }>; model?: string; temperature?: number }) =>
+    request<{ success: boolean; message: { content: string }; text: string }>('/api/ai/ollama-chat', { method: 'POST', body: JSON.stringify(payload) }),
+  getOllamaModels: () =>
+    request<{ connected: boolean; models: Array<{ name: string; model: string; size?: number }> }>('/api/ai/ollama-models'),
   extractQuestionsFromPaper: (payload: { paper_text?: string; file_name?: string; file_data?: string; subject?: string; category?: string; job_id?: string }) =>
     request<PaperExtractionResponse>('/api/question-papers/extract', { method: 'POST', body: JSON.stringify(payload) }),
   extractThreeStandardPapers: () =>

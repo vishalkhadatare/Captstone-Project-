@@ -64,7 +64,7 @@ export const AiPdfPaperGenerator: React.FC<AiPdfPaperGeneratorProps> = ({
 
   // AI Configuration state
   const [generationMode, setGenerationMode] = useState<AiGenerationMode>('CONCEPT_VARIANTS');
-  const [selectedModel, setSelectedModel] = useState<string>('claude-3-5-sonnet');
+  const [selectedModel, setSelectedModel] = useState<string>('groq-gpt-oss-120b');
   const [examTitle, setExamTitle] = useState('National Standard Examination 2026 (AI Generated)');
   const [subject, setSubject] = useState('Computer Science & Engineering');
   const [category, setCategory] = useState('Competitive Exam');
@@ -590,6 +590,11 @@ export const AiPdfPaperGenerator: React.FC<AiPdfPaperGeneratorProps> = ({
             {/* Mode Tabs */}
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
               {[
+                {
+                  id: 'EXACT_UPLOADED_PAPER' as AiGenerationMode,
+                  title: '🎯 Exact Extracted Paper',
+                  desc: 'Generate paper using the exact questions, formulas & options from uploaded document.',
+                },
                 {
                   id: 'CONCEPT_VARIANTS' as AiGenerationMode,
                   title: '⚡ Concept-Parallel Variants',
