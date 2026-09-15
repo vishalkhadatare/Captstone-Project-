@@ -353,6 +353,9 @@ export const api = {
   // Examinations
   getExaminations: () => request<{ examinations: Examination[] }>('/api/examinations'),
   createExamination: (payload: any) => request<{ message: string; examId: string }>('/api/examinations', { method: 'POST', body: JSON.stringify(payload) }),
+  deleteExamination: (id: string) => request<{ success: boolean; message: string }>(`/api/examinations/${id}`, { method: 'DELETE' }),
+  purgeDemoExaminations: () => request<{ success: boolean; message: string }>('/api/examinations/purge-demo', { method: 'POST' }),
+  deleteAllExaminations: () => request<{ success: boolean; message: string }>('/api/examinations', { method: 'DELETE' }),
   getExaminationDetails: (id: string) => request<{ examination: Examination; configuration: any; centres: ExaminationCentre[]; versions: any[] }>(`/api/examinations/${id}`),
   addCentre: (examId: string, payload: AddCentrePayload) => request<AddCentreResponse>(`/api/examinations/${examId}/centres`, { method: 'POST', body: JSON.stringify(payload) }),
   getCentresForExam: (examId: string) => request<{ centres: ExaminationCentre[]; managerAuthorized: number }>(`/api/examinations/${examId}/centres`),
@@ -363,6 +366,43 @@ export const api = {
   // Questions & OCR/PDF Extraction & Assignments
   getQuestions: () => request<{ questions: Question[] }>('/api/questions'),
   createQuestion: (payload: any) => request<{ message: string; questionId: string }>('/api/questions', { method: 'POST', body: JSON.stringify(payload) }),
+  runNaviDcOcr: (payload: { image_data?: string; image_path?: string; mode?: 'markdown' | 'mcq' | 'table'; prompt?: string }) =>
+    request<{
+      success: boolean;
+      markdown?: string;
+      questions?: Array<{
+        question_number: string;
+        content_text: string;
+        options: Array<{ id: string; text: string }> | null;
+        correct_answer: string;
+        has_latex: boolean;
+        has_table: boolean;
+        marks: number;
+      }>;
+      execution_time_ms?: number;
+      device?: string;
+      model?: string;
+      error?: string;
+    }>('/api/ocr/navidc', { method: 'POST', body: JSON.stringify(payload) }),
+  runOcrSpace: (payload: { image_data?: string; image_url?: string; engine?: '1' | '2' | '3'; isTable?: boolean; scale?: boolean; detectOrientation?: boolean; language?: string }) =>
+    request<{
+      success: boolean;
+      text: string;
+      engine: string;
+      parsedResults?: any[];
+      raw?: any;
+      error?: string;
+    }>('/api/ocr/ocrspace', { method: 'POST', body: JSON.stringify(payload) }),
+  extractPdfText: (payload: { file_data?: string; file_name?: string; raw_text?: string }) =>
+    request<{
+      success: boolean;
+      text: string;
+      pageCount: number;
+      fileName: string;
+      charCount: number;
+      wordCount: number;
+      info?: any;
+    }>('/api/pdf/extract-text', { method: 'POST', body: JSON.stringify(payload) }),
   extractQuestionsFromPaper: (payload: { paper_text?: string; file_name?: string; file_data?: string; subject?: string; category?: string; job_id?: string }) =>
     request<PaperExtractionResponse>('/api/question-papers/extract', { method: 'POST', body: JSON.stringify(payload) }),
   extractThreeStandardPapers: () =>

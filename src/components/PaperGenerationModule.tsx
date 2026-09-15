@@ -23,7 +23,10 @@ import {
   Binary,
   Sparkles,
   Check,
+  Trash2,
 } from 'lucide-react';
+
+import { AiPdfPaperGenerator } from './AiPdfPaperGenerator';
 
 interface PaperGenProps {
   currentUser: User | null;
@@ -31,6 +34,7 @@ interface PaperGenProps {
 }
 
 export const PaperGenerationModule: React.FC<PaperGenProps> = ({ currentUser, onRefresh }) => {
+  const [activeTab, setActiveTab] = useState<'ai_pdf_generator' | 'vault_generation'>('ai_pdf_generator');
   const [exams, setExams] = useState<Examination[]>([]);
   const [questions, setQuestions] = useState<Question[]>([]);
   const [selectedExamId, setSelectedExamId] = useState<string>('');
@@ -242,6 +246,32 @@ export const PaperGenerationModule: React.FC<PaperGenProps> = ({ currentUser, on
     }
   };
 
+  const handleDeleteExam = async (examId: string, examName: string) => {
+    if (!window.confirm(`Are you sure you want to permanently delete "${examName}"?`)) return;
+    try {
+      await api.deleteExamination(examId);
+      setActionMessage({ type: 'success', text: `Examination "${examName}" deleted successfully.` });
+      await loadData();
+      setSelectedExamId('');
+      onRefresh();
+    } catch (e: any) {
+      setActionMessage({ type: 'error', text: e.message || 'Failed to delete examination.' });
+    }
+  };
+
+  const handlePurgeAllMockExams = async () => {
+    if (!window.confirm('Are you sure you want to purge all pre-seeded mock and demo examination papers?')) return;
+    try {
+      await api.purgeDemoExaminations();
+      setActionMessage({ type: 'success', text: 'All mock and demo examination papers removed.' });
+      await loadData();
+      setSelectedExamId('');
+      onRefresh();
+    } catch (e: any) {
+      setActionMessage({ type: 'error', text: e.message || 'Failed to purge mock examinations.' });
+    }
+  };
+
   // Shamir custodians list
   const custodians = [
     { role: 'Institutional Registrar / Owner', name: 'Dr. Alok Verma', status: 'SHARE_ISSUED', index: 1 },
@@ -290,28 +320,103 @@ export const PaperGenerationModule: React.FC<PaperGenProps> = ({ currentUser, on
         </div>
       )}
 
-      {/* Select Examination Selector */}
-      <div className="bg-white dark:bg-slate-900 p-5 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-sm space-y-4">
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-100 dark:border-slate-800 pb-3">
-          <div className="text-sm font-bold text-slate-900 dark:text-white uppercase tracking-wider flex items-center gap-2">
-            <Layers className="w-4 h-4 text-indigo-500" />
-            Target Examination Selection
-          </div>
-          <div className="w-full sm:w-auto">
-            <select
-              value={selectedExamId}
-              onChange={e => setSelectedExamId(e.target.value)}
-              className="w-full sm:w-96 px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-700 text-xs text-slate-900 dark:text-white font-medium"
-            >
-              {exams.map(e => {
-                const type = (e as any).exam_type || 'MCQ';
-                return (
-                  <option key={e.id} value={e.id}>
-                    [{type}] {e.name} ({e.status})
-                  </option>
-                );
-              })}
-            </select>
+      {/* Top Module Navigation Tabs */}
+      <div className="flex flex-wrap items-center gap-2 border-b border-slate-200 dark:border-slate-800 pb-3">
+        <button
+          type="button"
+          onClick={() => setActiveTab('ai_pdf_generator')}
+          className={`px-4 py-2.5 rounded-xl text-xs font-bold flex items-center gap-2 transition-all cursor-pointer ${
+            activeTab === 'ai_pdf_generator'
+              ? 'bg-indigo-600 text-white shadow-md shadow-indigo-900/30'
+              : 'bg-white dark:bg-slate-900 text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800 border border-slate-200 dark:border-slate-800'
+          }`}
+        >
+          <Sparkles className="w-4 h-4 text-amber-400" />
+          <span>✨ AI Paper Generator from PDF</span>
+        </button>
+
+        <button
+          type="button"
+          onClick={() => setActiveTab('vault_generation')}
+          className={`px-4 py-2.5 rounded-xl text-xs font-bold flex items-center gap-2 transition-all cursor-pointer ${
+            activeTab === 'vault_generation'
+              ? 'bg-indigo-600 text-white shadow-md shadow-indigo-900/30'
+              : 'bg-white dark:bg-slate-900 text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800 border border-slate-200 dark:border-slate-800'
+          }`}
+        >
+          <Lock className="w-4 h-4 text-indigo-400" />
+          <span>🏛 Cryptographic Vault & Shamir 3-of-5 Custody</span>
+        </button>
+      </div>
+
+      {activeTab === 'ai_pdf_generator' ? (
+        <AiPdfPaperGenerator
+          currentUser={currentUser}
+          existingExams={exams}
+          onRefresh={() => {
+            loadData();
+            onRefresh();
+          }}
+          onPaperCreated={newExamId => {
+            setSelectedExamId(newExamId);
+            loadData();
+            loadPaperVersions(newExamId);
+            onRefresh();
+          }}
+        />
+      ) : (
+        <>
+          {/* Select Examination Selector */}
+          <div className="bg-white dark:bg-slate-900 p-5 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-sm space-y-4">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-100 dark:border-slate-800 pb-3">
+              <div className="text-sm font-bold text-slate-900 dark:text-white uppercase tracking-wider flex items-center gap-2">
+                <Layers className="w-4 h-4 text-indigo-500" />
+                Target Examination Selection
+              </div>
+          <div className="flex flex-wrap items-center gap-2 w-full sm:w-auto">
+            {exams.length > 0 && (
+              <button
+                type="button"
+                onClick={handlePurgeAllMockExams}
+                className="px-3 py-1.5 rounded-xl bg-rose-50 hover:bg-rose-100 text-rose-700 dark:bg-rose-950/40 dark:text-rose-300 border border-rose-200 dark:border-rose-800 text-xs font-bold flex items-center gap-1.5 transition-colors cursor-pointer"
+                title="Purge all pre-seeded mock examination papers"
+              >
+                <Trash2 className="w-3.5 h-3.5" />
+                <span>Purge Mock Papers</span>
+              </button>
+            )}
+
+            {exams.length > 0 ? (
+              <div className="flex items-center gap-2">
+                <select
+                  value={selectedExamId}
+                  onChange={e => setSelectedExamId(e.target.value)}
+                  className="w-full sm:w-80 px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-700 text-xs text-slate-900 dark:text-white font-medium"
+                >
+                  {exams.map(e => {
+                    const type = (e as any).exam_type || 'MCQ';
+                    return (
+                      <option key={e.id} value={e.id}>
+                        [{type}] {e.name} ({e.status})
+                      </option>
+                    );
+                  })}
+                </select>
+
+                {selectedExam && (
+                  <button
+                    type="button"
+                    onClick={() => handleDeleteExam(selectedExam.id, selectedExam.name)}
+                    className="p-2 rounded-xl bg-slate-100 hover:bg-rose-100 text-slate-500 hover:text-rose-700 dark:bg-slate-800 dark:hover:bg-rose-900 border border-slate-200 dark:border-slate-700 hover:border-rose-300 transition-colors"
+                    title="Delete Selected Examination"
+                  >
+                    <Trash2 className="w-3.5 h-3.5" />
+                  </button>
+                )}
+              </div>
+            ) : (
+              <span className="text-xs text-slate-400 font-medium italic">No examinations present</span>
+            )}
           </div>
         </div>
 
@@ -879,6 +984,8 @@ export const PaperGenerationModule: React.FC<PaperGenProps> = ({ currentUser, on
             </form>
           </div>
         </div>
+      )}
+        </>
       )}
     </div>
   );

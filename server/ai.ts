@@ -947,4 +947,103 @@ REQUIREMENTS:
   };
 }
 
+export interface NaviDcOcrResult {
+  success: boolean;
+  markdown?: string;
+  questions?: Array<{
+    question_number: string;
+    content_text: string;
+    options: Array<{ id: string; text: string }> | null;
+    correct_answer: string;
+    has_latex: boolean;
+    has_table: boolean;
+    marks: number;
+  }>;
+  execution_time_ms?: number;
+  device?: string;
+  model?: string;
+  error?: string;
+}
 
+export async function runNaviDcOcr(payload: {
+  image_data?: string;
+  image_path?: string;
+  mode?: 'markdown' | 'mcq' | 'table';
+  prompt?: string;
+}): Promise<NaviDcOcrResult> {
+  return new Promise((resolve) => {
+    const pythonExe = process.env.PYTHON_PATH || 'python';
+    const scriptPath = path.resolve(process.cwd(), 'server', 'navidc_ocr.py');
+
+    if (!fs.existsSync(scriptPath)) {
+      return resolve({
+        success: false,
+        error: `NaviDC-OCR service script not found at ${scriptPath}`,
+      });
+    }
+
+    const proc = spawn(pythonExe, ['-u', scriptPath, '--stdin'], {
+      windowsHide: true,
+      stdio: ['pipe', 'pipe', 'pipe'],
+      env: {
+        ...process.env,
+        PYTHONIOENCODING: 'utf-8',
+        PYTHONUTF8: '1',
+      },
+    });
+
+    let stdoutData = '';
+    let stderrData = '';
+
+    proc.stdout.on('data', (chunk: Buffer) => {
+      stdoutData += chunk.toString('utf-8');
+    });
+
+    proc.stderr.on('data', (chunk: Buffer) => {
+      stderrData += chunk.toString('utf-8');
+    });
+
+    proc.on('close', (code) => {
+      try {
+        const trimmed = stdoutData.trim();
+        const jsonMatch = trimmed.match(/\{[\s\S]*\}/);
+        if (jsonMatch) {
+          const parsed = JSON.parse(jsonMatch[0]);
+          return resolve(parsed);
+        }
+        if (code !== 0) {
+          return resolve({
+            success: false,
+            error: stderrData || `NaviDC-OCR exited with code ${code}`,
+          });
+        }
+        return resolve({
+          success: true,
+          markdown: trimmed,
+        });
+      } catch (err: any) {
+        return resolve({
+          success: false,
+          error: `Failed to parse NaviDC-OCR output: ${err?.message || err}`,
+        });
+      }
+    });
+
+    proc.on('error', (err) => {
+      resolve({
+        success: false,
+        error: `Failed to spawn Python process: ${err.message}`,
+      });
+    });
+
+    try {
+      proc.stdin.write(JSON.stringify(payload));
+      proc.stdin.end();
+    } catch (writeErr: any) {
+      resolve({
+        success: false,
+        error: `Failed to write input to NaviDC-OCR process: ${writeErr?.message}`,
+      });
+    }
+  });
+}

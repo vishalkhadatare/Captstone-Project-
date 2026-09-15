@@ -25,10 +25,12 @@ import {
   ShieldCheck,
   Info,
   ExternalLink,
-  Edit2
+  Edit2,
+  Cpu,
 } from 'lucide-react';
 import { api } from '../../api';
-import { runPuterOcr, parsePuterOcrText } from '../../utils/puterOcr';
+import { runPuterOcr, runPuterVisionChat, runPuterAutoExtract, parsePuterOcrText } from '../../utils/puterOcr';
+import { runOcrSpace, parseOcrSpaceQuestion } from '../../utils/ocrSpace';
 
 export interface BoundaryQuestion {
   id: string;
@@ -519,30 +521,126 @@ export const QuestionBoundaryEditor: React.FC<QuestionBoundaryEditorProps> = ({
     }
   };
 
-  const [puterOcrRunning, setPuterOcrRunning] = useState(false);
+  const [navidcOcrRunning, setNavidcOcrRunning] = useState(false);
 
-  const handleRunPuterOcrOnCrop = async () => {
+  const handleRunNaviDcOcrOnCrop = async () => {
     if (!livePreviewCanvasRef.current) return;
-    setPuterOcrRunning(true);
+    setNavidcOcrRunning(true);
     try {
       const dataUrl = livePreviewCanvasRef.current.toDataURL('image/png');
-      const text = await runPuterOcr(dataUrl, { provider: 'aws-textract' });
-      if (text) {
-        const parsed = parsePuterOcrText(text);
+      const res = await api.runNaviDcOcr({ image_data: dataUrl, mode: 'mcq' });
+      if (res && res.success) {
+        if (res.markdown) {
+          setEditedText(res.markdown);
+        }
+        if (res.questions && res.questions.length > 0 && res.questions[0].options) {
+          setEditedOptions(res.questions[0].options.map(o => `${o.id}) ${o.text}`));
+        }
+        showToast(`NaviDC-OCR 1.2B parsed ${res.markdown?.length || 0} chars (${res.execution_time_ms}ms, ${res.device || 'local'})!`, 'success');
+      } else {
+        showToast(`NaviDC-OCR: ${res?.error || 'Execution returned no text'}`, 'error');
+      }
+    } catch (err: any) {
+      showToast(`NaviDC-OCR Error: ${err.message || err}`, 'error');
+    } finally {
+      setNavidcOcrRunning(false);
+    }
+  };
+
+  const [ocrSpaceRunning, setOcrSpaceRunning] = useState<'2' | '3' | null>(null);
+
+  const handleRunOcrSpaceOnCrop = async (engine: '2' | '3' = '2') => {
+    if (!livePreviewCanvasRef.current) return;
+    setOcrSpaceRunning(engine);
+    try {
+      const dataUrl = livePreviewCanvasRef.current.toDataURL('image/png');
+      const res = await api.runOcrSpace({
+        image_data: dataUrl,
+        engine,
+        isTable: true,
+        scale: true,
+        detectOrientation: true,
+      });
+
+      if (res && res.success && res.text) {
+        const parsed = parseOcrSpaceQuestion(res.text, res.engine);
         if (parsed.contentText) {
           setEditedText(parsed.contentText);
         }
         if (parsed.options && parsed.options.length > 0) {
-          setEditedOptions(parsed.options);
+          setEditedOptions(parsed.options.map(o => `${o.label}) ${o.text}`));
         }
-        showToast(`Extracted ${text.length} chars with Puter.js AI OCR!`, 'success');
+        const extraNote = parsed.hasTable ? ' (with Table 📊)' : parsed.hasDiagramOrFormula ? ' (with Formulas 📐)' : '';
+        showToast(`OCR.space Engine ${engine} parsed ${res.text.length} chars${extraNote}!`, 'success');
       } else {
-        showToast('Puter OCR returned empty text for this crop.', 'error');
+        // Direct browser fallback if proxy failed
+        const directRes = await runOcrSpace(dataUrl, { engine, isTable: true, scale: true });
+        if (directRes && directRes.text) {
+          const parsed = parseOcrSpaceQuestion(directRes.text, directRes.engine);
+          if (parsed.contentText) setEditedText(parsed.contentText);
+          if (parsed.options && parsed.options.length > 0) {
+            setEditedOptions(parsed.options.map(o => `${o.label}) ${o.text}`));
+          }
+          showToast(`OCR.space Engine ${engine} parsed ${directRes.text.length} chars!`, 'success');
+        } else {
+          showToast('OCR.space returned empty text for this crop.', 'error');
+        }
       }
     } catch (err: any) {
-      showToast(`Puter OCR Error: ${err.message || err}`, 'error');
+      showToast(`OCR.space Error: ${err.message || err}`, 'error');
     } finally {
-      setPuterOcrRunning(false);
+      setOcrSpaceRunning(null);
+    }
+  };
+
+  const [puterOcrRunning, setPuterOcrRunning] = useState<'textract' | 'mistral' | 'vision' | null>(null);
+
+  const handleRunPuterOcrOnCrop = async (mode: 'textract' | 'mistral' | 'vision' = 'vision') => {
+    if (!livePreviewCanvasRef.current) {
+      showToast('No crop preview available for Puter AI analysis.', 'error');
+      return;
+    }
+    setPuterOcrRunning(mode);
+    try {
+      const dataUrl = livePreviewCanvasRef.current.toDataURL('image/png');
+      let rawText = '';
+      let engineName = 'Puter AI';
+
+      if (mode === 'vision') {
+        engineName = 'Puter (Vision AI)';
+        rawText = await runPuterVisionChat(dataUrl);
+      } else if (mode === 'mistral') {
+        engineName = 'Puter (Mistral OCR)';
+        rawText = await runPuterOcr(dataUrl, { provider: 'mistral' });
+      } else {
+        engineName = 'Puter (AWS Textract)';
+        rawText = await runPuterOcr(dataUrl, { provider: 'aws-textract' });
+      }
+
+      if (!rawText || rawText.trim().length < 5) {
+        // Resilient automatic fallback
+        const fallback = await runPuterAutoExtract(dataUrl);
+        rawText = fallback.text;
+        engineName = fallback.engineUsed;
+      }
+
+      if (rawText) {
+        const parsed = parsePuterOcrText(rawText);
+        if (parsed.contentText) {
+          setEditedText(parsed.contentText);
+        }
+        if (parsed.options && parsed.options.length > 0) {
+          setEditedOptions(parsed.options.map(o => `${o.label}) ${o.text}`));
+        }
+        const extraNote = parsed.hasTable ? ' (Table Detected 📊)' : '';
+        showToast(`${engineName} parsed ${rawText.length} characters${extraNote}!`, 'success');
+      } else {
+        showToast('Puter returned empty text for this crop.', 'error');
+      }
+    } catch (err: any) {
+      showToast(`Puter AI Error: ${err.message || err}`, 'error');
+    } finally {
+      setPuterOcrRunning(null);
     }
   };
 
@@ -960,17 +1058,52 @@ export const QuestionBoundaryEditor: React.FC<QuestionBoundaryEditorProps> = ({
                 />
               </div>
 
-              {/* Puter.js AI OCR Extraction Button */}
-              <button
-                type="button"
-                onClick={handleRunPuterOcrOnCrop}
-                disabled={puterOcrRunning}
-                className="w-full py-2 px-3 rounded-xl bg-gradient-to-r from-indigo-600 via-indigo-700 to-purple-700 hover:brightness-110 text-white font-bold text-xs flex items-center justify-center gap-2 shadow-md cursor-pointer transition disabled:opacity-50"
-                title="Extract text and options from this cropped box using Puter.js AI OCR (AWS Textract)"
-              >
-                <Sparkles className="w-3.5 h-3.5 text-amber-300" />
-                <span>{puterOcrRunning ? 'Running Puter.js AI OCR...' : 'Run Puter.js AI OCR on Crop'}</span>
-              </button>
+              {/* Quad AI OCR Engines for Visual Crop */}
+              <div className="grid grid-cols-2 gap-2">
+                <button
+                  type="button"
+                  onClick={() => handleRunOcrSpaceOnCrop('2')}
+                  disabled={ocrSpaceRunning !== null || navidcOcrRunning || puterOcrRunning}
+                  className="py-2 px-2.5 rounded-xl bg-gradient-to-r from-blue-600 via-sky-600 to-cyan-600 hover:brightness-110 text-white font-bold text-xs flex items-center justify-center gap-1.5 shadow-md cursor-pointer transition disabled:opacity-50"
+                  title="Run OCR.space Engine 2 (Fast, General Text, Formulas, Math)"
+                >
+                  <Sparkles className="w-3.5 h-3.5 text-sky-200" />
+                  <span>{ocrSpaceRunning === '2' ? 'OCR.space...' : 'OCR.space (E2)'}</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => handleRunOcrSpaceOnCrop('3')}
+                  disabled={ocrSpaceRunning !== null || navidcOcrRunning || puterOcrRunning}
+                  className="py-2 px-2.5 rounded-xl bg-gradient-to-r from-violet-600 via-purple-600 to-fuchsia-600 hover:brightness-110 text-white font-bold text-xs flex items-center justify-center gap-1.5 shadow-md cursor-pointer transition disabled:opacity-50"
+                  title="Run OCR.space Engine 3 (Markdown Tables, Handwriting, 200+ Languages)"
+                >
+                  <FileText className="w-3.5 h-3.5 text-pink-200" />
+                  <span>{ocrSpaceRunning === '3' ? 'Table OCR...' : 'OCR.space (Tables E3)'}</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={handleRunNaviDcOcrOnCrop}
+                  disabled={ocrSpaceRunning !== null || navidcOcrRunning || puterOcrRunning}
+                  className="py-2 px-2.5 rounded-xl bg-gradient-to-r from-emerald-600 via-teal-600 to-cyan-700 hover:brightness-110 text-white font-bold text-xs flex items-center justify-center gap-1.5 shadow-md cursor-pointer transition disabled:opacity-50"
+                  title="Run local offline 1.2B NaviDC-OCR model on this cropped region (LaTeX, Formulas, Tables)"
+                >
+                  <Cpu className="w-3.5 h-3.5 text-emerald-300" />
+                  <span>{navidcOcrRunning ? 'NaviDC 1.2B...' : 'NaviDC-OCR 1.2B'}</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => handleRunPuterOcrOnCrop('vision')}
+                  disabled={ocrSpaceRunning !== null || puterOcrRunning !== null || navidcOcrRunning}
+                  className="py-2 px-2.5 rounded-xl bg-gradient-to-r from-indigo-600 via-indigo-700 to-purple-700 hover:brightness-110 text-white font-bold text-xs flex items-center justify-center gap-1.5 shadow-md cursor-pointer transition disabled:opacity-50"
+                  title="Extract text, tables, and options using Puter.js AI Vision (Claude / Mistral Vision)"
+                >
+                  <Sparkles className="w-3.5 h-3.5 text-amber-300" />
+                  <span>{puterOcrRunning ? 'Puter AI...' : 'Puter Vision AI'}</span>
+                </button>
+              </div>
             </div>
 
             {/* 2. Validation & Boundary Health Status */}

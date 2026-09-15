@@ -34,12 +34,14 @@ import {
   Crop,
   RotateCcw,
   Plus,
+  Cpu,
 } from 'lucide-react';
 import { User, ExtractedQuestion, Organization, QuestionAssignment } from '../../types';
 import { api } from '../../api';
 import { QuestionBoundaryEditor } from './QuestionBoundaryEditor';
 import { LaTeXText } from '../common/LaTeXText';
-import { runPuterOcr, parsePuterOcrText } from '../../utils/puterOcr';
+import { runPuterOcr, runPuterVisionChat, runPuterAutoExtract, parsePuterOcrText } from '../../utils/puterOcr';
+import { runOcrSpace, parseOcrSpaceQuestion } from '../../utils/ocrSpace';
 
 interface ExamManagerQuestionExtractorProps {
   smes: User[];
@@ -242,20 +244,81 @@ export const ExamManagerQuestionExtractor: React.FC<ExamManagerQuestionExtractor
   const [activeDebugView, setActiveDebugView] = useState<string | null>(null);
   const [currentPaperId, setCurrentPaperId] = useState<string | null>(null);
   const [boundaryEditorOpen, setBoundaryEditorOpen] = useState(false);
-  const [isPuterOcrLoading, setIsPuterOcrLoading] = useState(false);
   const diagramInputRef = useRef<HTMLInputElement | null>(null);
 
-  const handlePuterOcrForQuestion = async (q: ExtractedQuestion) => {
+  const [isNavidcOcrLoading, setIsNavidcOcrLoading] = useState(false);
+
+  const handleNavidcOcrForQuestion = async (q: ExtractedQuestion) => {
     const targetSource = q.image_url || q.diagram_url;
     if (!targetSource) {
-      setStatusMessage({ type: 'error', text: 'No cropped question image available for Puter OCR.' });
+      setStatusMessage({ type: 'error', text: 'No cropped question image available for NaviDC-OCR.' });
       return;
     }
-    setIsPuterOcrLoading(true);
+    setIsNavidcOcrLoading(true);
     try {
-      const text = await runPuterOcr(targetSource, { provider: 'aws-textract' });
-      if (text) {
-        const parsed = parsePuterOcrText(text);
+      const res = await api.runNaviDcOcr({ image_data: targetSource, mode: 'mcq' });
+      if (res && res.success) {
+        setExtractedQuestions(prev =>
+          prev.map(item => {
+            if (item.tempId === q.tempId) {
+              const firstQ = res.questions && res.questions.length > 0 ? res.questions[0] : null;
+              return {
+                ...item,
+                content_text: res.markdown || item.content_text,
+                options: firstQ?.options && firstQ.options.length > 0
+                  ? firstQ.options.map(o => `${o.id}) ${o.text}`)
+                  : item.options,
+                correct_answer: firstQ?.correct_answer || item.correct_answer,
+              };
+            }
+            return item;
+          })
+        );
+        setStatusMessage({
+          type: 'success',
+          text: `NaviDC-OCR 1.2B parsed ${res.markdown?.length || 0} chars (${res.execution_time_ms}ms, ${res.device || 'local'})!`
+        });
+      } else {
+        setStatusMessage({ type: 'error', text: `NaviDC-OCR Error: ${res?.error || 'Empty response'}` });
+      }
+    } catch (err: any) {
+      setStatusMessage({ type: 'error', text: `NaviDC-OCR Error: ${err.message || err}` });
+    } finally {
+      setIsNavidcOcrLoading(false);
+    }
+  };
+
+  const [isOcrSpaceLoading, setIsOcrSpaceLoading] = useState<'2' | '3' | null>(null);
+
+  const handleOcrSpaceForQuestion = async (q: ExtractedQuestion, engine: '2' | '3' = '2') => {
+    const targetSource = q.image_url || q.diagram_url || (q.question_images && q.question_images[0]);
+    if (!targetSource) {
+      setStatusMessage({ type: 'error', text: 'No cropped question image available for OCR.space.' });
+      return;
+    }
+    setIsOcrSpaceLoading(engine);
+    try {
+      const res = await api.runOcrSpace({
+        image_data: targetSource.startsWith('data:') ? targetSource : undefined,
+        image_url: !targetSource.startsWith('data:') ? targetSource : undefined,
+        engine,
+        isTable: true,
+        scale: true,
+        detectOrientation: true,
+      });
+
+      let extractedText = res?.text;
+      let engineName = res?.engine || `OCR.space Engine ${engine}`;
+
+      if (!extractedText) {
+        // Fallback to direct client call if needed
+        const directRes = await runOcrSpace(targetSource, { engine, isTable: true, scale: true });
+        extractedText = directRes?.text;
+        engineName = directRes?.engine || engineName;
+      }
+
+      if (extractedText) {
+        const parsed = parseOcrSpaceQuestion(extractedText, engineName);
         setExtractedQuestions(prev =>
           prev.map(item => {
             if (item.tempId === q.tempId) {
@@ -264,19 +327,86 @@ export const ExamManagerQuestionExtractor: React.FC<ExamManagerQuestionExtractor
                 content_text: parsed.contentText || item.content_text,
                 options: parsed.options && parsed.options.length > 0 ? parsed.options.map(o => `${o.label}) ${o.text}`) : item.options,
                 correct_answer: parsed.suggestedAnswer || item.correct_answer,
+                has_table: parsed.hasTable || item.has_table,
               };
             }
             return item;
           })
         );
-        setStatusMessage({ type: 'success', text: `Extracted ${text.length} chars with Puter.js AI OCR!` });
+        const extra = parsed.hasTable ? ' (Table Extracted 📊)' : '';
+        setStatusMessage({
+          type: 'success',
+          text: `OCR.space Engine ${engine} recognized ${extractedText.length} chars${extra}!`,
+        });
       } else {
-        setStatusMessage({ type: 'error', text: 'Puter OCR returned empty text for this question.' });
+        setStatusMessage({ type: 'error', text: 'OCR.space returned empty text for this crop.' });
       }
     } catch (err: any) {
-      setStatusMessage({ type: 'error', text: `Puter OCR Error: ${err.message || err}` });
+      setStatusMessage({ type: 'error', text: `OCR.space Error: ${err.message || err}` });
     } finally {
-      setIsPuterOcrLoading(false);
+      setIsOcrSpaceLoading(null);
+    }
+  };
+
+  const [isPuterOcrLoading, setIsPuterOcrLoading] = useState<'textract' | 'mistral' | 'vision' | null>(null);
+
+  const handlePuterOcrForQuestion = async (q: ExtractedQuestion, mode: 'textract' | 'mistral' | 'vision' = 'vision') => {
+    const targetSource = q.image_url || q.diagram_url || (q.question_images && q.question_images[0]);
+    if (!targetSource) {
+      setStatusMessage({ type: 'error', text: 'No cropped question image available for Puter AI analysis.' });
+      return;
+    }
+    setIsPuterOcrLoading(mode);
+    try {
+      let rawText = '';
+      let engineName = 'Puter AI';
+
+      if (mode === 'vision') {
+        engineName = 'Puter (Vision AI)';
+        rawText = await runPuterVisionChat(targetSource);
+      } else if (mode === 'mistral') {
+        engineName = 'Puter (Mistral OCR)';
+        rawText = await runPuterOcr(targetSource, { provider: 'mistral' });
+      } else {
+        engineName = 'Puter (AWS Textract)';
+        rawText = await runPuterOcr(targetSource, { provider: 'aws-textract' });
+      }
+
+      if (!rawText || rawText.trim().length < 5) {
+        // Fallback to automatic multi-engine attempt
+        const fallback = await runPuterAutoExtract(targetSource);
+        rawText = fallback.text;
+        engineName = fallback.engineUsed;
+      }
+
+      if (rawText) {
+        const parsed = parsePuterOcrText(rawText);
+        setExtractedQuestions(prev =>
+          prev.map(item => {
+            if (item.tempId === q.tempId) {
+              return {
+                ...item,
+                content_text: parsed.contentText || item.content_text,
+                options: parsed.options && parsed.options.length > 0 ? parsed.options.map(o => `${o.label}) ${o.text}`) : item.options,
+                correct_answer: parsed.suggestedAnswer || item.correct_answer,
+                has_table: parsed.hasTable || item.has_table,
+              };
+            }
+            return item;
+          })
+        );
+        const extra = parsed.hasTable ? ' (Table Extracted 📊)' : '';
+        setStatusMessage({
+          type: 'success',
+          text: `${engineName} successfully parsed ${rawText.length} characters${extra}!`,
+        });
+      } else {
+        setStatusMessage({ type: 'error', text: 'Puter AI returned empty text for this crop.' });
+      }
+    } catch (err: any) {
+      setStatusMessage({ type: 'error', text: `Puter AI Error: ${err.message || err}` });
+    } finally {
+      setIsPuterOcrLoading(null);
     }
   };
 
@@ -2233,8 +2363,8 @@ export const ExamManagerQuestionExtractor: React.FC<ExamManagerQuestionExtractor
             <div className="lg:col-span-7 bg-white border border-slate-200 rounded-2xl p-6 shadow-xs space-y-5">
               {activeQuestion ? (
                 <>
-                  {/* Header with Navigation & Quick Actions */}
-                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-100 pb-4">
+                  {/* Sticky Header with Navigation & Quick Actions */}
+                  <div className="sticky top-0 z-20 bg-white/95 backdrop-blur-xs py-3 px-4 -mx-6 -mt-6 rounded-t-2xl border-b border-slate-200 shadow-2xs flex flex-col sm:flex-row sm:items-center justify-between gap-3">
                     <div className="flex flex-wrap items-center gap-2">
                       <span className="px-2.5 py-1 rounded-lg bg-emerald-700 text-white font-bold text-xs shadow-2xs">
                         Question Paper {activeQuestion.paper_number || 1}
@@ -2276,13 +2406,46 @@ export const ExamManagerQuestionExtractor: React.FC<ExamManagerQuestionExtractor
 
                       <button
                         type="button"
-                        onClick={() => handlePuterOcrForQuestion(activeQuestion)}
-                        disabled={isPuterOcrLoading}
-                        className="px-2.5 py-1.5 rounded-lg bg-indigo-700 hover:bg-indigo-600 text-white font-bold text-xs flex items-center gap-1 shadow-xs transition cursor-pointer mr-1"
-                        title="Extract & recognized text from question image using Puter.js AI OCR"
+                        onClick={() => handleOcrSpaceForQuestion(activeQuestion, '2')}
+                        disabled={isOcrSpaceLoading !== null || isNavidcOcrLoading || isPuterOcrLoading !== null}
+                        className="px-2.5 py-1.5 rounded-lg bg-sky-700 hover:bg-sky-600 text-white font-bold text-xs flex items-center gap-1 shadow-xs transition cursor-pointer mr-1"
+                        title="Extract question using OCR.space Engine 2 (Fast, General Text, Formulas)"
                       >
-                        <Sparkles className="w-3.5 h-3.5 text-indigo-200" />
-                        <span>{isPuterOcrLoading ? 'Puter OCR...' : 'Puter OCR'}</span>
+                        <Sparkles className="w-3.5 h-3.5 text-sky-200" />
+                        <span>{isOcrSpaceLoading === '2' ? 'OCR.space...' : 'OCR.space'}</span>
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => handleOcrSpaceForQuestion(activeQuestion, '3')}
+                        disabled={isOcrSpaceLoading !== null || isNavidcOcrLoading || isPuterOcrLoading !== null}
+                        className="px-2.5 py-1.5 rounded-lg bg-purple-700 hover:bg-purple-600 text-white font-bold text-xs flex items-center gap-1 shadow-xs transition cursor-pointer mr-1"
+                        title="Extract question using OCR.space Engine 3 (Markdown Tables & Handwriting)"
+                      >
+                        <FileText className="w-3.5 h-3.5 text-purple-200" />
+                        <span>{isOcrSpaceLoading === '3' ? 'Table OCR...' : 'Table E3'}</span>
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => handleNavidcOcrForQuestion(activeQuestion)}
+                        disabled={isOcrSpaceLoading !== null || isNavidcOcrLoading || isPuterOcrLoading !== null}
+                        className="px-2.5 py-1.5 rounded-lg bg-teal-700 hover:bg-teal-600 text-white font-bold text-xs flex items-center gap-1 shadow-xs transition cursor-pointer mr-1"
+                        title="Extract text, formulas & tables using local offline 1.2B NaviDC-OCR model"
+                      >
+                        <Cpu className="w-3.5 h-3.5 text-teal-200" />
+                        <span>{isNavidcOcrLoading ? 'NaviDC...' : 'NaviDC 1.2B'}</span>
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => handlePuterOcrForQuestion(activeQuestion, 'vision')}
+                        disabled={isOcrSpaceLoading !== null || isPuterOcrLoading !== null || isNavidcOcrLoading}
+                        className="px-2.5 py-1.5 rounded-lg bg-indigo-700 hover:bg-indigo-600 text-white font-bold text-xs flex items-center gap-1 shadow-xs transition cursor-pointer mr-1"
+                        title="Extract question, tables & options using Puter.js AI Vision (Claude / Mistral Vision - 100% Free)"
+                      >
+                        <Sparkles className="w-3.5 h-3.5 text-amber-300" />
+                        <span>{isPuterOcrLoading ? 'Puter AI...' : 'Puter Vision AI'}</span>
                       </button>
 
                       <button

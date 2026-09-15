@@ -1,0 +1,8 @@
+torch>=2.0.0
+torchvision>=0.15.0
+transformers>=4.48.0
+accelerate>=0.26.0
+safetensors>=0.4.0
+huggingface_hub>=0.20.0
+pillow>=10.0.0
+

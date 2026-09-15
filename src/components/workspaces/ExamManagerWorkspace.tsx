@@ -825,6 +825,44 @@ export const ExamManagerWorkspace: React.FC<ExamManagerWorkspaceProps> = ({
     }
   };
 
+  const handleDeleteExam = async (examId: string, examName: string) => {
+    if (!window.confirm(`Are you sure you want to permanently delete "${examName}" and all its encrypted paper versions?`)) return;
+    try {
+      await api.deleteExamination(examId);
+      setStatusMessage({ type: 'success', text: `Examination "${examName}" deleted successfully.` });
+      await loadData();
+      if (selectedGenExamId === examId) {
+        setSelectedGenExamId('');
+      }
+    } catch (err: any) {
+      setStatusMessage({ type: 'error', text: err.message || 'Failed to delete examination.' });
+    }
+  };
+
+  const handlePurgeAllMockExams = async () => {
+    if (!window.confirm('Are you sure you want to remove all pre-seeded mock and demo examination papers? Your real uploaded question papers will remain safe.')) return;
+    try {
+      await api.purgeDemoExaminations();
+      setStatusMessage({ type: 'success', text: 'All mock and demo examination papers have been removed.' });
+      await loadData();
+      setSelectedGenExamId('');
+    } catch (err: any) {
+      setStatusMessage({ type: 'error', text: err.message || 'Failed to purge mock examinations.' });
+    }
+  };
+
+  const handleDeleteAllExams = async () => {
+    if (!window.confirm('WARNING: Are you sure you want to delete ALL examinations? This cannot be undone.')) return;
+    try {
+      await api.deleteAllExaminations();
+      setStatusMessage({ type: 'success', text: 'All examinations removed successfully.' });
+      await loadData();
+      setSelectedGenExamId('');
+    } catch (err: any) {
+      setStatusMessage({ type: 'error', text: err.message || 'Failed to delete examinations.' });
+    }
+  };
+
   const verifiedCount = questions.filter(q => q.status === 'VERIFIED' || q.status === 'ELIGIBLE_FOR_PAPER').length;
   const quarantinedCount = questions.filter(q => q.status === 'QUARANTINED' || q.status === 'COMPROMISED').length;
 
@@ -2710,173 +2748,231 @@ Total Marks: 100. Negative marking applicable on Section 1.`
                 </p>
               </div>
 
-              {/* Exam Type Filter Pills */}
-              <div className="flex flex-wrap items-center gap-1.5 text-xs">
-                {(['ALL', 'MCQ', 'THEORY', 'MIXED', 'PRACTICAL_CODING'] as const).map(t => {
-                  const count = t === 'ALL' ? examinations.length : examinations.filter(e => ((e as any).exam_type || 'MCQ') === t).length;
-                  return (
-                    <button
-                      key={t}
-                      onClick={() => setGenerationExamTypeFilter(t)}
-                      className={`px-3 py-1.5 rounded-lg font-bold text-xs transition-all ${
-                        generationExamTypeFilter === t
-                          ? 'bg-emerald-900 text-white shadow-xs'
-                          : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
-                      }`}
-                    >
-                      {t === 'ALL' ? 'All Types' : t} ({count})
-                    </button>
-                  );
-                })}
+              {/* Action Controls & Exam Type Filter Pills */}
+              <div className="flex flex-wrap items-center gap-2 text-xs">
+                {examinations.length > 0 && (
+                  <button
+                    type="button"
+                    onClick={handlePurgeAllMockExams}
+                    className="px-3 py-1.5 rounded-lg bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 font-bold text-xs flex items-center gap-1.5 transition-all cursor-pointer shadow-2xs"
+                    title="Remove all pre-seeded dummy/mock examinations"
+                  >
+                    <Trash2 className="w-3.5 h-3.5" />
+                    <span>Purge Mock Papers</span>
+                  </button>
+                )}
+
+                <div className="flex flex-wrap items-center gap-1.5">
+                  {(['ALL', 'MCQ', 'THEORY', 'MIXED', 'PRACTICAL_CODING'] as const).map(t => {
+                    const count = t === 'ALL' ? examinations.length : examinations.filter(e => ((e as any).exam_type || 'MCQ') === t).length;
+                    return (
+                      <button
+                        key={t}
+                        onClick={() => setGenerationExamTypeFilter(t)}
+                        className={`px-3 py-1.5 rounded-lg font-bold text-xs transition-all ${
+                          generationExamTypeFilter === t
+                            ? 'bg-emerald-900 text-white shadow-xs'
+                            : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                        }`}
+                      >
+                        {t === 'ALL' ? 'All Types' : t} ({count})
+                      </button>
+                    );
+                  })}
+                </div>
               </div>
             </div>
 
             {/* Filtered Examinations List with Type Indicators */}
             <div className="space-y-3">
-              {examinations
-                .filter(ex => generationExamTypeFilter === 'ALL' || ((ex as any).exam_type || 'MCQ') === generationExamTypeFilter)
-                .map(ex => {
-                  const type: ExamType = (ex as any).exam_type || 'MCQ';
-                  const isSelected = selectedGenExamId === ex.id || (!selectedGenExamId && examinations[0]?.id === ex.id);
-
-                  return (
-                    <div
-                      key={ex.id}
-                      onClick={() => setSelectedGenExamId(ex.id)}
-                      className={`p-4 rounded-xl border cursor-pointer transition-all ${
-                        isSelected
-                          ? 'bg-emerald-50/50 border-emerald-500 ring-2 ring-emerald-500/20'
-                          : 'bg-slate-50 border-slate-200 hover:bg-slate-100/70'
-                      }`}
+              {examinations.length === 0 ? (
+                <div className="p-8 text-center bg-slate-50/80 rounded-2xl border border-dashed border-slate-300 space-y-3">
+                  <div className="w-12 h-12 rounded-full bg-emerald-100 text-emerald-700 flex items-center justify-center mx-auto">
+                    <CheckCircle2 className="w-6 h-6" />
+                  </div>
+                  <div>
+                    <h4 className="font-bold text-slate-800 text-sm">All Mock Examination Papers Cleared</h4>
+                    <p className="text-xs text-slate-500 max-w-md mx-auto mt-1">
+                      No dummy examinations are present. Upload your real question paper or create a new examination to generate authentic encrypted paper sets.
+                    </p>
+                  </div>
+                  <div className="flex items-center justify-center gap-3 pt-2">
+                    <button
+                      type="button"
+                      onClick={() => onSelectSubTab && onSelectSubTab('question_workflow' as any)}
+                      className="px-4 py-2 bg-emerald-700 hover:bg-emerald-800 text-white rounded-xl text-xs font-bold transition-all shadow-xs flex items-center gap-1.5"
                     >
-                      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs">
-                        <div className="space-y-1">
+                      <Upload className="w-3.5 h-3.5" />
+                      Upload Question Paper
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => onSelectSubTab && onSelectSubTab('create_examination' as any)}
+                      className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-800 rounded-xl text-xs font-bold transition-all border border-slate-300 flex items-center gap-1.5"
+                    >
+                      <PlusCircle className="w-3.5 h-3.5" />
+                      Create New Exam
+                    </button>
+                  </div>
+                </div>
+              ) : (
+                examinations
+                  .filter(ex => generationExamTypeFilter === 'ALL' || ((ex as any).exam_type || 'MCQ') === generationExamTypeFilter)
+                  .map(ex => {
+                    const type: ExamType = (ex as any).exam_type || 'MCQ';
+                    const isSelected = selectedGenExamId === ex.id || (!selectedGenExamId && examinations[0]?.id === ex.id);
+
+                    return (
+                      <div
+                        key={ex.id}
+                        onClick={() => setSelectedGenExamId(ex.id)}
+                        className={`p-4 rounded-xl border cursor-pointer transition-all ${
+                          isSelected
+                            ? 'bg-emerald-50/50 border-emerald-500 ring-2 ring-emerald-500/20'
+                            : 'bg-slate-50 border-slate-200 hover:bg-slate-100/70'
+                        }`}
+                      >
+                        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs">
+                          <div className="space-y-1">
+                            <div className="flex items-center gap-2">
+                              <span className="font-bold text-sm text-slate-900">{ex.name}</span>
+                              <span
+                                className={`px-2 py-0.5 rounded text-[10px] font-bold border ${
+                                  type === 'MCQ'
+                                    ? 'bg-blue-100 text-blue-900 border-blue-200'
+                                    : type === 'THEORY'
+                                    ? 'bg-amber-100 text-amber-900 border-amber-200'
+                                    : type === 'MIXED'
+                                    ? 'bg-teal-100 text-teal-900 border-teal-200'
+                                    : 'bg-indigo-100 text-indigo-900 border-indigo-200'
+                                }`}
+                              >
+                                {type === 'MCQ' ? '⚡ MCQ PATTERN' : type === 'THEORY' ? '📝 THEORY PATTERN' : type === 'MIXED' ? '🔀 HYBRID PATTERN' : '💻 PRACTICAL PATTERN'}
+                              </span>
+                            </div>
+                            <div className="text-[11px] text-slate-500 font-mono">
+                              Subject: {ex.subject} • Qs: {ex.total_questions} • Marks: {ex.total_marks} • Unlock: {ex.unlock_time}
+                            </div>
+                          </div>
+
                           <div className="flex items-center gap-2">
-                            <span className="font-bold text-sm text-slate-900">{ex.name}</span>
-                            <span
-                              className={`px-2 py-0.5 rounded text-[10px] font-bold border ${
-                                type === 'MCQ'
-                                  ? 'bg-blue-100 text-blue-900 border-blue-200'
-                                  : type === 'THEORY'
-                                  ? 'bg-amber-100 text-amber-900 border-amber-200'
-                                  : type === 'MIXED'
-                                  ? 'bg-teal-100 text-teal-900 border-teal-200'
-                                  : 'bg-indigo-100 text-indigo-900 border-indigo-200'
+                            {ex.simulation_status === 'COMPLETED' ? (
+                              <span
+                                className="px-3 py-2 bg-emerald-50 text-emerald-800 border border-emerald-300 rounded-lg font-bold text-xs flex items-center gap-1.5 shadow-2xs"
+                                title="Simulation already completed. The final question paper cannot be viewed again in simulation mode."
+                              >
+                                <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
+                                <span>Simulation Completed ✓</span>
+                              </span>
+                            ) : (
+                              <button
+                                type="button"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  handleSimulateExam(ex);
+                                }}
+                                className="px-3.5 py-2 bg-emerald-700 hover:bg-emerald-600 text-white rounded-lg font-bold text-xs shadow-xs flex items-center gap-1.5 cursor-pointer transition-all"
+                                title="Start Proctored Final Paper Simulation"
+                              >
+                                <Camera className="w-3.5 h-3.5" />
+                                <span>Simulate Exam</span>
+                              </button>
+                            )}
+
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                handleGeneratePaper(ex.id);
+                              }}
+                              disabled={generating || org?.status !== 'VERIFIED'}
+                              className={`px-4 py-2 rounded-lg font-bold text-xs shadow-xs flex items-center gap-1.5 ${
+                                ex.simulation_status === 'COMPLETED'
+                                  ? 'bg-emerald-900 hover:bg-emerald-800 text-white ring-2 ring-emerald-500/30'
+                                  : 'bg-slate-900 hover:bg-slate-800 text-white disabled:opacity-40'
                               }`}
                             >
-                              {type === 'MCQ' ? '⚡ MCQ PATTERN' : type === 'THEORY' ? '📝 THEORY PATTERN' : type === 'MIXED' ? '🔀 HYBRID PATTERN' : '💻 PRACTICAL PATTERN'}
-                            </span>
-                          </div>
-                          <div className="text-[11px] text-slate-500 font-mono">
-                            Subject: {ex.subject} • Qs: {ex.total_questions} • Marks: {ex.total_marks} • Unlock: {ex.unlock_time}
-                          </div>
-                        </div>
+                              <Lock className="w-3.5 h-3.5" />
+                              <span>{generating ? 'Encrypting...' : `Generate ${type} Paper`}</span>
+                            </button>
 
-                        <div className="flex items-center gap-2">
-                          {ex.simulation_status === 'COMPLETED' ? (
-                            <span
-                              className="px-3 py-2 bg-emerald-50 text-emerald-800 border border-emerald-300 rounded-lg font-bold text-xs flex items-center gap-1.5 shadow-2xs"
-                              title="Simulation already completed. The final question paper cannot be viewed again in simulation mode."
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                handleEmergencyRegenerate(ex.id);
+                              }}
+                              className="px-3 py-2 bg-rose-50 hover:bg-rose-100 text-rose-800 border border-rose-200 rounded-lg font-bold text-xs flex items-center gap-1.5 cursor-pointer"
+                              title="Emergency Question Paper Regeneration"
                             >
-                              <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
-                              <span>Simulation Completed ✓</span>
-                            </span>
-                          ) : (
+                              <RotateCcw className="w-3.5 h-3.5" />
+                              <span>Emergency Re-Gen</span>
+                            </button>
+
                             <button
                               type="button"
                               onClick={(e) => {
                                 e.stopPropagation();
-                                handleSimulateExam(ex);
+                                setSelectedGenExamId(ex.id);
+                                if (onSelectSubTab) {
+                                  onSelectSubTab('multi_paper_generator');
+                                } else {
+                                  window.location.hash = 'multi-paper-generator';
+                                }
                               }}
-                              className="px-3.5 py-2 bg-emerald-700 hover:bg-emerald-600 text-white rounded-lg font-bold text-xs shadow-xs flex items-center gap-1.5 cursor-pointer transition-all"
-                              title="Start Proctored Final Paper Simulation"
+                              className="px-3 py-2 bg-indigo-50 hover:bg-indigo-100 text-indigo-900 border border-indigo-200 rounded-lg font-bold text-xs flex items-center gap-1.5 cursor-pointer transition-all"
+                              title="Generate Sets A, B, C, D with balanced candidate pool quotas"
                             >
-                              <Camera className="w-3.5 h-3.5" />
-                              <span>Simulate Exam</span>
+                              <Sparkles className="w-3.5 h-3.5 text-indigo-600" />
+                              <span>Multi-Sets</span>
                             </button>
-                          )}
 
-                          <button
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              handleGeneratePaper(ex.id);
-                            }}
-                            disabled={generating || org?.status !== 'VERIFIED'}
-                            className={`px-4 py-2 rounded-lg font-bold text-xs shadow-xs flex items-center gap-1.5 ${
-                              ex.simulation_status === 'COMPLETED'
-                                ? 'bg-emerald-900 hover:bg-emerald-800 text-white ring-2 ring-emerald-500/30'
-                                : 'bg-slate-900 hover:bg-slate-800 text-white disabled:opacity-40'
-                            }`}
-                          >
-                            <Lock className="w-3.5 h-3.5" />
-                            <span>{generating ? 'Encrypting...' : `Generate ${type} Paper`}</span>
-                          </button>
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setSelectedGenExamId(ex.id);
+                                if (onSelectSubTab) {
+                                  onSelectSubTab('paper_versions');
+                                } else {
+                                  window.location.hash = 'paper-versions';
+                                }
+                              }}
+                              className="px-3 py-2 bg-slate-100 hover:bg-slate-200 text-slate-800 border border-slate-300 rounded-lg font-bold text-xs flex items-center gap-1.5 cursor-pointer transition-all"
+                              title="View encrypted paper versions and release sets"
+                            >
+                              <Layers className="w-3.5 h-3.5 text-slate-600" />
+                              <span>Versions</span>
+                            </button>
 
-                          <button
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              handleEmergencyRegenerate(ex.id);
-                            }}
-                            className="px-3 py-2 bg-rose-50 hover:bg-rose-100 text-rose-800 border border-rose-200 rounded-lg font-bold text-xs flex items-center gap-1.5 cursor-pointer"
-                            title="Emergency Question Paper Regeneration"
-                          >
-                            <RotateCcw className="w-3.5 h-3.5" />
-                            <span>Emergency Re-Gen</span>
-                          </button>
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setPdfViewExam(ex);
+                              }}
+                              className="px-3.5 py-2 bg-rose-50 hover:bg-rose-100 text-rose-800 border border-rose-200 rounded-lg font-bold text-xs flex items-center gap-1.5 cursor-pointer transition-all shadow-2xs"
+                              title="View & Print Official Generated Question Paper PDF"
+                            >
+                              <FileText className="w-3.5 h-3.5 text-rose-600" />
+                              <span>View PDF</span>
+                            </button>
 
-                          <button
-                            type="button"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              setSelectedGenExamId(ex.id);
-                              if (onSelectSubTab) {
-                                onSelectSubTab('multi_paper_generator');
-                              } else {
-                                window.location.hash = 'multi-paper-generator';
-                              }
-                            }}
-                            className="px-3 py-2 bg-indigo-50 hover:bg-indigo-100 text-indigo-900 border border-indigo-200 rounded-lg font-bold text-xs flex items-center gap-1.5 cursor-pointer transition-all"
-                            title="Generate Sets A, B, C, D with balanced candidate pool quotas"
-                          >
-                            <Sparkles className="w-3.5 h-3.5 text-indigo-600" />
-                            <span>Multi-Sets</span>
-                          </button>
-
-                          <button
-                            type="button"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              setSelectedGenExamId(ex.id);
-                              if (onSelectSubTab) {
-                                onSelectSubTab('paper_versions');
-                              } else {
-                                window.location.hash = 'paper-versions';
-                              }
-                            }}
-                            className="px-3 py-2 bg-slate-100 hover:bg-slate-200 text-slate-800 border border-slate-300 rounded-lg font-bold text-xs flex items-center gap-1.5 cursor-pointer transition-all"
-                            title="View encrypted paper versions and release sets"
-                          >
-                            <Layers className="w-3.5 h-3.5 text-slate-600" />
-                            <span>Versions</span>
-                          </button>
-
-                          <button
-                            type="button"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              setPdfViewExam(ex);
-                            }}
-                            className="px-3.5 py-2 bg-rose-50 hover:bg-rose-100 text-rose-800 border border-rose-200 rounded-lg font-bold text-xs flex items-center gap-1.5 cursor-pointer transition-all shadow-2xs"
-                            title="View & Print Official Generated Question Paper PDF"
-                          >
-                            <FileText className="w-3.5 h-3.5 text-rose-600" />
-                            <span>View PDF</span>
-                          </button>
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                handleDeleteExam(ex.id, ex.name);
+                              }}
+                              className="p-2 bg-slate-100 hover:bg-rose-100 text-slate-500 hover:text-rose-700 border border-slate-200 hover:border-rose-300 rounded-lg font-bold text-xs flex items-center justify-center transition-all cursor-pointer"
+                              title="Delete Examination"
+                            >
+                              <Trash2 className="w-3.5 h-3.5" />
+                            </button>
+                          </div>
                         </div>
                       </div>
-                    </div>
-                  );
-                })}
+                    );
+                  })
+              )}
             </div>
           </div>
 

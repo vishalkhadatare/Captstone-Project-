@@ -53,11 +53,16 @@ export interface PermutedQuestion {
   questionId: string;
   sourcePaperId: string;
   displayOrder: number;
+  questionNumber?: string;
+  questionType?: string;
   subject: string;
   topic: string;
   difficulty: string;
   contentText: string;
   diagramUrl?: string;
+  imageUrl?: string;
+  hasDiagram?: boolean;
+  hasTable?: boolean;
   shuffledOptions: Array<{ id: string; text: string; label: string }>;
   correctOptionId: string;
   displayedCorrectAnswer: string; // 'A' | 'B' | 'C' | 'D'
@@ -389,23 +394,28 @@ export function permuteQuestionsAndOptions(
  label: String.fromCharCode(65 + idx),
  }));
 
- return {
- questionId: q.id,
- sourcePaperId: q.question_paper_id || '',
- displayOrder: qIndex + 1,
- subject: q.subject,
- topic: q.topic || 'General',
- difficulty: q.difficulty,
- contentText: q.content_text,
- diagramUrl: q.diagram_url,
- shuffledOptions: formattedOptions,
- correctOptionId,
- displayedCorrectAnswer,
- originalCorrectAnswer: q.correct_answer,
- marks: q.marks || 4,
- negativeMarks: q.negative_marks || 1.0,
- };
- });
+    return {
+      questionId: q.id,
+      sourcePaperId: q.question_paper_id || '',
+      displayOrder: qIndex + 1,
+      questionNumber: q.question_number,
+      questionType: q.question_type || (formattedOptions.length > 0 ? 'MCQ' : 'THEORY'),
+      subject: q.subject,
+      topic: q.topic || 'General',
+      difficulty: q.difficulty,
+      contentText: q.content_text,
+      diagramUrl: q.diagram_url,
+      imageUrl: (q as any).image_url || q.diagram_url,
+      hasDiagram: (q as any).has_diagram !== undefined ? Boolean((q as any).has_diagram) : Boolean(q.diagram_url),
+      hasTable: Boolean((q as any).has_table),
+      shuffledOptions: formattedOptions,
+      correctOptionId,
+      displayedCorrectAnswer,
+      originalCorrectAnswer: q.correct_answer,
+      marks: q.marks || 4,
+      negativeMarks: q.negative_marks || 1.0,
+    };
+  });
 }
 
 /**
