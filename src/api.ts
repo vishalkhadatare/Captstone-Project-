@@ -5,6 +5,7 @@ import {
   VerificationHistoryItem,
   TrustedDevice,
   Examination,
+  ExamBlueprint,
   Question,
   QuestionAssignment,
   PaperExtractionResponse,
@@ -354,6 +355,18 @@ export const api = {
   getExaminations: () => request<{ examinations: Examination[] }>('/api/examinations'),
   createExamination: (payload: any) => request<{ message: string; examId: string }>('/api/examinations', { method: 'POST', body: JSON.stringify(payload) }),
   getExaminationDetails: (id: string) => request<{ examination: Examination; configuration: any; centres: ExaminationCentre[]; versions: any[] }>(`/api/examinations/${id}`),
+  getBlueprints: () => request<{ blueprints: ExamBlueprint[] }>('/api/blueprints'),
+  getBlueprint: (examId: string) => request<{ blueprint: ExamBlueprint | null; versions: ExamBlueprint[] }>(`/api/examinations/${examId}/blueprint`),
+  saveBlueprint: (examId: string, blueprint: Partial<ExamBlueprint>, saveAsDraft = false) =>
+    request<{ message: string; blueprint: ExamBlueprint }>(`/api/examinations/${examId}/blueprint`, {
+      method: 'PUT',
+      body: JSON.stringify({ blueprint, saveAsDraft }),
+    }),
+  deactivateBlueprint: (examId: string, versionId?: string) =>
+    request<{ message: string }>(`/api/examinations/${examId}/blueprint`, {
+      method: 'DELETE',
+      body: JSON.stringify({ versionId }),
+    }),
   addCentre: (examId: string, payload: AddCentrePayload) => request<AddCentreResponse>(`/api/examinations/${examId}/centres`, { method: 'POST', body: JSON.stringify(payload) }),
   getCentresForExam: (examId: string) => request<{ centres: ExaminationCentre[]; managerAuthorized: number }>(`/api/examinations/${examId}/centres`),
   getAllCentres: () => request<{ centres: ExaminationCentre[] }>('/api/centres'),

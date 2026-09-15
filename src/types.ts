@@ -203,6 +203,43 @@ export interface Examination {
   simulated_by?: string;
 }
 
+export type BlueprintStatus = 'DRAFT' | 'ACTIVE' | 'INACTIVE';
+
+export interface BlueprintSection {
+  id: string;
+  name: string;
+  subject: string;
+  questionType: ExamType;
+  questionNumber?: string;
+  totalQuestions: number;
+  subQuestions?: number;
+  questionsToAttempt: number;
+  marksPerQuestion: number;
+  marksPerSubQuestion?: number;
+  mainQuestionMarks?: number;
+  negativeMarks: number;
+  difficulty?: 'ANY' | 'EASY' | 'MEDIUM' | 'HARD';
+  totalMarks?: number;
+}
+
+export interface ExamBlueprint {
+  id: string;
+  examId: string;
+  examName: string;
+  examType: ExamType;
+  conductingBody: string;
+  examYear: number;
+  paperName: string;
+  paperNumber: number;
+  durationMinutes: number;
+  totalMarks: number;
+  status: BlueprintStatus;
+  version: string;
+  sections: BlueprintSection[];
+  createdAt: string;
+  updatedAt: string;
+}
+
 export type QuestionStatus =
   | 'DRAFT'
   | 'UNDER_VERIFICATION'

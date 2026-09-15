@@ -2982,6 +2982,180 @@ async function startServer() {
   // 4. EXAMINATIONS MANAGEMENT
   // ==========================================
 
+  const parseBlueprintVersions = (raw: any): { versions: any[]; activeVersionId: string | null } => {
+    if (!raw) return { versions: [], activeVersionId: null };
+    try {
+      const parsed = typeof raw === 'string' ? JSON.parse(raw) : raw;
+      if (Array.isArray(parsed?.versions)) {
+        return { versions: parsed.versions, activeVersionId: parsed.activeVersionId || null };
+      }
+      if (parsed?.sections) {
+        return {
+          versions: [{ ...parsed, id: parsed.id || `BP-LEGACY-${Date.now()}`, status: parsed.status || 'ACTIVE' }],
+          activeVersionId: parsed.status === 'INACTIVE' ? null : (parsed.id || null),
+        };
+      }
+    } catch {}
+    return { versions: [], activeVersionId: null };
+  };
+
+  const validateManualBlueprint = (blueprint: any): string[] => {
+    const errors: string[] = [];
+    const requiredText: Array<[string, string]> = [
+      ['examName', 'Exam name'],
+      ['conductingBody', 'Conducting body'],
+      ['paperName', 'Paper name'],
+      ['version', 'Blueprint version'],
+    ];
+    requiredText.forEach(([key, label]) => {
+      if (!String(blueprint?.[key] || '').trim()) errors.push(`${label} is required.`);
+    });
+    if (!Number.isInteger(Number(blueprint?.examYear)) || Number(blueprint.examYear) < 1) errors.push('Exam year must be valid.');
+    if (Number(blueprint?.durationMinutes) < 0) errors.push('Duration cannot be negative.');
+    if (Number(blueprint?.totalMarks) < 0) errors.push('Total marks cannot be negative.');
+    if (!Array.isArray(blueprint?.sections) || blueprint.sections.length === 0) errors.push('Add at least one section.');
+
+    let calculatedMarks = 0;
+    (blueprint?.sections || []).forEach((section: any, index: number) => {
+      const prefix = `Section ${index + 1}`;
+      if (!String(section?.name || '').trim()) errors.push(`${prefix}: name is required.`);
+      if (!String(section?.subject || '').trim()) errors.push(`${prefix}: subject is required.`);
+      const totalQuestions = Number(section?.totalQuestions);
+      const questionsToAttempt = Number(section?.questionsToAttempt);
+      const marksPerQuestion = Number(section?.marksPerQuestion);
+      const negativeMarks = Number(section?.negativeMarks || 0);
+      if (!Number.isFinite(totalQuestions) || totalQuestions <= 0) errors.push(`${prefix}: total questions must be a valid positive number.`);
+      if (!Number.isFinite(questionsToAttempt) || questionsToAttempt <= 0) errors.push(`${prefix}: questions to attempt must be greater than 0.`);
+      if (questionsToAttempt > totalQuestions) errors.push(`${prefix}: questions to attempt cannot exceed total questions.`);
+      if (!Number.isFinite(marksPerQuestion) || marksPerQuestion <= 0) errors.push(`${prefix}: marks per question must be greater than 0.`);
+      if (!Number.isFinite(negativeMarks) || negativeMarks < 0) errors.push(`${prefix}: negative marking cannot be negative.`);
+      calculatedMarks += questionsToAttempt * marksPerQuestion;
+    });
+    if (Number(blueprint?.totalMarks) !== calculatedMarks) {
+      errors.push(`Total marks must equal the sum of section question counts multiplied by marks per question (${calculatedMarks}).`);
+    }
+    return errors;
+  };
+
+  const blueprintSummary = (exam: any, config: any): any => {
+    const { versions, activeVersionId } = parseBlueprintVersions(config?.blueprint_json);
+    const active = versions.find(version => version.id === activeVersionId && version.status === 'ACTIVE')
+      || versions.find(version => version.status === 'ACTIVE')
+      || versions[versions.length - 1]
+      || null;
+    return active ? { ...active, examId: exam.id, examName: active.examName || exam.name } : null;
+  };
+
+  app.get('/api/blueprints', authenticateToken, requireRole(['EXAM_MANAGER', 'ORG_OWNER']), async (req: Request, res: Response) => {
+    try {
+      const db = await getDb();
+      const exams = executeQuery(db, 'SELECT * FROM examinations WHERE org_id = ? ORDER BY created_at DESC', [req.user!.org_id]);
+      const blueprints = exams.map(exam => blueprintSummary(exam, executeQuery(db, 'SELECT blueprint_json FROM examination_configurations WHERE exam_id = ?', [exam.id])[0])).filter(Boolean);
+      return res.json({ blueprints });
+    } catch (e: any) {
+      return res.status(500).json({ error: e.message });
+    }
+  });
+
+  app.get('/api/examinations/:id/blueprint', authenticateToken, requireRole(['EXAM_MANAGER', 'ORG_OWNER']), async (req: Request, res: Response) => {
+    try {
+      const db = await getDb();
+      const exam = executeQuery(db, 'SELECT * FROM examinations WHERE id = ? AND org_id = ?', [req.params.id, req.user!.org_id])[0];
+      if (!exam) return res.status(404).json({ error: 'Examination not found.' });
+      const config = executeQuery(db, 'SELECT blueprint_json FROM examination_configurations WHERE exam_id = ?', [exam.id])[0];
+      const parsed = parseBlueprintVersions(config?.blueprint_json);
+      return res.json({ blueprint: blueprintSummary(exam, config), versions: parsed.versions.map(version => ({ ...version, examId: exam.id, examName: version.examName || exam.name })) });
+    } catch (e: any) {
+      return res.status(500).json({ error: e.message });
+    }
+  });
+
+  app.put('/api/examinations/:id/blueprint', authenticateToken, requireRole(['EXAM_MANAGER', 'ORG_OWNER']), async (req: Request, res: Response) => {
+    try {
+      const db = await getDb();
+      const exam = executeQuery(db, 'SELECT * FROM examinations WHERE id = ? AND org_id = ?', [req.params.id, req.user!.org_id])[0];
+      if (!exam) return res.status(404).json({ error: 'Examination not found.' });
+
+      const incoming = req.body?.blueprint || {};
+      const now = new Date().toISOString();
+      const saveAsDraft = Boolean(req.body?.saveAsDraft);
+      const normalized: any = {
+        id: incoming.id || `BP-${uuidv4().substring(0, 8).toUpperCase()}`,
+        examId: exam.id,
+        examName: String(incoming.examName || exam.name).trim(),
+        examType: incoming.examType || exam.exam_type,
+        conductingBody: String(incoming.conductingBody || exam.category).trim(),
+        examYear: Number(incoming.examYear || String(exam.exam_date || now).slice(0, 4)),
+        paperName: String(incoming.paperName || exam.name).trim(),
+        paperNumber: Number(incoming.paperNumber || 1),
+        durationMinutes: Number(incoming.durationMinutes ?? exam.duration_minutes ?? 0),
+        status: saveAsDraft ? 'DRAFT' : 'ACTIVE',
+        version: String(incoming.version || 'v1.0').trim(),
+        sections: Array.isArray(incoming.sections) ? incoming.sections.map((section: any, index: number) => ({
+          id: section.id || `SECTION-${uuidv4().substring(0, 6).toUpperCase()}`,
+          name: String(section.name || '').trim(),
+          subject: String(section.subject || '').trim(),
+          questionType: section.questionType || incoming.examType || exam.exam_type,
+          totalQuestions: Number(section.totalQuestions || 0),
+          questionsToAttempt: Number(section.questionsToAttempt || 0),
+          marksPerQuestion: Number(section.marksPerQuestion || 0),
+          negativeMarks: Number(section.negativeMarks || 0),
+          difficulty: section.difficulty || 'ANY',
+          order: index,
+        })) : [],
+        createdAt: incoming.createdAt || now,
+        updatedAt: now,
+      };
+      normalized.totalMarks = normalized.sections.reduce(
+        (sum: number, section: any) => sum + (Number(section.questionsToAttempt || section.totalQuestions || 0) * Number(section.marksPerQuestion || section.marksPerSubQuestion || 0)),
+        0
+      );
+      const validationErrors = validateManualBlueprint(normalized);
+      if (!saveAsDraft && validationErrors.length > 0) return res.status(422).json({ error: 'Blueprint validation failed.', validationErrors });
+
+      const config = executeQuery(db, 'SELECT * FROM examination_configurations WHERE exam_id = ?', [exam.id])[0];
+      const parsed = parseBlueprintVersions(config?.blueprint_json);
+      const existingIndex = parsed.versions.findIndex(version => version.id === normalized.id);
+      if (existingIndex >= 0) parsed.versions[existingIndex] = normalized;
+      else parsed.versions.push(normalized);
+      if (normalized.status === 'ACTIVE') {
+        parsed.versions = parsed.versions.map(version => version.id === normalized.id ? version : { ...version, status: 'INACTIVE' });
+        parsed.activeVersionId = normalized.id;
+      }
+      const blueprintJson = JSON.stringify(parsed);
+      if (config) {
+        executeRun(db, 'UPDATE examination_configurations SET blueprint_json = ?, pattern_confirmed = ?, updated_at = ? WHERE exam_id = ?', [blueprintJson, normalized.status === 'ACTIVE' ? 1 : 0, now, exam.id]);
+      } else {
+        executeRun(db, 'INSERT INTO examination_configurations (id, exam_id, blueprint_json, pattern_confirmed, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)', [uuidv4(), exam.id, blueprintJson, normalized.status === 'ACTIVE' ? 1 : 0, now, now]);
+      }
+      if (normalized.status === 'ACTIVE') {
+        executeRun(db, 'UPDATE examinations SET total_marks = ?, total_questions = ?, duration_minutes = ?, updated_at = ? WHERE id = ?', [normalized.totalMarks, normalized.sections.reduce((sum: number, section: any) => sum + section.totalQuestions, 0), normalized.durationMinutes, now, exam.id]);
+      }
+      await logAuditEvent({ event_type: 'EXAMINATION_BLUEPRINT_SAVED', user_id: req.user!.id, org_id: req.user!.org_id, exam_id: exam.id, details: { blueprintId: normalized.id, status: normalized.status, version: normalized.version } });
+      return res.json({ message: saveAsDraft ? 'Blueprint draft saved.' : 'Blueprint activated successfully.', blueprint: normalized });
+    } catch (e: any) {
+      console.error('Save blueprint error:', e);
+      return res.status(500).json({ error: e.message });
+    }
+  });
+
+  app.delete('/api/examinations/:id/blueprint', authenticateToken, requireRole(['EXAM_MANAGER', 'ORG_OWNER']), async (req: Request, res: Response) => {
+    try {
+      const db = await getDb();
+      const exam = executeQuery(db, 'SELECT * FROM examinations WHERE id = ? AND org_id = ?', [req.params.id, req.user!.org_id])[0];
+      if (!exam) return res.status(404).json({ error: 'Examination not found.' });
+      const config = executeQuery(db, 'SELECT * FROM examination_configurations WHERE exam_id = ?', [exam.id])[0];
+      const parsed = parseBlueprintVersions(config?.blueprint_json);
+      const targetId = req.body?.versionId || parsed.activeVersionId;
+      parsed.versions = parsed.versions.map(version => version.id === targetId ? { ...version, status: 'INACTIVE', updatedAt: new Date().toISOString() } : version);
+      if (parsed.activeVersionId === targetId) parsed.activeVersionId = null;
+      executeRun(db, 'UPDATE examination_configurations SET blueprint_json = ?, pattern_confirmed = 0, updated_at = ? WHERE exam_id = ?', [JSON.stringify(parsed), new Date().toISOString(), exam.id]);
+      return res.json({ message: 'Blueprint deactivated.' });
+    } catch (e: any) {
+      return res.status(500).json({ error: e.message });
+    }
+  });
+
   // List Examinations
   app.get('/api/examinations', authenticateToken, async (req: Request, res: Response) => {
     try {
@@ -5601,28 +5775,49 @@ async function startServer() {
     // 0. Auto-ensure sufficient questions exist in the pool so paper generation never fails
     seedQuestionsIfPoolLow(db, exam, orgId);
 
-    const isUniversityExam =
+    const configuration = executeQuery(db, 'SELECT blueprint_json FROM examination_configurations WHERE exam_id = ?', [exam.id])[0];
+    const blueprintVersions = parseBlueprintVersions(configuration?.blueprint_json);
+    const manualBlueprint = blueprintVersions.versions.find(version => version.id === blueprintVersions.activeVersionId && version.status === 'ACTIVE')
+      || blueprintVersions.versions.find(version => version.status === 'ACTIVE');
+    const hasManualBlueprint = Boolean(manualBlueprint);
+
+    const isUniversityExam = !hasManualBlueprint && (
       body.exam_mode === 'UNIVERSITY_3_PAPERS' ||
       exam.category === 'University Exam' ||
       exam.category === 'Autonomous University' ||
       exam.category === 'State Examination Authority' ||
       (exam.name && exam.name.toLowerCase().includes('university')) ||
-      (exam.exam_type === 'THEORY' && body.num_sets !== 1);
+      (exam.exam_type === 'THEORY' && body.num_sets !== 1)
+    );
 
-    const isNeetOrMultiSubjectMCQ =
+    const isNeetOrMultiSubjectMCQ = !hasManualBlueprint && (
       body.exam_mode === 'MULTI_SUBJECT_MCQ' ||
       exam.category === 'NEET' ||
       exam.category === 'JEE' ||
       exam.category === 'Competitive Exam' ||
       exam.category === 'TCET / CET-type Exam' ||
       (exam.name && (exam.name.toUpperCase().includes('NEET') || exam.name.toUpperCase().includes('JEE'))) ||
-      (exam.exam_type === 'MCQ' && (body.subject_pool || exam.subject.includes('PCB') || exam.subject.includes('PCM') || exam.subject.includes('All') || exam.subject.includes('&')));
+      (exam.exam_type === 'MCQ' && (body.subject_pool || exam.subject.includes('PCB') || exam.subject.includes('PCM') || exam.subject.includes('All') || exam.subject.includes('&')))
+    );
 
     // 1. Determine Question Pool Strategy
     let eligibleQuestions: any[] = [];
     let subjectBreakdown: Array<{ subject: string; count: number; totalMarks: number }> = [];
 
-    if (isNeetOrMultiSubjectMCQ) {
+    if (hasManualBlueprint) {
+      eligibleQuestions = executeQuery(
+        db,
+        `SELECT * FROM questions WHERE org_id = ? AND status = 'ELIGIBLE_FOR_PAPER' ORDER BY subject ASC, difficulty ASC`,
+        [orgId]
+      );
+      const subjectMap: Record<string, { count: number; totalMarks: number }> = {};
+      eligibleQuestions.forEach(q => {
+        if (!subjectMap[q.subject]) subjectMap[q.subject] = { count: 0, totalMarks: 0 };
+        subjectMap[q.subject].count += 1;
+        subjectMap[q.subject].totalMarks += (q.marks || 0);
+      });
+      subjectBreakdown = Object.entries(subjectMap).map(([subject, stats]) => ({ subject, count: stats.count, totalMarks: stats.totalMarks }));
+    } else if (isNeetOrMultiSubjectMCQ) {
       let targetSubjects: string[] = [];
       if (Array.isArray(body.subject_pool) && body.subject_pool.length > 0) {
         targetSubjects = body.subject_pool;
@@ -5711,7 +5906,9 @@ async function startServer() {
     }
 
     const validationErrors: string[] = [];
-    const requiredMinQuestions = 1; // Resilient baseline
+    const requiredMinQuestions = hasManualBlueprint
+      ? (manualBlueprint.sections || []).reduce((sum: number, section: any) => sum + Number(section.totalQuestions || 0), 0)
+      : isUniversityExam ? Math.min(exam.total_questions || 4, 3) : Math.min(exam.total_questions || 5, 4);
 
     if (eligibleQuestions.length < requiredMinQuestions) {
       validationErrors.push(
@@ -5720,7 +5917,7 @@ async function startServer() {
     }
 
     const now = new Date().toISOString();
-    const numSetsToGenerate = isUniversityExam ? 3 : 1;
+    const numSetsToGenerate = hasManualBlueprint ? 1 : isUniversityExam ? 3 : 1;
     const generatedSets: any[] = [];
 
     for (let setIdx = 1; setIdx <= numSetsToGenerate; setIdx++) {
@@ -5729,7 +5926,45 @@ async function startServer() {
       const versionCode = `EXAM-${categorySlug}-${setLabel}-${String(Math.floor(100 + Math.random() * 900))}`;
 
       let setQuestions: any[] = [];
-      if (isUniversityExam) {
+      if (hasManualBlueprint) {
+        const usedQuestionIds = new Set<string>();
+        const blueprintSections: any[] = [];
+        (manualBlueprint.sections || []).forEach((section: any) => {
+          const matches = eligibleQuestions.filter(q => {
+            if (usedQuestionIds.has(q.id)) return false;
+            if (section.subject && q.subject !== section.subject) return false;
+            if (section.questionType && section.questionType !== 'MIXED' && q.question_type !== section.questionType) return false;
+            if (section.difficulty && section.difficulty !== 'ANY' && q.difficulty !== section.difficulty) return false;
+            return true;
+          });
+          const selected = matches.slice(0, Number(section.totalQuestions || 0));
+          if (selected.length < Number(section.totalQuestions || 0)) {
+            validationErrors.push(`Section "${section.name}" requires ${section.totalQuestions} eligible questions, but only ${selected.length} match its subject, type, and difficulty rules.`);
+          }
+          selected.forEach(q => {
+            usedQuestionIds.add(q.id);
+            setQuestions.push({
+              ...q,
+              marks: Number(section.marksPerQuestion || 0),
+              negative_marks: Number(section.negativeMarks || 0),
+              blueprintSectionId: section.id,
+              blueprintSectionName: section.name,
+              blueprintQuestionsToAttempt: Number(section.questionsToAttempt || 0),
+            });
+          });
+          blueprintSections.push({
+            id: section.id,
+            name: section.name,
+            subject: section.subject,
+            questionType: section.questionType,
+            totalQuestions: Number(section.totalQuestions || 0),
+            questionsToAttempt: Number(section.questionsToAttempt || 0),
+            marksPerQuestion: Number(section.marksPerQuestion || 0),
+            negativeMarks: Number(section.negativeMarks || 0),
+          });
+        });
+        setQuestions = setQuestions.map((question, index) => ({ ...question, blueprintOrder: index + 1 }));
+      } else if (isUniversityExam) {
         const shuffledPool = [...eligibleQuestions].sort((a, b) => {
           const hashA = (a.id + setIdx).split('').reduce((acc, c) => acc + c.charCodeAt(0), 0);
           const hashB = (b.id + setIdx).split('').reduce((acc, c) => acc + c.charCodeAt(0), 0);
@@ -5754,7 +5989,9 @@ async function startServer() {
         setQuestions = eligibleQuestions.slice(0, exam.total_questions || 10);
       }
 
-      const totalPaperMarks = setQuestions.reduce((acc, q) => acc + (q.marks || 4), 0);
+      const totalPaperMarks = hasManualBlueprint
+        ? Number(manualBlueprint.totalMarks || 0)
+        : setQuestions.reduce((acc, q) => acc + (q.marks || 4), 0);
 
       const paperPayloadObject = {
         examinationId: exam.id,
@@ -5763,14 +6000,22 @@ async function startServer() {
         category: exam.category,
         examType: exam.exam_type,
         versionCode,
-        setLabel: isUniversityExam ? `Master Paper Set ${setIdx}` : 'Master Set A',
+        setLabel: hasManualBlueprint ? `${manualBlueprint.paperName} v${manualBlueprint.version}` : isUniversityExam ? `Master Paper Set ${setIdx}` : 'Master Set A',
         isUniversity3PaperFormat: isUniversityExam,
         isMultiSubjectMCQFormat: isNeetOrMultiSubjectMCQ,
+        blueprint: hasManualBlueprint ? {
+          id: manualBlueprint.id,
+          version: manualBlueprint.version,
+          paperName: manualBlueprint.paperName,
+          sections: manualBlueprint.sections,
+        } : null,
         subjectBreakdown,
         generatedAt: now,
         durationMinutes: exam.duration_minutes,
         totalMarks: totalPaperMarks,
-        instructions: isUniversityExam
+        instructions: hasManualBlueprint
+          ? [`Paper generated from active blueprint ${manualBlueprint.version}.`, 'Follow the configured section order, question counts, attempt rules, marks, and negative marking.']
+          : isUniversityExam
           ? [
               `University Examination Master Paper Set ${setIdx} (Sealed Enclave).`,
               'Section A: All short-answer compulsory questions (2 marks each).',
@@ -5785,8 +6030,11 @@ async function startServer() {
               'Options and question sequence are cryptographically randomized for OMR evaluation.',
             ],
         questions: setQuestions.map((q, idx) => ({
-          orderIndex: idx + 1,
+          orderIndex: q.blueprintOrder || idx + 1,
           questionId: q.id,
+          sectionId: q.blueprintSectionId,
+          sectionName: q.blueprintSectionName,
+          questionsToAttempt: q.blueprintQuestionsToAttempt,
           subject: q.subject,
           topic: q.topic,
           difficulty: q.difficulty,

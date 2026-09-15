@@ -85,11 +85,16 @@ export function App() {
   const syncTabFromLocation = () => {
     const hash = window.location.hash.replace(/^#\/?/, '').replace(/^#/, '');
     const matchedTab = (Object.entries(tabToHashMap) as [NavSubTab, string][]).find(([, value]) => value === hash)?.[0];
-    if (matchedTab) {
-      setActiveSubTab(matchedTab);
+    const requestedTab = matchedTab === 'proctor_dashboard' && (currentUser?.role === 'ORG_OWNER' || currentUser?.role === 'EXAM_MANAGER')
+      ? 'dashboard'
+      : matchedTab === 'dashboard' && currentUser?.role === 'SME'
+      ? 'assigned_questions'
+      : matchedTab;
+    if (requestedTab) {
+      setActiveSubTab(requestedTab);
       return;
     }
-    setActiveSubTab('dashboard');
+    setActiveSubTab(currentUser?.role === 'SME' ? 'assigned_questions' : 'dashboard');
   };
 
   useEffect(() => {
@@ -100,7 +105,7 @@ export function App() {
     syncTabFromLocation();
     window.addEventListener('popstate', syncTabFromLocation);
     return () => window.removeEventListener('popstate', syncTabFromLocation);
-  }, []);
+  }, [currentUser]);
 
   useEffect(() => {
     if (!currentUser) return;
@@ -133,8 +138,9 @@ export function App() {
   const handleLoginSuccess = (user: User, token: string) => {
     setStoredAuth(token, user);
     setCurrentUser(user);
-    setActiveSubTab('dashboard');
-    window.history.pushState({}, '', `${window.location.pathname}${window.location.search}#dashboard`);
+    const initialTab: NavSubTab = user.role === 'SME' ? 'assigned_questions' : 'dashboard';
+    setActiveSubTab(initialTab);
+    window.history.pushState({}, '', `${window.location.pathname}${window.location.search}#${tabToHashMap[initialTab]}`);
     setRefreshTrigger(prev => prev + 1);
   };
 

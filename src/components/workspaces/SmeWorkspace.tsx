@@ -177,8 +177,8 @@ export const SmeWorkspace: React.FC<SmeWorkspaceProps> = ({
         </div>
       )}
 
-      {/* SME UNIFIED DASHBOARD & REVIEW WORKSPACE */}
-      {(activeSubTab === 'dashboard' || activeSubTab === 'assigned_questions' || activeSubTab === 'question_verification') && (
+      {/* SME QUESTION REVIEW WORKSPACE */}
+      {(activeSubTab === 'assigned_questions' || activeSubTab === 'question_verification') && (
         <AuthorityProctorEnclave
           currentUser={currentUser}
           workspaceType="SME_QUESTION_VETTING"

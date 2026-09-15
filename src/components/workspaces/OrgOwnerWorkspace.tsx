@@ -25,7 +25,6 @@ import {
 import { User, Organization, OrganizationDocument, TrustedDevice, SecurityEvent } from '../../types';
 import { api, getDeviceFingerprint, performFullLogin } from '../../api';
 import { NavSubTab } from '../Sidebar';
-import { AuthoritySurveillanceDashboard } from '../proctor/AuthoritySurveillanceDashboard';
 
 interface OrgOwnerWorkspaceProps {
   currentUser: User | null;
@@ -1491,10 +1490,6 @@ export const OrgOwnerWorkspace: React.FC<OrgOwnerWorkspaceProps> = ({
         </div>
       )}
 
-      {/* AUTHORITY SURVEILLANCE */}
-      {activeSubTab === 'proctor_dashboard' && (
-        <AuthoritySurveillanceDashboard currentUser={currentUser} />
-      )}
     </div>
   );
 };

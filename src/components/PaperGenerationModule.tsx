@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { api } from '../api';
-import { Examination, User, Question, ExamType, PaperVersion, UniversityPaperSet, MultiSubjectBreakdown } from '../types';
+import { Examination, User, Question, ExamBlueprint, ExamType, PaperVersion, UniversityPaperSet, MultiSubjectBreakdown } from '../types';
 import {
   Cpu,
   ShieldCheck,
@@ -35,6 +35,7 @@ export const PaperGenerationModule: React.FC<PaperGenProps> = ({ currentUser, on
   const [questions, setQuestions] = useState<Question[]>([]);
   const [selectedExamId, setSelectedExamId] = useState<string>('');
   const [paperVersions, setPaperVersions] = useState<PaperVersion[]>([]);
+  const [activeBlueprint, setActiveBlueprint] = useState<ExamBlueprint | null>(null);
   const [loading, setLoading] = useState(true);
   const [generating, setGenerating] = useState(false);
   const [settingActive, setSettingActive] = useState<string | null>(null);
@@ -71,6 +72,7 @@ export const PaperGenerationModule: React.FC<PaperGenProps> = ({ currentUser, on
   useEffect(() => {
     if (selectedExamId) {
       loadPaperVersions(selectedExamId);
+      api.getBlueprint(selectedExamId).then(response => setActiveBlueprint(response.blueprint)).catch(() => setActiveBlueprint(null));
       // Auto-detect mode based on selected exam
       const ex = exams.find(e => e.id === selectedExamId);
       if (ex) {
@@ -328,6 +330,20 @@ export const PaperGenerationModule: React.FC<PaperGenProps> = ({ currentUser, on
 
           return (
             <div className="space-y-4">
+              {activeBlueprint && (
+                <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-4 text-xs text-emerald-950">
+                  <div className="flex items-center justify-between gap-3">
+                    <div>
+                      <div className="font-bold">Active Blueprint: {activeBlueprint.paperName} ({activeBlueprint.version})</div>
+                      <div className="mt-1 text-emerald-800">Generation will follow its {activeBlueprint.sections.length} configured section{activeBlueprint.sections.length === 1 ? '' : 's'} exactly.</div>
+                    </div>
+                    <span className="rounded-full bg-emerald-700 px-2 py-1 text-[10px] font-bold text-white">SOURCE OF TRUTH</span>
+                  </div>
+                  <div className="mt-3 flex flex-wrap gap-2 text-[11px]">
+                    {activeBlueprint.sections.map(section => <span key={section.id} className="rounded bg-white px-2 py-1 border border-emerald-200">{section.name}: {section.totalQuestions} Q / attempt {section.questionsToAttempt}</span>)}
+                  </div>
+                </div>
+              )}
               <div className="grid grid-cols-2 sm:grid-cols-5 gap-3 text-xs">
                 <div className="bg-slate-50 dark:bg-slate-950 p-3 rounded-xl border border-slate-200 dark:border-slate-800">
                   <div className="text-slate-400 text-[10px] uppercase font-semibold">Exam Type Engine</div>

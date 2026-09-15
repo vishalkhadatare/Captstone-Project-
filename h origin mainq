@@ -1,0 +1,12 @@
+ index.html                                         |   2 [31m-[m
+ server.ts                                          | 272 [32m+++++++[m[31m-[m
+ src/App.tsx                                        |  18 [32m+[m[31m-[m
+ src/api.ts                                         |  13 [32m+[m
+ src/components/PaperGenerationModule.tsx           |  18 [32m+[m[31m-[m
+ src/components/Sidebar.tsx                         |  12 [32m+[m[31m-[m
+ src/components/workspaces/ExamManagerWorkspace.tsx | 743 [32m+++++[m[31m----------------[m
+ src/components/workspaces/OrgOwnerWorkspace.tsx    |   5 [31m-[m
+ src/components/workspaces/SmeWorkspace.tsx         |   4 [32m+[m[31m-[m
+ src/index.css                                      | 103 [32m+++[m
+ src/types.ts                                       |  37 [32m+[m
+ 11 files changed, 627 insertions(+), 600 deletions(-)
