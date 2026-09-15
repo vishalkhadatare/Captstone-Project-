@@ -181,7 +181,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({ onClose, onAuthSuccess }) 
                 >
                   <option value="ORG_OWNER">1. Organization Owner</option>
                   <option value="EXAM_MANAGER">2. Examination Manager</option>
-                  <option value="SME">3. Subject Matter Expert</option>
+                  <option value="TRANSLATOR">3. Linguistic Translator</option>
                   <option value="CENTRE_OPERATOR">4. Centre Operator</option>
                   <option value="AUDITOR">5. Security Auditor</option>
                 </select>

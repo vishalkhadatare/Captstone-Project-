@@ -54,7 +54,7 @@ export interface QuestionSimilarityResult {
   duplicateQuestionId?: string;
   matchedContent?: string;
   reason: string;
-  recommendedAction: 'ACCEPT' | 'FLAG_FOR_SME_REVIEW' | 'REJECT_DUPLICATE';
+  recommendedAction: 'ACCEPT' | 'FLAG_FOR_REVIEW' | 'REJECT_DUPLICATE';
 }
 
 /**
@@ -262,7 +262,7 @@ Analyze similarity and return ONLY a JSON response:
       duplicateQuestionId: matchedId,
       matchedContent,
       reason: `Moderate topic overlap (${Math.round(score * 100)}%). Verification recommended.`,
-      recommendedAction: 'FLAG_FOR_SME_REVIEW',
+      recommendedAction: 'FLAG_FOR_REVIEW',
     };
   }
 

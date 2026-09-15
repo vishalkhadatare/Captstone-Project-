@@ -23,7 +23,7 @@ import {
 interface PublicLandingProps {
   onOpenLogin: () => void;
   onOpenRegister: () => void;
-  onOpenPersonnelRegister?: (role?: 'SME' | 'TRANSLATOR' | 'CENTRE_OPERATOR') => void;
+  onOpenPersonnelRegister?: (role?: 'TRANSLATOR' | 'CENTRE_OPERATOR') => void;
 }
 
 export const PublicLanding: React.FC<PublicLandingProps> = ({

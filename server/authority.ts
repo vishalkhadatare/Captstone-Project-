@@ -10,7 +10,6 @@
  *
  *   ORG_OWNER
  *     ├─> EXAM_MANAGER
- *     │     ├─> SME
  *     │     ├─> TRANSLATOR
  *     │     └─> CENTRE_OPERATOR
  *     └─> AUDITOR
@@ -22,7 +21,6 @@
 export type AuthorityRole =
   | 'ORG_OWNER'
   | 'EXAM_MANAGER'
-  | 'SME'
   | 'TRANSLATOR'
   | 'CENTRE_OPERATOR'
   | 'AUDITOR';
@@ -31,7 +29,6 @@ export const ALL_ROLES: AuthorityRole[] = [
   'ORG_OWNER',
   'EXAM_MANAGER',
   'AUDITOR',
-  'SME',
   'TRANSLATOR',
   'CENTRE_OPERATOR',
 ];
@@ -40,13 +37,12 @@ export const ALL_ROLES: AuthorityRole[] = [
  * Relative authority rank. Higher = more authority. Used only to distinguish a
  * privilege-escalation attempt (granting an equal-or-higher role) from a plain
  * hierarchy violation (granting a lower role you are simply not allowed to grant
- * directly, e.g. ORG_OWNER trying to skip EXAM_MANAGER to create an SME).
+ * directly, e.g. ORG_OWNER trying to skip EXAM_MANAGER to create an operator).
  */
 export const ROLE_RANK: Record<AuthorityRole, number> = {
   ORG_OWNER: 100,
   EXAM_MANAGER: 70,
   AUDITOR: 70,
-  SME: 40,
   TRANSLATOR: 40,
   CENTRE_OPERATOR: 40,
 };
@@ -57,10 +53,9 @@ export const ROLE_RANK: Record<AuthorityRole, number> = {
  * can never escalate themselves or others.
  */
 export const ROLE_DELEGATIONS: Record<AuthorityRole, AuthorityRole[]> = {
-  ORG_OWNER: ['EXAM_MANAGER', 'AUDITOR', 'SME', 'TRANSLATOR', 'CENTRE_OPERATOR'],
-  EXAM_MANAGER: ['SME', 'TRANSLATOR', 'CENTRE_OPERATOR'],
+  ORG_OWNER: ['EXAM_MANAGER', 'AUDITOR', 'TRANSLATOR', 'CENTRE_OPERATOR'],
+  EXAM_MANAGER: ['TRANSLATOR', 'CENTRE_OPERATOR'],
   AUDITOR: [],
-  SME: [],
   TRANSLATOR: [],
   CENTRE_OPERATOR: [],
 };
@@ -91,6 +86,8 @@ export const ROLE_PERMISSIONS: Record<AuthorityRole, string[]> = {
     'paper:manage',
     'questions:manage',
     'questions:assign',
+    'questions:author',
+    'questions:verify',
     'centre:manage',
     'authority:delegate',
     'authority:revoke',
@@ -98,7 +95,6 @@ export const ROLE_PERMISSIONS: Record<AuthorityRole, string[]> = {
     'authority:view',
     'members:view',
   ],
-  SME: ['questions:author', 'questions:verify', 'assignments:view'],
   TRANSLATOR: ['translations:manage', 'translations:submit', 'assignments:view'],
   CENTRE_OPERATOR: ['delivery:view', 'delivery:print', 'centre:operate'],
   AUDITOR: ['audit:view', 'security:view', 'devices:view', 'authority:view', 'members:view'],
@@ -291,7 +287,6 @@ export function describeAuthorityModel() {
       ORG_OWNER: { delegates: ROLE_DELEGATIONS.ORG_OWNER },
       EXAM_MANAGER: { delegates: ROLE_DELEGATIONS.EXAM_MANAGER },
       AUDITOR: { delegates: ROLE_DELEGATIONS.AUDITOR },
-      SME: { delegates: ROLE_DELEGATIONS.SME },
       TRANSLATOR: { delegates: ROLE_DELEGATIONS.TRANSLATOR },
       CENTRE_OPERATOR: { delegates: ROLE_DELEGATIONS.CENTRE_OPERATOR },
     },

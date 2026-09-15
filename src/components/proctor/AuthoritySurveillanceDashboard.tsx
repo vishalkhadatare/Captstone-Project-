@@ -308,9 +308,8 @@ export const AuthoritySurveillanceDashboard: React.FC<AuthoritySurveillanceDashb
               className="px-2.5 py-1 rounded-lg border border-slate-300 text-xs bg-white text-slate-700 focus:outline-none focus:ring-1 focus:ring-emerald-500"
             >
               <option value="ALL">All Roles</option>
-              <option value="SME">Subject Matter Expert (SME)</option>
-              <option value="TRANSLATOR">Translator</option>
               <option value="EXAM_MANAGER">Exam Manager</option>
+              <option value="TRANSLATOR">Linguistic Translator</option>
               <option value="CENTRE_OPERATOR">Centre Operator</option>
             </select>
           </div>

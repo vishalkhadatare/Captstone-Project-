@@ -1,4 +1,4 @@
-export type UserRole = 'ORG_OWNER' | 'EXAM_MANAGER' | 'SME' | 'TRANSLATOR' | 'CENTRE_OPERATOR' | 'AUDITOR';
+export type UserRole = 'ORG_OWNER' | 'EXAM_MANAGER' | 'TRANSLATOR' | 'CENTRE_OPERATOR' | 'AUDITOR';
 
 export interface User {
   id: string;
@@ -347,7 +347,8 @@ export interface QuestionAssignment {
   id: string;
   org_id: string;
   question_id: string;
-  assigned_sme_user_id: string;
+  assigned_sme_user_id?: string;
+  assigned_user_id?: string;
   assigned_by_user_id?: string;
   assignment_type: 'SME_REVIEW' | 'LINGUISTIC_TRANSLATION';
   target_language?: string;

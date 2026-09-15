@@ -1118,14 +1118,14 @@ function initializeSchema(db: Database) {
     }
 
     // Seed initial demo Authority Proctor Enclave sessions for live surveillance monitoring
-    const existingAuthSessions = executeQuery(db, 'SELECT id FROM authority_proctor_sessions WHERE id = "AUTH-SESS-SME-01"', []);
+    const existingAuthSessions = executeQuery(db, 'SELECT id FROM authority_proctor_sessions WHERE id IN ("AUTH-SESS-MGR-01", "AUTH-SESS-SME-01")', []);
     if (existingAuthSessions.length === 0) {
       const nowIso = new Date().toISOString();
       const tenMinsAgo = new Date(Date.now() - 10 * 60 * 1000).toISOString();
       const fiveMinsAgo = new Date(Date.now() - 5 * 60 * 1000).toISOString();
       const twoMinsAgo = new Date(Date.now() - 2 * 60 * 1000).toISOString();
 
-      // 1. SME Question Vetting Enclave
+      // 1. Examination Manager Paper Review Enclave
       db.run(`
         INSERT INTO authority_proctor_sessions (
           id, user_id, user_name, user_email, user_role, org_id, workspace_type,
@@ -1133,8 +1133,8 @@ function initializeSchema(db: Database) {
           face_status, faces_detected_count, audio_level_db, leak_risk_score,
           leak_risk_level, last_heartbeat_at, created_at, updated_at
         ) VALUES (
-          'AUTH-SESS-SME-01', 'usr-sme-01', 'Dr. Anjali Rao', 'sme@nbte.edu.in', 'SME',
-          'ORG-ZEROLEAK-NATIONAL', 'SME_QUESTION_VETTING', 'EXAM-2026-CS-NATIONAL',
+          'AUTH-SESS-MGR-01', 'usr-manager-01', 'Prof. Rajesh Sharma', 'manager@nbte.edu.in', 'EXAM_MANAGER',
+          'ORG-ZEROLEAK-NATIONAL', 'EXAM_PAPER_COMPILATION', 'EXAM-2026-CS-NATIONAL',
           'ACTIVE', 'ACTIVE', 'ACTIVE', 'ACTIVE', 'VERIFIED', 1, -42.0, 0,
           'NORMAL', ?, ?, ?
         )
@@ -1144,7 +1144,7 @@ function initializeSchema(db: Database) {
         INSERT INTO proctor_events (
           id, session_id, user_id, user_role, exam_id, event_type, severity, risk_points, timestamp, metadata_json, created_at
         ) VALUES (
-          'AUTH-EV-01', 'AUTH-SESS-SME-01', 'usr-sme-01', 'SME', 'EXAM-2026-CS-NATIONAL',
+          'AUTH-EV-01', 'AUTH-SESS-MGR-01', 'usr-manager-01', 'EXAM_MANAGER', 'EXAM-2026-CS-NATIONAL',
           'ENCLAVE_STARTED', 'LOW', 0, ?, '{"action":"Camera & Mic initialized; verified single official"}', ?
         )
       `, [tenMinsAgo, tenMinsAgo]);
@@ -1239,6 +1239,11 @@ function initializeSchema(db: Database) {
   } catch (migErr) {
     console.error('Proctor migration notice:', migErr);
   }
+
+  // Decommission SME role: Mark all existing SME user records inactive & revoked
+  try {
+    db.run("UPDATE users SET status = 'INACTIVE', authorization_status = 'REVOKED' WHERE role = 'SME'");
+  } catch (e) {}
 }
 
 // Generic SQL helper functions for clean execution

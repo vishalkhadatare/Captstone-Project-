@@ -7,7 +7,6 @@ import { OrgRegistrationPage } from './components/OrgRegistrationPage';
 import { PersonnelRegistrationPage } from './components/PersonnelRegistrationPage';
 import { OrgOwnerWorkspace } from './components/workspaces/OrgOwnerWorkspace';
 import { ExamManagerWorkspace } from './components/workspaces/ExamManagerWorkspace';
-import { SmeWorkspace } from './components/workspaces/SmeWorkspace';
 import { TranslatorWorkspace } from './components/workspaces/TranslatorWorkspace';
 import { CentreOperatorWorkspace } from './components/workspaces/CentreOperatorWorkspace';
 import { AuditorWorkspace } from './components/workspaces/AuditorWorkspace';
@@ -23,7 +22,7 @@ type PublicView = 'landing' | 'login' | 'register' | 'personnel_register' | 'can
 export function App() {
   const [currentUser, setCurrentUser] = useState<User | null>(getStoredUser());
   const [publicView, setPublicView] = useState<PublicView>('landing');
-  const [personnelRole, setPersonnelRole] = useState<'SME' | 'TRANSLATOR' | 'CENTRE_OPERATOR' | undefined>(undefined);
+  const [personnelRole, setPersonnelRole] = useState<'TRANSLATOR' | 'CENTRE_OPERATOR' | undefined>(undefined);
   const [activeSubTab, setActiveSubTab] = useState<NavSubTab>('dashboard');
   const [refreshTrigger, setRefreshTrigger] = useState(0);
   const [sessionLoading, setSessionLoading] = useState(true);
@@ -336,13 +335,6 @@ export function App() {
                     setCandidateSimulatorExamId(examId);
                     setActiveCandidateSimulator(true);
                   }}
-                />
-              ) : currentUser.role === 'SME' ? (
-                <SmeWorkspace
-                  key={`sme-${refreshTrigger}`}
-                  currentUser={currentUser}
-                  activeSubTab={activeSubTab}
-                  onRefresh={handleRefreshData}
                 />
               ) : currentUser.role === 'TRANSLATOR' ? (
                 <TranslatorWorkspace

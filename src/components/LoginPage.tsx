@@ -33,7 +33,7 @@ interface LoginPageProps {
   onLoginSuccess: (user: User, token: string) => void;
   onRegisterRedirect?: () => void;
   onNavigateRegister?: () => void;
-  onOpenPersonnelRegister?: (role?: 'SME' | 'TRANSLATOR' | 'CENTRE_OPERATOR') => void;
+  onOpenPersonnelRegister?: (role?: 'TRANSLATOR' | 'CENTRE_OPERATOR') => void;
   onBackToLanding: () => void;
 }
 
@@ -68,16 +68,6 @@ const DEMO_ACCOUNTS: QuickAccount[] = [
     description: 'Exam scheduling (MCQ & Theory), AI blueprint analysis, AES-256 paper generation.',
     icon: <UserCheck className="w-4 h-4 text-emerald-700" />,
     accent: 'border-emerald-200 bg-emerald-50/50 hover:border-emerald-400',
-  },
-  {
-    role: 'SME',
-    title: 'Subject Matter Expert (SME)',
-    badge: 'Question Vetting',
-    email: 'sme@nbte.edu.in',
-    password: 'Password123!',
-    description: 'Syllabus compliance, correctness validation, answer key review & eligibility sign-off.',
-    icon: <FileCheck2 className="w-4 h-4 text-blue-700" />,
-    accent: 'border-blue-200 bg-blue-50/50 hover:border-blue-400',
   },
   {
     role: 'TRANSLATOR',
@@ -422,7 +412,7 @@ export const LoginPage: React.FC<LoginPageProps> = ({
                     <div className="flex items-center gap-2.5">
                       <FileCheck2 className="w-4 h-4 text-blue-700 shrink-0" />
                       <div>
-                        <span className="text-[11px] font-bold text-slate-800 block leading-tight">SME, Translator, or Centre Operator?</span>
+                        <span className="text-[11px] font-bold text-slate-800 block leading-tight">Translator or Centre Operator?</span>
                         <span className="text-[10px] text-slate-500">Dedicated personnel self-registration portal</span>
                       </div>
                     </div>
@@ -452,7 +442,7 @@ export const LoginPage: React.FC<LoginPageProps> = ({
             </div>
           </div>
 
-          {/* Right Column: All 6 Role Credentials & Quick-Login Cards */}
+          {/* Right Column: All 5 Role Credentials & Quick-Login Cards */}
           <div className="lg:col-span-7 space-y-4">
             <div className="bg-white/80 dark:bg-[#0B0F17]/65 backdrop-blur-2xl p-6 sm:p-8 border border-slate-200/90 dark:border-white/15 rounded-3xl shadow-[0_20px_50px_-10px_rgba(15,23,42,0.07)] dark:shadow-[0_25px_60px_rgba(0,0,0,0.8),0_0_30px_rgba(0,204,95,0.1)] relative overflow-hidden">
               {/* Top Accent Gradient Bar */}
@@ -469,7 +459,7 @@ export const LoginPage: React.FC<LoginPageProps> = ({
                   </p>
                 </div>
                 <span className="px-2.5 py-1 rounded-full text-[10px] font-bold bg-emerald-50 dark:bg-[#00cc5f]/15 text-emerald-800 dark:text-[#00cc5f] border border-emerald-200 dark:border-[#00cc5f]/30 uppercase tracking-wider backdrop-blur-md">
-                  6 Roles Active
+                  5 Roles Active
                 </span>
               </div>
 
@@ -484,7 +474,7 @@ export const LoginPage: React.FC<LoginPageProps> = ({
                         Join Institutional Personnel
                       </span>
                       <span className="text-[11px] text-blue-800 dark:text-blue-300">
-                        Register as SME, Linguistic Translator, or Centre Operator.
+                        Register as Linguistic Translator or Centre Operator.
                       </span>
                     </div>
                   </div>
@@ -559,7 +549,7 @@ export const LoginPage: React.FC<LoginPageProps> = ({
                             <Copy className="w-3.5 h-3.5" />
                           )}
                         </button>
-                        {(acc.role === 'SME' || acc.role === 'TRANSLATOR' || acc.role === 'CENTRE_OPERATOR') && onOpenPersonnelRegister && (
+                        {(acc.role === 'TRANSLATOR' || acc.role === 'CENTRE_OPERATOR') && onOpenPersonnelRegister && (
                           <button
                             type="button"
                             onClick={() => onOpenPersonnelRegister(acc.role as any)}
@@ -593,7 +583,7 @@ export const LoginPage: React.FC<LoginPageProps> = ({
                 <span>&rarr;</span>
                 <span className="px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-800 border border-emerald-200 font-medium">2. Exam Manager</span>
                 <span>&rarr;</span>
-                <span className="px-2 py-0.5 rounded-full bg-blue-50 text-blue-800 border border-blue-200 font-medium">3. SME & Translator</span>
+                <span className="px-2 py-0.5 rounded-full bg-blue-50 text-blue-800 border border-blue-200 font-medium">3. Linguistic Translator</span>
                 <span>&rarr;</span>
                 <span className="px-2 py-0.5 rounded-full bg-teal-50 text-teal-800 border border-teal-200 font-medium">4. Centre Operator</span>
                 <span>&rarr;</span>

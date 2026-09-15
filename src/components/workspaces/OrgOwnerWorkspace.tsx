@@ -55,13 +55,13 @@ export const OrgOwnerWorkspace: React.FC<OrgOwnerWorkspaceProps> = ({
   const [managerContact, setManagerContact] = useState('');
   const [managerDesignation, setManagerDesignation] = useState('');
   const [managerPassword, setManagerPassword] = useState('');
-  const [managerRole, setManagerRole] = useState<'EXAM_MANAGER' | 'AUDITOR' | 'SME' | 'TRANSLATOR' | 'CENTRE_OPERATOR'>('EXAM_MANAGER');
+  const [managerRole, setManagerRole] = useState<'EXAM_MANAGER' | 'AUDITOR' | 'TRANSLATOR' | 'CENTRE_OPERATOR'>('EXAM_MANAGER');
   const [showAddUserModal, setShowAddUserModal] = useState(false);
   const [issuedCredentials, setIssuedCredentials] = useState<{
     name: string;
     email: string;
     password: string;
-    role: 'EXAM_MANAGER' | 'AUDITOR' | 'SME' | 'TRANSLATOR' | 'CENTRE_OPERATOR';
+    role: 'EXAM_MANAGER' | 'AUDITOR' | 'TRANSLATOR' | 'CENTRE_OPERATOR';
     roleLabel: string;
   } | null>(null);
   const [copiedField, setCopiedField] = useState<string | null>(null);
@@ -158,8 +158,6 @@ export const OrgOwnerWorkspace: React.FC<OrgOwnerWorkspaceProps> = ({
           ? 'Examination Manager'
           : managerRole === 'AUDITOR'
           ? 'Auditor'
-          : managerRole === 'SME'
-          ? 'Subject Matter Expert (SME)'
           : managerRole === 'TRANSLATOR'
           ? 'Linguistic Translator'
           : 'Centre Superintendent & Operator',
@@ -817,7 +815,6 @@ export const OrgOwnerWorkspace: React.FC<OrgOwnerWorkspaceProps> = ({
                   const roleLabelMap: Record<string, string> = {
                     EXAM_MANAGER: 'Examination Manager',
                     AUDITOR: 'Auditor',
-                    SME: 'SME / Question Verifier',
                     TRANSLATOR: 'Linguistic Translator',
                     CENTRE_OPERATOR: 'Centre Operator',
                   };
@@ -977,7 +974,6 @@ export const OrgOwnerWorkspace: React.FC<OrgOwnerWorkspaceProps> = ({
                     >
                       <option value="EXAM_MANAGER">Examination Manager</option>
                       <option value="AUDITOR">Auditor</option>
-                      <option value="SME">Subject Matter Expert (SME)</option>
                       <option value="TRANSLATOR">Linguistic Translator</option>
                       <option value="CENTRE_OPERATOR">Centre Superintendent & Operator</option>
                     </select>
