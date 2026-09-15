@@ -5,6 +5,7 @@ import {
   VerificationHistoryItem,
   TrustedDevice,
   Examination,
+  ExamBlueprint,
   Question,
   QuestionAssignment,
   PaperExtractionResponse,
@@ -353,7 +354,22 @@ export const api = {
   // Examinations
   getExaminations: () => request<{ examinations: Examination[] }>('/api/examinations'),
   createExamination: (payload: any) => request<{ message: string; examId: string }>('/api/examinations', { method: 'POST', body: JSON.stringify(payload) }),
+  deleteExamination: (id: string) => request<{ success: boolean; message: string }>(`/api/examinations/${id}`, { method: 'DELETE' }),
+  purgeDemoExaminations: () => request<{ success: boolean; message: string }>('/api/examinations/purge-demo', { method: 'POST' }),
+  deleteAllExaminations: () => request<{ success: boolean; message: string }>('/api/examinations', { method: 'DELETE' }),
   getExaminationDetails: (id: string) => request<{ examination: Examination; configuration: any; centres: ExaminationCentre[]; versions: any[] }>(`/api/examinations/${id}`),
+  getBlueprints: () => request<{ blueprints: ExamBlueprint[] }>('/api/blueprints'),
+  getBlueprint: (examId: string) => request<{ blueprint: ExamBlueprint | null; versions: ExamBlueprint[] }>(`/api/examinations/${examId}/blueprint`),
+  saveBlueprint: (examId: string, blueprint: Partial<ExamBlueprint>, saveAsDraft = false) =>
+    request<{ message: string; blueprint: ExamBlueprint }>(`/api/examinations/${examId}/blueprint`, {
+      method: 'PUT',
+      body: JSON.stringify({ blueprint, saveAsDraft }),
+    }),
+  deactivateBlueprint: (examId: string, versionId?: string) =>
+    request<{ message: string }>(`/api/examinations/${examId}/blueprint`, {
+      method: 'DELETE',
+      body: JSON.stringify({ versionId }),
+    }),
   addCentre: (examId: string, payload: AddCentrePayload) => request<AddCentreResponse>(`/api/examinations/${examId}/centres`, { method: 'POST', body: JSON.stringify(payload) }),
   getCentresForExam: (examId: string) => request<{ centres: ExaminationCentre[]; managerAuthorized: number }>(`/api/examinations/${examId}/centres`),
   getAllCentres: () => request<{ centres: ExaminationCentre[] }>('/api/centres'),
@@ -363,6 +379,49 @@ export const api = {
   // Questions & OCR/PDF Extraction & Assignments
   getQuestions: () => request<{ questions: Question[] }>('/api/questions'),
   createQuestion: (payload: any) => request<{ message: string; questionId: string }>('/api/questions', { method: 'POST', body: JSON.stringify(payload) }),
+  runNaviDcOcr: (payload: { image_data?: string; image_path?: string; mode?: 'markdown' | 'mcq' | 'table'; prompt?: string }) =>
+    request<{
+      success: boolean;
+      markdown?: string;
+      questions?: Array<{
+        question_number: string;
+        content_text: string;
+        options: Array<{ id: string; text: string }> | null;
+        correct_answer: string;
+        has_latex: boolean;
+        has_table: boolean;
+        marks: number;
+      }>;
+      execution_time_ms?: number;
+      device?: string;
+      model?: string;
+      error?: string;
+    }>('/api/ocr/navidc', { method: 'POST', body: JSON.stringify(payload) }),
+  runOcrSpace: (payload: { image_data?: string; image_url?: string; engine?: '1' | '2' | '3'; isTable?: boolean; scale?: boolean; detectOrientation?: boolean; language?: string }) =>
+    request<{
+      success: boolean;
+      text: string;
+      engine: string;
+      parsedResults?: any[];
+      raw?: any;
+      error?: string;
+    }>('/api/ocr/ocrspace', { method: 'POST', body: JSON.stringify(payload) }),
+  extractPdfText: (payload: { file_data?: string; file_name?: string; raw_text?: string }) =>
+    request<{
+      success: boolean;
+      text: string;
+      pageCount: number;
+      fileName: string;
+      charCount: number;
+      wordCount: number;
+      info?: any;
+    }>('/api/pdf/extract-text', { method: 'POST', body: JSON.stringify(payload) }),
+  groqChat: (payload: { messages: Array<{ role: string; content: string }>; model?: string; temperature?: number; max_tokens?: number }) =>
+    request<{ success: boolean; message: { content: string }; text: string }>('/api/ai/groq-chat', { method: 'POST', body: JSON.stringify(payload) }),
+  ollamaChat: (payload: { messages: Array<{ role: string; content: string }>; model?: string; temperature?: number }) =>
+    request<{ success: boolean; message: { content: string }; text: string }>('/api/ai/ollama-chat', { method: 'POST', body: JSON.stringify(payload) }),
+  getOllamaModels: () =>
+    request<{ connected: boolean; models: Array<{ name: string; model: string; size?: number }> }>('/api/ai/ollama-models'),
   extractQuestionsFromPaper: (payload: { paper_text?: string; file_name?: string; file_data?: string; subject?: string; category?: string; job_id?: string }) =>
     request<PaperExtractionResponse>('/api/question-papers/extract', { method: 'POST', body: JSON.stringify(payload) }),
   extractThreeStandardPapers: () =>
@@ -370,8 +429,10 @@ export const api = {
   getExtractionProgress: (jobId: string) =>
     request<{ jobId: string; status: 'PENDING' | 'PROCESSING' | 'COMPLETED' | 'FAILED'; percent: number; stage: string; message: string; current: number; total: number; updatedAt: number }>(`/api/question-papers/extract-progress/${jobId}`),
   getOllamaHealth: () => request<{ connected: boolean; model: string; error?: string }>('/api/question-papers/ollama-health'),
-  bulkCreateQuestions: (payload: { questions: any[]; auto_assign_sme_id?: string; auto_assign_translator_id?: string; target_language?: string; assignment_notes?: string }) =>
+  bulkCreateQuestions: (payload: { questions: any[]; auto_assign_sme_id?: string; auto_assign_translator_id?: string; target_language?: string; assignment_notes?: string; initial_status?: string }) =>
     request<{ message: string; createdCount: number; questionIds: string[] }>('/api/questions/bulk-create', { method: 'POST', body: JSON.stringify(payload) }),
+  bulkVerifyQuestions: (payload: { question_ids: string[]; status?: string }) =>
+    request<{ message: string; updatedCount: number }>('/api/questions/bulk-verify', { method: 'POST', body: JSON.stringify(payload) }),
   bulkAssignQuestions: (payload: { question_ids: string[]; assignment_type: 'SME_REVIEW' | 'LINGUISTIC_TRANSLATION'; assignee_user_id: string; target_language?: string; notes?: string }) =>
     request<{ message: string; assignedCount: number }>('/api/questions/bulk-assign', { method: 'POST', body: JSON.stringify(payload) }),
   getAssignments: (params?: { assignment_type?: string; status?: string }) => {
@@ -446,6 +507,58 @@ export const api = {
       body: payload ? JSON.stringify(payload) : undefined,
     }),
   getPaperVersions: (examId: string) => request<{ versions: PaperVersion[] }>(`/api/examinations/${examId}/paper-versions`),
+  getPaperVersionDetails: (examId: string, versionId: string) =>
+    request<{
+      success: boolean;
+      version: PaperVersion & { iv_hex?: string; auth_tag_hex?: string; checksum_sha256?: string; key_fingerprint?: string };
+      questions: Array<{
+        paper_question_id: string;
+        section_name: string;
+        order_index: number;
+        question_marks: number;
+        id: string;
+        content_text: string;
+        options_json?: string;
+        options?: any[];
+        correct_answer?: string;
+        difficulty?: string;
+        subject?: string;
+        topic?: string;
+        diagram_url?: string;
+        image_url?: string;
+        question_type?: string;
+      }>;
+      exam?: Examination;
+      shamirDetails: {
+        threshold: number;
+        totalShares: number;
+        status: string;
+      };
+    }>(`/api/examinations/${examId}/paper-versions/${versionId}/details`),
+  getCurrentPaper: (examId: string) =>
+    request<{
+      success: boolean;
+      version: PaperVersion & { iv_hex?: string; auth_tag_hex?: string; checksum_sha256?: string; key_fingerprint?: string };
+      questions: Array<{
+        paper_question_id: string;
+        section_name: string;
+        order_index: number;
+        question_marks: number;
+        id: string;
+        content_text: string;
+        options_json?: string;
+        options?: any[];
+        correct_answer?: string;
+        difficulty?: string;
+        subject?: string;
+        topic?: string;
+        diagram_url?: string;
+        image_url?: string;
+        question_type?: string;
+      }>;
+      allVersions?: Array<{ id: string; version_code: string; is_current: number; status: string; generated_at: string }>;
+      exam: Examination;
+    }>(`/api/examinations/${examId}/current-paper`),
   setActivePaperVersion: (examId: string, versionId: string) =>
     request<{ message: string; activeVersion: PaperVersion }>(`/api/examinations/${examId}/set-active-version`, {
       method: 'POST',

@@ -4,17 +4,18 @@ dist/
 coverage/
 .DS_Store
 *.log
+.env
 .env.local
 .env.production
 .env*.local
-!.env
 !.env.example
 __pycache__/
 *.py[cod]
 .vite/
 0leakexam-main/
 
-# Local SQLite database & temp files
+# Local database & temp files
+*.db
 *.sqlite
 *.sqlite*
 *.tmp
@@ -22,9 +23,19 @@ __pycache__/
 # Generated question crops from PDF processing
 public/questions/*
 !public/questions/.gitkeep
+!public/questions/paper1/
+!public/questions/paper2/
+!public/questions/paper3/
 public/papers/*
 !public/papers/.gitkeep
 
 # Scratch and temporary work
 scratch/
+
+# Model weights and artifacts
+models/
+NaviDC-OCR/outputs/
+*.safetensors
+*.bin
+.cache/
 

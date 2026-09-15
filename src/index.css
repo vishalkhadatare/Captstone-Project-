@@ -55,6 +55,109 @@ body {
   font-feature-settings: "cv02", "cv03", "cv04", "cv11";
 }
 
+.blueprint-form .field-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+
+.blueprint-form .field-label {
+  display: block;
+  min-height: 16px;
+  color: #334155;
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 16px;
+}
+
+.blueprint-form .field {
+  display: block;
+  width: 100%;
+  min-width: 0;
+  min-height: 40px;
+  box-sizing: border-box;
+  padding: 9px 12px;
+  border: 1px solid #CBD5E1;
+  border-radius: 9px;
+  background: #F8FAFC;
+  color: #0F172A;
+  line-height: 20px;
+  outline: none;
+}
+
+.blueprint-form .field:focus {
+  border-color: #047857;
+  box-shadow: 0 0 0 2px rgba(5, 150, 105, 0.12);
+}
+
+.blueprint-form .field:disabled {
+  opacity: 0.7;
+}
+
+.blueprint-form .section-card {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  min-width: 0;
+  padding: 16px;
+  border: 1px solid #E2E8F0;
+  border-radius: 14px;
+  background: #F8FAFC;
+}
+
+.blueprint-form .section-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  column-gap: 24px;
+  row-gap: 18px;
+  min-width: 0;
+}
+
+.blueprint-form .section-summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-top: 18px;
+  padding-top: 12px;
+  border-top: 1px solid #E2E8F0;
+}
+
+.blueprint-form .action-row {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 12px;
+  margin-top: 24px;
+  padding: 16px 0 24px;
+}
+
+.blueprint-form .button-primary,
+.blueprint-form .button-secondary {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-height: 40px;
+  box-sizing: border-box;
+  white-space: nowrap;
+}
+
+@media (max-width: 767px) {
+  .blueprint-form .section-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .blueprint-form .action-row {
+    justify-content: stretch;
+  }
+
+  .blueprint-form .action-row > button {
+    flex: 1 1 auto;
+  }
+}
+
 html.dark body {
   background: #080B11;
   color: #F3F4F6;

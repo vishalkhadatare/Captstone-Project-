@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { api } from '../api';
-import { Examination, User, Question, ExamType, PaperVersion, UniversityPaperSet, MultiSubjectBreakdown } from '../types';
+import { Examination, User, Question, ExamBlueprint, ExamType, PaperVersion, UniversityPaperSet, MultiSubjectBreakdown } from '../types';
 import {
   Cpu,
   ShieldCheck,
@@ -23,7 +23,15 @@ import {
   Binary,
   Sparkles,
   Check,
+  Trash2,
+  FileText,
+  Printer,
+  Eye,
 } from 'lucide-react';
+
+import { AiPdfPaperGenerator } from './AiPdfPaperGenerator';
+import { UniversityFormatGenerator } from './workspaces/UniversityFormatGenerator';
+import { QuestionPaperPdfModal } from './workspaces/QuestionPaperPdfModal';
 
 interface PaperGenProps {
   currentUser: User | null;
@@ -31,14 +39,18 @@ interface PaperGenProps {
 }
 
 export const PaperGenerationModule: React.FC<PaperGenProps> = ({ currentUser, onRefresh }) => {
+  const [activeTab, setActiveTab] = useState<'university_generator' | 'ai_pdf_generator' | 'vault_generation'>('university_generator');
   const [exams, setExams] = useState<Examination[]>([]);
   const [questions, setQuestions] = useState<Question[]>([]);
   const [selectedExamId, setSelectedExamId] = useState<string>('');
   const [paperVersions, setPaperVersions] = useState<PaperVersion[]>([]);
+  const [activeBlueprint, setActiveBlueprint] = useState<ExamBlueprint | null>(null);
   const [loading, setLoading] = useState(true);
   const [generating, setGenerating] = useState(false);
   const [settingActive, setSettingActive] = useState<string | null>(null);
   const [actionMessage, setActionMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
+  const [pdfModalExam, setPdfModalExam] = useState<Examination | null>(null);
+  const [pdfModalVersionId, setPdfModalVersionId] = useState<string | undefined>(undefined);
 
   // Generation options
   const [examMode, setExamMode] = useState<'AUTO' | 'UNIVERSITY_3_SETS' | 'NEET_MULTI_SUBJECT' | 'STANDARD'>('AUTO');
@@ -71,6 +83,7 @@ export const PaperGenerationModule: React.FC<PaperGenProps> = ({ currentUser, on
   useEffect(() => {
     if (selectedExamId) {
       loadPaperVersions(selectedExamId);
+      api.getBlueprint(selectedExamId).then(response => setActiveBlueprint(response.blueprint)).catch(() => setActiveBlueprint(null));
       // Auto-detect mode based on selected exam
       const ex = exams.find(e => e.id === selectedExamId);
       if (ex) {
@@ -242,6 +255,32 @@ export const PaperGenerationModule: React.FC<PaperGenProps> = ({ currentUser, on
     }
   };
 
+  const handleDeleteExam = async (examId: string, examName: string) => {
+    if (!window.confirm(`Are you sure you want to permanently delete "${examName}"?`)) return;
+    try {
+      await api.deleteExamination(examId);
+      setActionMessage({ type: 'success', text: `Examination "${examName}" deleted successfully.` });
+      await loadData();
+      setSelectedExamId('');
+      onRefresh();
+    } catch (e: any) {
+      setActionMessage({ type: 'error', text: e.message || 'Failed to delete examination.' });
+    }
+  };
+
+  const handlePurgeAllMockExams = async () => {
+    if (!window.confirm('Are you sure you want to purge all pre-seeded mock and demo examination papers?')) return;
+    try {
+      await api.purgeDemoExaminations();
+      setActionMessage({ type: 'success', text: 'All mock and demo examination papers removed.' });
+      await loadData();
+      setSelectedExamId('');
+      onRefresh();
+    } catch (e: any) {
+      setActionMessage({ type: 'error', text: e.message || 'Failed to purge mock examinations.' });
+    }
+  };
+
   // Shamir custodians list
   const custodians = [
     { role: 'Institutional Registrar / Owner', name: 'Dr. Alok Verma', status: 'SHARE_ISSUED', index: 1 },
@@ -290,28 +329,121 @@ export const PaperGenerationModule: React.FC<PaperGenProps> = ({ currentUser, on
         </div>
       )}
 
-      {/* Select Examination Selector */}
-      <div className="bg-white dark:bg-slate-900 p-5 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-sm space-y-4">
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-100 dark:border-slate-800 pb-3">
-          <div className="text-sm font-bold text-slate-900 dark:text-white uppercase tracking-wider flex items-center gap-2">
-            <Layers className="w-4 h-4 text-indigo-500" />
-            Target Examination Selection
-          </div>
-          <div className="w-full sm:w-auto">
-            <select
-              value={selectedExamId}
-              onChange={e => setSelectedExamId(e.target.value)}
-              className="w-full sm:w-96 px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-700 text-xs text-slate-900 dark:text-white font-medium"
-            >
-              {exams.map(e => {
-                const type = (e as any).exam_type || 'MCQ';
-                return (
-                  <option key={e.id} value={e.id}>
-                    [{type}] {e.name} ({e.status})
-                  </option>
-                );
-              })}
-            </select>
+      {/* Top Module Navigation Tabs */}
+      <div className="flex flex-wrap items-center gap-2 border-b border-slate-200 dark:border-slate-800 pb-3">
+        <button
+          type="button"
+          onClick={() => setActiveTab('university_generator')}
+          className={`px-4 py-2.5 rounded-xl text-xs font-bold flex items-center gap-2 transition-all cursor-pointer ${
+            activeTab === 'university_generator'
+              ? 'bg-rose-600 text-white shadow-md shadow-rose-900/30'
+              : 'bg-white dark:bg-slate-900 text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800 border border-slate-200 dark:border-slate-800'
+          }`}
+        >
+          <BookOpen className="w-4 h-4 text-rose-400" />
+          <span>🎓 University Format Generator</span>
+        </button>
+
+        <button
+          type="button"
+          onClick={() => setActiveTab('ai_pdf_generator')}
+          className={`px-4 py-2.5 rounded-xl text-xs font-bold flex items-center gap-2 transition-all cursor-pointer ${
+            activeTab === 'ai_pdf_generator'
+              ? 'bg-indigo-600 text-white shadow-md shadow-indigo-900/30'
+              : 'bg-white dark:bg-slate-900 text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800 border border-slate-200 dark:border-slate-800'
+          }`}
+        >
+          <Sparkles className="w-4 h-4 text-amber-400" />
+          <span>✨ AI Paper Generator from PDF</span>
+        </button>
+
+        <button
+          type="button"
+          onClick={() => setActiveTab('vault_generation')}
+          className={`px-4 py-2.5 rounded-xl text-xs font-bold flex items-center gap-2 transition-all cursor-pointer ${
+            activeTab === 'vault_generation'
+              ? 'bg-indigo-600 text-white shadow-md shadow-indigo-900/30'
+              : 'bg-white dark:bg-slate-900 text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800 border border-slate-200 dark:border-slate-800'
+          }`}
+        >
+          <Lock className="w-4 h-4 text-indigo-400" />
+          <span>🏛 Cryptographic Vault & Shamir 3-of-5 Custody</span>
+        </button>
+      </div>
+
+      {activeTab === 'university_generator' ? (
+        <UniversityFormatGenerator
+          currentUser={currentUser}
+          onRefresh={onRefresh}
+        />
+      ) : activeTab === 'ai_pdf_generator' ? (
+        <AiPdfPaperGenerator
+          currentUser={currentUser}
+          existingExams={exams}
+          onRefresh={() => {
+            loadData();
+            onRefresh();
+          }}
+          onPaperCreated={newExamId => {
+            setSelectedExamId(newExamId);
+            loadData();
+            loadPaperVersions(newExamId);
+            onRefresh();
+          }}
+        />
+      ) : (
+        <>
+          {/* Select Examination Selector */}
+          <div className="bg-white dark:bg-slate-900 p-5 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-sm space-y-4">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-100 dark:border-slate-800 pb-3">
+              <div className="text-sm font-bold text-slate-900 dark:text-white uppercase tracking-wider flex items-center gap-2">
+                <Layers className="w-4 h-4 text-indigo-500" />
+                Target Examination Selection
+              </div>
+          <div className="flex flex-wrap items-center gap-2 w-full sm:w-auto">
+            {exams.length > 0 && (
+              <button
+                type="button"
+                onClick={handlePurgeAllMockExams}
+                className="px-3 py-1.5 rounded-xl bg-rose-50 hover:bg-rose-100 text-rose-700 dark:bg-rose-950/40 dark:text-rose-300 border border-rose-200 dark:border-rose-800 text-xs font-bold flex items-center gap-1.5 transition-colors cursor-pointer"
+                title="Purge all pre-seeded mock examination papers"
+              >
+                <Trash2 className="w-3.5 h-3.5" />
+                <span>Purge Mock Papers</span>
+              </button>
+            )}
+
+            {exams.length > 0 ? (
+              <div className="flex items-center gap-2">
+                <select
+                  value={selectedExamId}
+                  onChange={e => setSelectedExamId(e.target.value)}
+                  className="w-full sm:w-80 px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-700 text-xs text-slate-900 dark:text-white font-medium"
+                >
+                  {exams.map(e => {
+                    const type = (e as any).exam_type || 'MCQ';
+                    return (
+                      <option key={e.id} value={e.id}>
+                        [{type}] {e.name} ({e.status})
+                      </option>
+                    );
+                  })}
+                </select>
+
+                {selectedExam && (
+                  <button
+                    type="button"
+                    onClick={() => handleDeleteExam(selectedExam.id, selectedExam.name)}
+                    className="p-2 rounded-xl bg-slate-100 hover:bg-rose-100 text-slate-500 hover:text-rose-700 dark:bg-slate-800 dark:hover:bg-rose-900 border border-slate-200 dark:border-slate-700 hover:border-rose-300 transition-colors"
+                    title="Delete Selected Examination"
+                  >
+                    <Trash2 className="w-3.5 h-3.5" />
+                  </button>
+                )}
+              </div>
+            ) : (
+              <span className="text-xs text-slate-400 font-medium italic">No examinations present</span>
+            )}
           </div>
         </div>
 
@@ -328,6 +460,20 @@ export const PaperGenerationModule: React.FC<PaperGenProps> = ({ currentUser, on
 
           return (
             <div className="space-y-4">
+              {activeBlueprint && (
+                <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-4 text-xs text-emerald-950">
+                  <div className="flex items-center justify-between gap-3">
+                    <div>
+                      <div className="font-bold">Active Blueprint: {activeBlueprint.paperName} ({activeBlueprint.version})</div>
+                      <div className="mt-1 text-emerald-800">Generation will follow its {activeBlueprint.sections.length} configured section{activeBlueprint.sections.length === 1 ? '' : 's'} exactly.</div>
+                    </div>
+                    <span className="rounded-full bg-emerald-700 px-2 py-1 text-[10px] font-bold text-white">SOURCE OF TRUTH</span>
+                  </div>
+                  <div className="mt-3 flex flex-wrap gap-2 text-[11px]">
+                    {activeBlueprint.sections.map(section => <span key={section.id} className="rounded bg-white px-2 py-1 border border-emerald-200">{section.name}: {section.totalQuestions} Q / attempt {section.questionsToAttempt}</span>)}
+                  </div>
+                </div>
+              )}
               <div className="grid grid-cols-2 sm:grid-cols-5 gap-3 text-xs">
                 <div className="bg-slate-50 dark:bg-slate-950 p-3 rounded-xl border border-slate-200 dark:border-slate-800">
                   <div className="text-slate-400 text-[10px] uppercase font-semibold">Exam Type Engine</div>
@@ -560,30 +706,47 @@ export const PaperGenerationModule: React.FC<PaperGenProps> = ({ currentUser, on
                       </div>
                     </div>
 
-                    {/* Action to set active */}
-                    {(currentUser?.role === 'EXAM_MANAGER' || currentUser?.role === 'ORG_OWNER') && (
-                      <div className="mt-3 pt-2 border-t border-slate-200 dark:border-slate-800">
-                        {isActive ? (
-                          <div className="text-[11px] font-bold text-amber-400 text-center py-1 bg-amber-950/40 rounded-lg">
-                            ✓ Designated for Centre Decryption
-                          </div>
-                        ) : (
-                          <button
-                            type="button"
-                            disabled={settingActive === version.id}
-                            onClick={() => handleSetActiveVersion(version.id, version.version_code)}
-                            className="w-full py-1.5 px-2.5 rounded-lg bg-slate-800 hover:bg-amber-700 text-white text-xs font-semibold transition-colors flex items-center justify-center gap-1"
-                          >
-                            {settingActive === version.id ? (
-                              <RefreshCw className="w-3 h-3 animate-spin" />
-                            ) : (
-                              <CheckCircle2 className="w-3 h-3 text-amber-400" />
-                            )}
-                            <span>Set as Active Release Paper</span>
-                          </button>
-                        )}
-                      </div>
-                    )}
+                    {/* Action to set active & View PDF */}
+                    <div className="mt-3 pt-2 border-t border-slate-200 dark:border-slate-800 space-y-1.5">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          if (selectedExam) {
+                            setPdfModalExam(selectedExam);
+                            setPdfModalVersionId(version.id);
+                          }
+                        }}
+                        className="w-full py-1.5 px-2.5 rounded-lg bg-rose-50 hover:bg-rose-100 dark:bg-rose-950/40 dark:hover:bg-rose-900/60 text-rose-700 dark:text-rose-300 border border-rose-200 dark:border-rose-800 text-xs font-bold transition-colors flex items-center justify-center gap-1.5 shadow-2xs"
+                        title="View and Print Generated Official Question Paper PDF"
+                      >
+                        <FileText className="w-3.5 h-3.5 text-rose-600" />
+                        <span>View / Print PDF</span>
+                      </button>
+
+                      {(currentUser?.role === 'EXAM_MANAGER' || currentUser?.role === 'ORG_OWNER') && (
+                        <div>
+                          {isActive ? (
+                            <div className="text-[11px] font-bold text-amber-400 text-center py-1 bg-amber-950/40 rounded-lg">
+                              ✓ Designated for Centre Decryption
+                            </div>
+                          ) : (
+                            <button
+                              type="button"
+                              disabled={settingActive === version.id}
+                              onClick={() => handleSetActiveVersion(version.id, version.version_code)}
+                              className="w-full py-1.5 px-2.5 rounded-lg bg-slate-800 hover:bg-amber-700 text-white text-xs font-semibold transition-colors flex items-center justify-center gap-1"
+                            >
+                              {settingActive === version.id ? (
+                                <RefreshCw className="w-3 h-3 animate-spin" />
+                              ) : (
+                                <CheckCircle2 className="w-3 h-3 text-amber-400" />
+                              )}
+                              <span>Set as Active Release Paper</span>
+                            </button>
+                          )}
+                        </div>
+                      )}
+                    </div>
                   </div>
                 );
               })}
@@ -879,6 +1042,20 @@ export const PaperGenerationModule: React.FC<PaperGenProps> = ({ currentUser, on
             </form>
           </div>
         </div>
+      )}
+        </>
+      )}
+
+      {/* Official Generated Question Paper PDF Modal */}
+      {pdfModalExam && (
+        <QuestionPaperPdfModal
+          exam={pdfModalExam}
+          initialVersionId={pdfModalVersionId}
+          onClose={() => {
+            setPdfModalExam(null);
+            setPdfModalVersionId(undefined);
+          }}
+        />
       )}
     </div>
   );

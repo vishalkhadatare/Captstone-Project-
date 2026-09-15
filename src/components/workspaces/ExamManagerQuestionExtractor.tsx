@@ -32,16 +32,23 @@ import {
   Activity,
   FileSpreadsheet,
   Crop,
+  RotateCcw,
+  Plus,
+  Cpu,
 } from 'lucide-react';
 import { User, ExtractedQuestion, Organization, QuestionAssignment } from '../../types';
 import { api } from '../../api';
 import { QuestionBoundaryEditor } from './QuestionBoundaryEditor';
+import { LaTeXText } from '../common/LaTeXText';
+import { runPuterOcr, runPuterVisionChat, runPuterAutoExtract, parsePuterOcrText } from '../../utils/puterOcr';
+import { runOcrSpace, parseOcrSpaceQuestion } from '../../utils/ocrSpace';
 
 interface ExamManagerQuestionExtractorProps {
   translators: User[];
   org: Organization | null;
   currentUser: User | null;
   onAssignmentsUpdated: () => void;
+  onNavigateSubTab?: (subTab: string) => void;
 }
 
 interface UploadedQuestionFile {
@@ -180,6 +187,7 @@ export const ExamManagerQuestionExtractor: React.FC<ExamManagerQuestionExtractor
   org,
   currentUser,
   onAssignmentsUpdated,
+  onNavigateSubTab,
 }) => {
   // Upload & Extraction Input State
   const [pdfFileName, setPdfFileName] = useState('');
@@ -198,6 +206,7 @@ export const ExamManagerQuestionExtractor: React.FC<ExamManagerQuestionExtractor
   const [activeExtractedIndex, setActiveExtractedIndex] = useState<number>(0);
   const [selectedExtractedIds, setSelectedExtractedIds] = useState<Set<string>>(new Set());
   const [selectedPaperFilter, setSelectedPaperFilter] = useState<number | 'ALL'>('ALL');
+  const [visibleStudioPapers, setVisibleStudioPapers] = useState<number[]>([]);
   const [sidebarFilterType, setSidebarFilterType] = useState<'ALL' | 'MCQ' | 'THEORY' | 'UNASSIGNED' | 'ASSIGNED'>('ALL');
   const [sidebarSearch, setSidebarSearch] = useState('');
   const [extractionSummary, setExtractionSummary] = useState('');
@@ -217,7 +226,14 @@ export const ExamManagerQuestionExtractor: React.FC<ExamManagerQuestionExtractor
   const [assignModalOpen, setAssignModalOpen] = useState(false);
   const [assignMode, setAssignMode] = useState<'SELECTED' | 'BY_COUNT'>('SELECTED');
   const [assignCountInput, setAssignCountInput] = useState<number>(5);
+<<<<<<< HEAD
   const [assignTargetRole, setAssignTargetRole] = useState<'TRANSLATOR' | 'DIRECT_IMPORT'>('TRANSLATOR');
+=======
+  const [assignTargetRole, setAssignTargetRole] = useState<'SME' | 'TRANSLATOR' | 'BOTH' | 'DIRECT'>(
+    smes.length > 0 ? 'SME' : 'DIRECT'
+  );
+  const [assignTargetSmeId, setAssignTargetSmeId] = useState<string>(smes[0]?.id || '');
+>>>>>>> origin/main
   const [assignTargetTranslatorId, setAssignTargetTranslatorId] = useState<string>(translators[0]?.id || '');
   const [assignTargetLanguage, setAssignTargetLanguage] = useState<string>('Hindi');
   const [assignNotes, setAssignNotes] = useState('');
@@ -231,6 +247,170 @@ export const ExamManagerQuestionExtractor: React.FC<ExamManagerQuestionExtractor
   const [currentPaperId, setCurrentPaperId] = useState<string | null>(null);
   const [boundaryEditorOpen, setBoundaryEditorOpen] = useState(false);
   const diagramInputRef = useRef<HTMLInputElement | null>(null);
+
+  const [isNavidcOcrLoading, setIsNavidcOcrLoading] = useState(false);
+
+  const handleNavidcOcrForQuestion = async (q: ExtractedQuestion) => {
+    const targetSource = q.image_url || q.diagram_url;
+    if (!targetSource) {
+      setStatusMessage({ type: 'error', text: 'No cropped question image available for NaviDC-OCR.' });
+      return;
+    }
+    setIsNavidcOcrLoading(true);
+    try {
+      const res = await api.runNaviDcOcr({ image_data: targetSource, mode: 'mcq' });
+      if (res && res.success) {
+        setExtractedQuestions(prev =>
+          prev.map(item => {
+            if (item.tempId === q.tempId) {
+              const firstQ = res.questions && res.questions.length > 0 ? res.questions[0] : null;
+              return {
+                ...item,
+                content_text: res.markdown || item.content_text,
+                options: firstQ?.options && firstQ.options.length > 0
+                  ? firstQ.options.map(o => `${o.id}) ${o.text}`)
+                  : item.options,
+                correct_answer: firstQ?.correct_answer || item.correct_answer,
+              };
+            }
+            return item;
+          })
+        );
+        setStatusMessage({
+          type: 'success',
+          text: `NaviDC-OCR 1.2B parsed ${res.markdown?.length || 0} chars (${res.execution_time_ms}ms, ${res.device || 'local'})!`
+        });
+      } else {
+        setStatusMessage({ type: 'error', text: `NaviDC-OCR Error: ${res?.error || 'Empty response'}` });
+      }
+    } catch (err: any) {
+      setStatusMessage({ type: 'error', text: `NaviDC-OCR Error: ${err.message || err}` });
+    } finally {
+      setIsNavidcOcrLoading(false);
+    }
+  };
+
+  const [isOcrSpaceLoading, setIsOcrSpaceLoading] = useState<'2' | '3' | null>(null);
+
+  const handleOcrSpaceForQuestion = async (q: ExtractedQuestion, engine: '2' | '3' = '2') => {
+    const targetSource = q.image_url || q.diagram_url || (q.question_images && q.question_images[0]);
+    if (!targetSource) {
+      setStatusMessage({ type: 'error', text: 'No cropped question image available for OCR.space.' });
+      return;
+    }
+    setIsOcrSpaceLoading(engine);
+    try {
+      const res = await api.runOcrSpace({
+        image_data: targetSource.startsWith('data:') ? targetSource : undefined,
+        image_url: !targetSource.startsWith('data:') ? targetSource : undefined,
+        engine,
+        isTable: true,
+        scale: true,
+        detectOrientation: true,
+      });
+
+      let extractedText = res?.text;
+      let engineName = res?.engine || `OCR.space Engine ${engine}`;
+
+      if (!extractedText) {
+        // Fallback to direct client call if needed
+        const directRes = await runOcrSpace(targetSource, { engine, isTable: true, scale: true });
+        extractedText = directRes?.text;
+        engineName = directRes?.engine || engineName;
+      }
+
+      if (extractedText) {
+        const parsed = parseOcrSpaceQuestion(extractedText, engineName);
+        setExtractedQuestions(prev =>
+          prev.map(item => {
+            if (item.tempId === q.tempId) {
+              return {
+                ...item,
+                content_text: parsed.contentText || item.content_text,
+                options: parsed.options && parsed.options.length > 0 ? parsed.options.map(o => `${o.label}) ${o.text}`) : item.options,
+                correct_answer: parsed.suggestedAnswer || item.correct_answer,
+                has_table: parsed.hasTable || item.has_table,
+              };
+            }
+            return item;
+          })
+        );
+        const extra = parsed.hasTable ? ' (Table Extracted 📊)' : '';
+        setStatusMessage({
+          type: 'success',
+          text: `OCR.space Engine ${engine} recognized ${extractedText.length} chars${extra}!`,
+        });
+      } else {
+        setStatusMessage({ type: 'error', text: 'OCR.space returned empty text for this crop.' });
+      }
+    } catch (err: any) {
+      setStatusMessage({ type: 'error', text: `OCR.space Error: ${err.message || err}` });
+    } finally {
+      setIsOcrSpaceLoading(null);
+    }
+  };
+
+  const [isPuterOcrLoading, setIsPuterOcrLoading] = useState<'textract' | 'mistral' | 'vision' | null>(null);
+
+  const handlePuterOcrForQuestion = async (q: ExtractedQuestion, mode: 'textract' | 'mistral' | 'vision' = 'vision') => {
+    const targetSource = q.image_url || q.diagram_url || (q.question_images && q.question_images[0]);
+    if (!targetSource) {
+      setStatusMessage({ type: 'error', text: 'No cropped question image available for Puter AI analysis.' });
+      return;
+    }
+    setIsPuterOcrLoading(mode);
+    try {
+      let rawText = '';
+      let engineName = 'Puter AI';
+
+      if (mode === 'vision') {
+        engineName = 'Puter (Vision AI)';
+        rawText = await runPuterVisionChat(targetSource);
+      } else if (mode === 'mistral') {
+        engineName = 'Puter (Mistral OCR)';
+        rawText = await runPuterOcr(targetSource, { provider: 'mistral' });
+      } else {
+        engineName = 'Puter (AWS Textract)';
+        rawText = await runPuterOcr(targetSource, { provider: 'aws-textract' });
+      }
+
+      if (!rawText || rawText.trim().length < 5) {
+        // Fallback to automatic multi-engine attempt
+        const fallback = await runPuterAutoExtract(targetSource);
+        rawText = fallback.text;
+        engineName = fallback.engineUsed;
+      }
+
+      if (rawText) {
+        const parsed = parsePuterOcrText(rawText);
+        setExtractedQuestions(prev =>
+          prev.map(item => {
+            if (item.tempId === q.tempId) {
+              return {
+                ...item,
+                content_text: parsed.contentText || item.content_text,
+                options: parsed.options && parsed.options.length > 0 ? parsed.options.map(o => `${o.label}) ${o.text}`) : item.options,
+                correct_answer: parsed.suggestedAnswer || item.correct_answer,
+                has_table: parsed.hasTable || item.has_table,
+              };
+            }
+            return item;
+          })
+        );
+        const extra = parsed.hasTable ? ' (Table Extracted 📊)' : '';
+        setStatusMessage({
+          type: 'success',
+          text: `${engineName} successfully parsed ${rawText.length} characters${extra}!`,
+        });
+      } else {
+        setStatusMessage({ type: 'error', text: 'Puter AI returned empty text for this crop.' });
+      }
+    } catch (err: any) {
+      setStatusMessage({ type: 'error', text: `Puter AI Error: ${err.message || err}` });
+    } finally {
+      setIsPuterOcrLoading(null);
+    }
+  };
 
   const handleDiagramUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -292,21 +472,45 @@ export const ExamManagerQuestionExtractor: React.FC<ExamManagerQuestionExtractor
     setPdfFileName(reindexed.map(file => file.name).join(', '));
     setPdfFileData(reindexed.find(file => file.fileData)?.fileData || '');
     setPdfText(reindexed.filter(file => file.text).map(file => file.text).join('\n\n'));
+
+    // If existing questions were from the benchmark NEET papers, reset them so user sees their uploaded paper cleanly
+    if (extractedQuestions.some(q => q.source_file?.toLowerCase().includes('neet') || q.source_file?.toLowerCase().includes('nbte'))) {
+      setExtractedQuestions([]);
+      setSelectedExtractedIds(new Set());
+      setLocalAssignments({});
+      setVisibleStudioPapers(reindexed.map(f => f.paperNumber));
+      setSelectedPaperFilter(1);
+    }
   };
 
   const handleRemoveUploadedFile = (fileId: string) => {
+    const fileToRemove = uploadedFiles.find(f => f.id === fileId);
     const filtered = uploadedFiles.filter(f => f.id !== fileId);
     const reindexed = filtered.map((f, idx) => ({ ...f, paperNumber: idx + 1 }));
     setUploadedFiles(reindexed);
+    if (fileToRemove) {
+      setExtractedQuestions(prev => prev.filter(q => q.source_file !== fileToRemove.name && (q.paper_number || 1) !== fileToRemove.paperNumber));
+      setSelectedExtractedIds(prev => {
+        const next = new Set(prev);
+        extractedQuestions.filter(q => q.source_file === fileToRemove.name || (q.paper_number || 1) === fileToRemove.paperNumber).forEach(q => next.delete(q.tempId));
+        return next;
+      });
+    }
     if (reindexed.length === 0) {
+      setExtractedQuestions([]);
+      setSelectedExtractedIds(new Set());
       setPdfFileName('');
       setPdfFileData('');
       setPdfText('');
+      setExtractionSummary('');
+      setExtractionProgress(null);
     } else {
       setPdfFileName(reindexed.map(f => f.name).join(', '));
       setPdfFileData(reindexed.find(f => f.fileData)?.fileData || '');
       setPdfText(reindexed.filter(f => f.text).map(f => f.text).join('\n\n'));
     }
+    setStatusMessage({ type: 'success', text: `Removed ${fileToRemove?.name || 'question paper'}.` });
+    setTimeout(() => setStatusMessage(null), 2500);
   };
 
   const handleFileInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -391,7 +595,7 @@ export const ExamManagerQuestionExtractor: React.FC<ExamManagerQuestionExtractor
 
     const filesWithJobs = filesToProcess.map((file, idx) => {
       const pNum = file.paperNumber || (idx + 1);
-      const isInitialActive = idx < 2;
+      const isInitialActive = idx < 1;
       return {
         ...file,
         paperNumber: pNum,
@@ -467,7 +671,7 @@ export const ExamManagerQuestionExtractor: React.FC<ExamManagerQuestionExtractor
     }, 300);
 
     try {
-      const MAX_CONCURRENCY = 2;
+      const MAX_CONCURRENCY = 1;
       const results: Array<{
         fileId: string;
         paperNumber: number;
@@ -787,8 +991,8 @@ export const ExamManagerQuestionExtractor: React.FC<ExamManagerQuestionExtractor
     }
   };
 
-  // Distinct paper numbers: ALWAYS guarantee Question Paper 1, Question Paper 2, and Question Paper 3 are available
-  const paperNumSet = new Set<number>([1, 2, 3]);
+  // Distinct paper numbers: Dynamically computed strictly from uploaded files and extracted questions
+  const paperNumSet = new Set<number>();
   extractedQuestions.forEach(q => {
     if (typeof q.paper_number === 'number' && q.paper_number > 0) {
       paperNumSet.add(q.paper_number);
@@ -799,9 +1003,12 @@ export const ExamManagerQuestionExtractor: React.FC<ExamManagerQuestionExtractor
       paperNumSet.add(f.paperNumber);
     }
   });
+  if (paperNumSet.size === 0 && uploadedFiles.length > 0) {
+    paperNumSet.add(1);
+  }
   const availablePaperNumbers: number[] = Array.from(paperNumSet).sort((a, b) => a - b);
 
-  const handleSelectPaperFilter = async (paperNum: number | 'ALL') => {
+  const handleSelectPaperFilter = (paperNum: number | 'ALL') => {
     setSelectedPaperFilter(paperNum);
     const targetQuestions = paperNum === 'ALL'
       ? extractedQuestions
@@ -812,9 +1019,6 @@ export const ExamManagerQuestionExtractor: React.FC<ExamManagerQuestionExtractor
       if (firstIdx !== -1) {
         setActiveExtractedIndex(firstIdx);
       }
-    } else {
-      // If questions for this paper are not in state yet, auto-extract all 3 papers (180 Qs each) and select it!
-      await handleExtractThreeStandardPapers(paperNum);
     }
   };
 
@@ -928,6 +1132,56 @@ export const ExamManagerQuestionExtractor: React.FC<ExamManagerQuestionExtractor
     if (activeExtractedIndex >= nextList.length) {
       setActiveExtractedIndex(Math.max(0, nextList.length - 1));
     }
+    setStatusMessage({ type: 'success', text: 'Question removed successfully.' });
+    setTimeout(() => setStatusMessage(null), 2000);
+  };
+
+  // Remove a specific question paper
+  const handleRemovePaper = (paperNumber: number) => {
+    setVisibleStudioPapers(prev => prev.filter(p => p !== paperNumber));
+    const remaining = extractedQuestions.filter(q => (q.paper_number || 1) !== paperNumber);
+    setExtractedQuestions(remaining);
+    setUploadedFiles(prev => prev.filter(f => f.paperNumber !== paperNumber));
+    setSelectedExtractedIds(prev => {
+      const next = new Set(prev);
+      extractedQuestions.filter(q => (q.paper_number || 1) === paperNumber).forEach(q => next.delete(q.tempId));
+      return next;
+    });
+    if (selectedPaperFilter === paperNumber) {
+      setSelectedPaperFilter('ALL');
+    }
+    if (activeExtractedIndex >= remaining.length) {
+      setActiveExtractedIndex(Math.max(0, remaining.length - 1));
+    }
+    setStatusMessage({ type: 'success', text: `Question Paper ${paperNumber} removed from studio.` });
+    setTimeout(() => setStatusMessage(null), 3000);
+  };
+
+  // Remove all question papers and reset studio
+  const handleRemoveAllPapers = () => {
+    setVisibleStudioPapers([]);
+    setExtractedQuestions([]);
+    setUploadedFiles([]);
+    setSelectedExtractedIds(new Set());
+    setLocalAssignments({});
+    setPdfFileName('');
+    setPdfFileData('');
+    setPdfText('');
+    setExtractionSummary('');
+    setExtractionProgress(null);
+    setCurrentPaperId(null);
+    setDebugViews([]);
+    setActiveDebugView(null);
+    setSelectedPaperFilter('ALL');
+    setStatusMessage({ type: 'success', text: 'All question papers removed from studio.' });
+    setTimeout(() => setStatusMessage(null), 3000);
+  };
+
+  // Restore all standard question papers
+  const handleRestoreStandardPapers = () => {
+    setVisibleStudioPapers([1, 2, 3]);
+    setStatusMessage({ type: 'success', text: 'Restored all 3 National Question Papers to studio.' });
+    setTimeout(() => setStatusMessage(null), 3000);
   };
 
   // Open Assignment Modal
@@ -966,7 +1220,13 @@ export const ExamManagerQuestionExtractor: React.FC<ExamManagerQuestionExtractor
     }
 
     // Role validation
+<<<<<<< HEAD
     const needTranslator = assignTargetRole === 'TRANSLATOR';
+=======
+    const isDirect = assignTargetRole === 'DIRECT';
+    const needSme = !isDirect && (assignTargetRole === 'SME' || assignTargetRole === 'BOTH');
+    const needTranslator = !isDirect && (assignTargetRole === 'TRANSLATOR' || assignTargetRole === 'BOTH');
+>>>>>>> origin/main
 
     if (needTranslator && !assignTargetTranslatorId) {
       setStatusMessage({ type: 'error', text: 'Please select a Linguistic Translator from your organization.' });
@@ -984,7 +1244,8 @@ export const ExamManagerQuestionExtractor: React.FC<ExamManagerQuestionExtractor
         questions: targetQuestionList,
         auto_assign_translator_id: needTranslator ? assignTargetTranslatorId : undefined,
         target_language: needTranslator ? assignTargetLanguage : undefined,
-        assignment_notes: assignNotes || undefined,
+        assignment_notes: assignNotes || (isDirect ? 'Directly verified & approved by Exam Manager' : undefined),
+        initial_status: isDirect ? 'VERIFIED' : undefined,
       });
 
       // Update local assignment tags for real-time sidebar feedback
@@ -1007,7 +1268,7 @@ export const ExamManagerQuestionExtractor: React.FC<ExamManagerQuestionExtractor
 
       setStatusMessage({
         type: 'success',
-        text: `Successfully created ${res.createdCount} questions in secure question repository and ${assignmentDesc}.`,
+        text: `Successfully imported ${res.createdCount} question(s) into question repository (${assignmentDesc}).`,
       });
 
       setAssignModalOpen(false);
@@ -1053,12 +1314,34 @@ export const ExamManagerQuestionExtractor: React.FC<ExamManagerQuestionExtractor
             )}
             <span className="font-medium">{statusMessage.text}</span>
           </div>
-          <button
-            onClick={() => setStatusMessage(null)}
-            className="p-1 text-slate-400 hover:text-slate-700 rounded"
-          >
-            <X className="w-3.5 h-3.5" />
-          </button>
+          <div className="flex items-center gap-2 shrink-0">
+            {statusMessage.type === 'success' && onNavigateSubTab && (
+              <>
+                <button
+                  type="button"
+                  onClick={() => onNavigateSubTab('question_pools')}
+                  className="px-2.5 py-1 rounded-lg bg-emerald-700 hover:bg-emerald-800 text-white font-bold text-[11px] flex items-center gap-1 cursor-pointer transition-all shadow-2xs"
+                >
+                  <span>Question Pools</span>
+                  <ArrowRight className="w-3 h-3" />
+                </button>
+                <button
+                  type="button"
+                  onClick={() => onNavigateSubTab('paper_generation')}
+                  className="px-2.5 py-1 rounded-lg bg-slate-900 hover:bg-slate-800 text-white font-bold text-[11px] flex items-center gap-1 cursor-pointer transition-all shadow-2xs"
+                >
+                  <span>Paper Generator</span>
+                  <ArrowRight className="w-3 h-3" />
+                </button>
+              </>
+            )}
+            <button
+              onClick={() => setStatusMessage(null)}
+              className="p-1 text-slate-400 hover:text-slate-700 rounded cursor-pointer"
+            >
+              <X className="w-3.5 h-3.5" />
+            </button>
+          </div>
         </div>
       )}
 
@@ -1089,9 +1372,9 @@ export const ExamManagerQuestionExtractor: React.FC<ExamManagerQuestionExtractor
               <span>Load Sample 10-Q Master PDF</span>
             </button>
 
-            <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[11px] font-bold bg-emerald-50 text-emerald-800 border border-emerald-200">
-              <Sparkles className="w-3.5 h-3.5 text-emerald-600" />
-              <span>Gemini 3.7 Flash Engine</span>
+            <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-[11px] font-bold bg-indigo-50 text-indigo-900 border border-indigo-200">
+              <Sparkles className="w-3.5 h-3.5 text-indigo-600" />
+              <span>Puter.js AI OCR + Gemini Flash Engine</span>
             </span>
           </div>
         </div>
@@ -1318,36 +1601,34 @@ export const ExamManagerQuestionExtractor: React.FC<ExamManagerQuestionExtractor
           <div className="flex flex-wrap items-center gap-2.5">
             <button
               type="button"
-              onClick={() => handleExtractThreeStandardPapers(1)}
-              disabled={extracting}
-              className="px-6 py-3.5 bg-gradient-to-r from-emerald-800 via-emerald-700 to-teal-800 hover:from-emerald-700 hover:via-emerald-600 hover:to-teal-700 text-white rounded-xl font-bold text-sm shadow-md hover:shadow-lg flex flex-wrap items-center gap-3 transition-all cursor-pointer border border-emerald-500/40 disabled:opacity-90"
+              onClick={handleExtract}
+              disabled={extracting || (uploadedFiles.length === 0 && !pdfFileData && !pdfText)}
+              className="px-6 py-3.5 bg-gradient-to-r from-emerald-800 via-emerald-700 to-teal-800 hover:from-emerald-700 hover:via-emerald-600 hover:to-teal-700 text-white rounded-xl font-bold text-sm shadow-md hover:shadow-lg flex flex-wrap items-center gap-3 transition-all cursor-pointer border border-emerald-500/40 disabled:opacity-50"
             >
               <Sparkles className={`w-4 h-4 text-amber-300 ${extracting ? 'animate-spin' : ''}`} />
               <span>
                 {extracting
-                  ? '⚡ Extracting All 3 Question Papers (180 Qs Each)...'
-                  : '⚡ Extract Questions (All 3 Question Papers - 180 Qs Each)'}
+                  ? `⚡ Extracting Questions from ${uploadedFiles.length || 1} Question Paper${uploadedFiles.length > 1 ? 's' : ''}...`
+                  : uploadedFiles.length > 0
+                    ? `⚡ Extract Questions (${uploadedFiles.length === 1 ? uploadedFiles[0].name : `${uploadedFiles.length} Question Papers`})`
+                    : '⚡ Extract Questions from Uploaded Paper'}
               </span>
 
               {/* Real-time individual question paper percentages displayed directly on extraction button */}
-              {extracting && (
+              {extracting && uploadedFiles.length > 0 && (
                 <div className="flex items-center gap-1.5 pl-2.5 border-l border-white/20 text-xs font-mono">
-                  <span className="px-2 py-0.5 rounded bg-emerald-950/90 text-emerald-300 border border-emerald-500/50 shadow-xs">
-                    Paper 1: {uploadedFiles.find(f => f.paperNumber === 1)?.progressPercent || 18}%
-                  </span>
-                  <span className="px-2 py-0.5 rounded bg-teal-950/90 text-teal-300 border border-teal-500/50 shadow-xs">
-                    Paper 2: {uploadedFiles.find(f => f.paperNumber === 2)?.progressPercent || 12}%
-                  </span>
-                  <span className="px-2 py-0.5 rounded bg-cyan-950/90 text-cyan-300 border border-cyan-500/50 shadow-xs">
-                    Paper 3: {uploadedFiles.find(f => f.paperNumber === 3)?.progressPercent || 24}%
-                  </span>
+                  {uploadedFiles.map(f => (
+                    <span key={f.id} className="px-2 py-0.5 rounded bg-emerald-950/90 text-emerald-300 border border-emerald-500/50 shadow-xs">
+                      P{f.paperNumber}: {f.progressPercent || 20}%
+                    </span>
+                  ))}
                 </div>
               )}
             </button>
 
             {extractedQuestions.length > 0 && (
               <span className="text-xs font-mono font-bold text-emerald-800 bg-emerald-100 px-3 py-2 rounded-lg border border-emerald-200">
-                {extractedQuestions.length} Questions Extracted (3 Papers)
+                {extractedQuestions.length} Questions Extracted ({uploadedFiles.length || visibleStudioPapers.length || 1} Paper{(uploadedFiles.length || visibleStudioPapers.length) !== 1 ? 's' : ''})
               </span>
             )}
           </div>
@@ -1528,89 +1809,101 @@ export const ExamManagerQuestionExtractor: React.FC<ExamManagerQuestionExtractor
               </div>
               <div>
                 <h3 className="font-bold text-sm sm:text-base text-slate-900">
-                  National Question Paper Studio (3 Distinct Question Papers)
+                  Question Paper Studio ({uploadedFiles.length > 0 ? uploadedFiles.length : (extractedQuestions.length > 0 ? 1 : 0)} Question Paper{(uploadedFiles.length > 0 ? uploadedFiles.length : 1) !== 1 ? 's' : ''})
                 </h3>
                 <p className="text-xs text-slate-500">
-                  Each Question Paper contains 180 curriculum-accurate distinct questions with high-resolution diagrams:
+                  Universal multi-examination question paper studio. Upload any examination paper (Computer Networks, Engineering, University Tests, etc.) to extract questions with exact zero-bleed boundaries.
                 </p>
               </div>
             </div>
 
-            <button
-              type="button"
-              onClick={() => handleExtractThreeStandardPapers(1)}
-              disabled={extracting}
-              className="px-5 py-2.5 bg-gradient-to-r from-emerald-800 via-emerald-700 to-teal-800 hover:from-emerald-700 hover:to-teal-700 text-white rounded-xl font-bold text-xs shadow-md flex items-center gap-2 cursor-pointer border border-emerald-600 transition-all shrink-0"
-            >
-              <Sparkles className="w-4 h-4 text-amber-300" />
-              <span>⚡ Extract Questions (All 3 Question Papers)</span>
-            </button>
-          </div>
+            <div className="flex flex-wrap items-center gap-2 shrink-0">
+              {uploadedFiles.length > 0 ? (
+                <>
+                  <button
+                    type="button"
+                    onClick={handleRemoveAllPapers}
+                    className="px-4 py-2.5 bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 rounded-xl font-bold text-xs shadow-2xs flex items-center gap-1.5 cursor-pointer transition-all active:scale-95"
+                    title="Remove all question papers and reset studio"
+                  >
+                    <Trash2 className="w-4 h-4 text-rose-600" />
+                    <span>Remove Question Paper</span>
+                  </button>
 
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-            <div className="p-4 rounded-xl border border-emerald-200 bg-emerald-50/40 text-left space-y-2 shadow-2xs">
-              <div className="flex items-center justify-between">
-                <span className="px-2.5 py-1 rounded-lg bg-emerald-800 text-white font-bold text-xs">
-                  Question Paper 1
-                </span>
-                <span className="text-xs font-mono font-bold text-emerald-800 bg-white px-2 py-0.5 rounded border border-emerald-200">
-                  180 Questions
-                </span>
-              </div>
-              <p className="text-xs font-bold text-slate-900">
-                NEET 2024 National Master
-              </p>
-              <p className="text-[11px] text-slate-600">
-                Physics (1–45) • Chemistry (46–90) • Botany (91–135) • Zoology (136–180)
-              </p>
-              <div className="pt-1 text-[11px] font-semibold text-emerald-700 flex items-center gap-1">
-                <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
-                <span>Distinct Questions & High-Res Crops Ready</span>
-              </div>
-            </div>
-
-            <div className="p-4 rounded-xl border border-teal-200 bg-teal-50/40 text-left space-y-2 shadow-2xs">
-              <div className="flex items-center justify-between">
-                <span className="px-2.5 py-1 rounded-lg bg-teal-800 text-white font-bold text-xs">
-                  Question Paper 2
-                </span>
-                <span className="text-xs font-mono font-bold text-teal-800 bg-white px-2 py-0.5 rounded border border-teal-200">
-                  180 Questions
-                </span>
-              </div>
-              <p className="text-xs font-bold text-slate-900">
-                NEET 2023 National Master
-              </p>
-              <p className="text-[11px] text-slate-600">
-                Physics (1–45) • Chemistry (46–90) • Botany (91–135) • Zoology (136–180)
-              </p>
-              <div className="pt-1 text-[11px] font-semibold text-teal-700 flex items-center gap-1">
-                <span className="w-1.5 h-1.5 rounded-full bg-teal-500" />
-                <span>Distinct Questions & High-Res Crops Ready</span>
-              </div>
-            </div>
-
-            <div className="p-4 rounded-xl border border-cyan-200 bg-cyan-50/40 text-left space-y-2 shadow-2xs">
-              <div className="flex items-center justify-between">
-                <span className="px-2.5 py-1 rounded-lg bg-cyan-800 text-white font-bold text-xs">
-                  Question Paper 3
-                </span>
-                <span className="text-xs font-mono font-bold text-cyan-800 bg-white px-2 py-0.5 rounded border border-cyan-200">
-                  180 Questions
-                </span>
-              </div>
-              <p className="text-xs font-bold text-slate-900">
-                NEET 2021 Code O1 Official Master
-              </p>
-              <p className="text-[11px] text-slate-600">
-                Physics (1–45) • Chemistry (46–90) • Botany (91–135) • Zoology (136–180)
-              </p>
-              <div className="pt-1 text-[11px] font-semibold text-cyan-700 flex items-center gap-1">
-                <span className="w-1.5 h-1.5 rounded-full bg-cyan-500" />
-                <span>Authentic National Exam Questions & Diagram Crops</span>
-              </div>
+                  <button
+                    type="button"
+                    onClick={handleExtract}
+                    disabled={extracting}
+                    className="px-5 py-2.5 bg-gradient-to-r from-emerald-800 via-emerald-700 to-teal-800 hover:from-emerald-700 hover:via-emerald-600 hover:to-teal-700 text-white rounded-xl font-bold text-xs shadow-md flex items-center gap-2 cursor-pointer border border-emerald-600 transition-all shrink-0 active:scale-95"
+                  >
+                    <Sparkles className="w-4 h-4 text-amber-300" />
+                    <span>⚡ Extract Questions ({uploadedFiles.length === 1 ? uploadedFiles[0].name : `${uploadedFiles.length} Paper${uploadedFiles.length > 1 ? 's' : ''}`})</span>
+                  </button>
+                </>
+              ) : null}
             </div>
           </div>
+
+          {/* Dynamic cards for all uploaded files (1 paper = 1 card, 2 papers = 2 cards) */}
+          {uploadedFiles.length === 0 ? (
+            <div className="text-center py-8 px-4 bg-slate-50 border border-dashed border-slate-300 rounded-xl space-y-2">
+              <p className="font-bold text-xs text-slate-700">No Question Papers Currently Uploaded</p>
+              <p className="text-[11px] text-slate-500 max-w-md mx-auto">
+                Upload your exam PDF above (e.g. cn.pdf, semester exam, or test paper) to extract questions.
+              </p>
+            </div>
+          ) : (
+            <div className={`grid grid-cols-1 ${uploadedFiles.length === 1 ? 'max-w-md mx-auto' : uploadedFiles.length === 2 ? 'md:grid-cols-2' : 'md:grid-cols-3'} gap-3`}>
+              {uploadedFiles.map(file => {
+                const pNum = file.paperNumber;
+                const count = extractedQuestions.filter(q => (q.paper_number || 1) === pNum || q.source_file === file.name).length;
+                return (
+                  <div key={file.id} className="p-4 rounded-xl border border-emerald-200 bg-emerald-50/40 text-left space-y-2 shadow-2xs relative group">
+                    <div className="flex items-center justify-between">
+                      <span className="px-2.5 py-1 rounded-lg bg-emerald-800 text-white font-bold text-xs">
+                        Question Paper {pNum}
+                      </span>
+                      <div className="flex items-center gap-1.5">
+                        <span className="text-xs font-mono font-bold text-emerald-800 bg-white px-2 py-0.5 rounded border border-emerald-200">
+                          {count > 0 ? `${count} Questions` : 'Ready to Extract'}
+                        </span>
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            handleRemoveUploadedFile(file.id);
+                          }}
+                          className="p-1 rounded-lg text-slate-400 hover:text-rose-600 hover:bg-rose-100/70 transition-colors cursor-pointer"
+                          title={`Remove ${file.name}`}
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
+                    </div>
+                    <p className="text-xs font-bold text-slate-900 truncate" title={file.name}>
+                      {file.name}
+                    </p>
+                    <p className="text-[11px] text-slate-600">
+                      {paperSubject || 'Academic Examination'} {file.size ? `• ${formatFileSize(file.size)}` : ''}
+                    </p>
+                    <div className="pt-1 text-[11px] font-semibold text-emerald-700 flex items-center justify-between">
+                      <div className="flex items-center gap-1">
+                        <span className={`w-1.5 h-1.5 rounded-full ${count > 0 ? 'bg-emerald-500' : 'bg-amber-400'}`} />
+                        <span>{count > 0 ? `${count} Questions Extracted & Ready` : 'Ready for Zero-Bleed Extraction'}</span>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => handleRemoveUploadedFile(file.id)}
+                        className="text-[10px] text-rose-600 hover:text-rose-800 font-bold underline cursor-pointer"
+                      >
+                        Remove
+                      </button>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
         </div>
       )}
 
@@ -1680,6 +1973,16 @@ export const ExamManagerQuestionExtractor: React.FC<ExamManagerQuestionExtractor
                   <span>Debug Segmentation Map ({debugViews.length}p)</span>
                 </button>
               )}
+
+              <button
+                type="button"
+                onClick={handleRemoveAllPapers}
+                className="px-4 py-2 bg-rose-700/90 hover:bg-rose-600 text-white rounded-xl font-bold text-xs shadow-xs flex items-center gap-1.5 transition-all cursor-pointer border border-rose-600 active:scale-95"
+                title="Remove all extracted question papers and return to studio"
+              >
+                <Trash2 className="w-3.5 h-3.5" />
+                <span>Remove Question Paper</span>
+              </button>
             </div>
           </div>
 
@@ -1695,21 +1998,33 @@ export const ExamManagerQuestionExtractor: React.FC<ExamManagerQuestionExtractor
                     Question Paper Selector ({availablePaperNumbers.length} Question Paper{availablePaperNumbers.length > 1 ? 's' : ''})
                   </h4>
                   <p className="text-[11px] text-slate-500">
-                    Click any Question Paper tab to inspect all 180 extracted questions in the sidebar:
+                    Click any Question Paper tab to inspect extracted questions in the sidebar:
                   </p>
                 </div>
               </div>
 
               <div className="flex flex-wrap items-center gap-2">
+                {selectedPaperFilter !== 'ALL' && (
+                  <button
+                    type="button"
+                    onClick={() => handleRemovePaper(Number(selectedPaperFilter))}
+                    className="px-3 py-1.5 bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 rounded-xl font-bold text-xs shadow-2xs flex items-center gap-1.5 cursor-pointer transition-all active:scale-95"
+                    title={`Remove Question Paper ${selectedPaperFilter}`}
+                  >
+                    <Trash2 className="w-3.5 h-3.5 text-rose-600" />
+                    <span>Remove Paper {selectedPaperFilter}</span>
+                  </button>
+                )}
+
                 <button
                   type="button"
-                  onClick={() => handleExtractThreeStandardPapers(selectedPaperFilter)}
-                  disabled={extracting}
-                  className="px-3.5 py-1.5 bg-gradient-to-r from-emerald-700 to-teal-700 hover:from-emerald-600 hover:to-teal-600 text-white rounded-xl font-bold text-xs shadow-xs flex items-center gap-1.5 cursor-pointer border border-emerald-600 transition-all"
-                  title="Extract or re-extract all 180 questions for Paper 1, Paper 2, and Paper 3"
+                  onClick={handleExtract}
+                  disabled={extracting || uploadedFiles.length === 0}
+                  className="px-3.5 py-1.5 bg-gradient-to-r from-emerald-700 to-teal-700 hover:from-emerald-600 hover:to-teal-600 text-white rounded-xl font-bold text-xs shadow-xs flex items-center gap-1.5 cursor-pointer border border-emerald-600 transition-all disabled:opacity-50"
+                  title="Extract or re-extract questions for uploaded question paper(s)"
                 >
                   <Sparkles className="w-3.5 h-3.5 text-amber-300" />
-                  <span>⚡ Extract All 3 Question Papers (180 Qs Each)</span>
+                  <span>⚡ Re-Extract Questions</span>
                 </button>
 
                 <div className="flex items-center gap-1.5 text-xs">
@@ -1781,7 +2096,7 @@ export const ExamManagerQuestionExtractor: React.FC<ExamManagerQuestionExtractor
                         isSelected ? 'bg-emerald-950 text-emerald-200 border border-emerald-700' : 'bg-slate-200 text-slate-700'
                       }`}
                     >
-                      {count > 0 ? `${count} Qs` : '180 Qs'}
+                      {count} Qs
                     </span>
                   </button>
                 );
@@ -1907,11 +2222,12 @@ export const ExamManagerQuestionExtractor: React.FC<ExamManagerQuestionExtractor
                     </p>
                     <button
                       type="button"
-                      onClick={() => handleExtractThreeStandardPapers(selectedPaperFilter)}
-                      className="px-4 py-2 bg-emerald-800 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold shadow-xs cursor-pointer inline-flex items-center gap-1.5"
+                      onClick={handleExtract}
+                      disabled={uploadedFiles.length === 0}
+                      className="px-4 py-2 bg-emerald-800 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold shadow-xs cursor-pointer inline-flex items-center gap-1.5 disabled:opacity-50"
                     >
                       <Sparkles className="w-3.5 h-3.5 text-emerald-300" />
-                      <span>Extract 180 Questions for Question Paper {selectedPaperFilter !== 'ALL' ? selectedPaperFilter : '1, 2 & 3'}</span>
+                      <span>Extract Questions for Question Paper {selectedPaperFilter !== 'ALL' ? selectedPaperFilter : 'All Papers'}</span>
                     </button>
                   </div>
                 ) : (
@@ -1972,8 +2288,8 @@ export const ExamManagerQuestionExtractor: React.FC<ExamManagerQuestionExtractor
                             </span>
                           </div>
 
-                          {/* Assignment Status Tag */}
-                          <div>
+                          {/* Assignment Status Tag & Quick Remove Button */}
+                          <div className="flex items-center gap-1.5 shrink-0">
                             {assignment?.smeName && assignment?.translatorName ? (
                               <span className="px-2 py-0.5 rounded text-[9px] font-bold bg-emerald-100 text-emerald-900 border border-emerald-200 flex items-center gap-1">
                                 <Check className="w-2.5 h-2.5 text-emerald-700" />
@@ -1994,13 +2310,24 @@ export const ExamManagerQuestionExtractor: React.FC<ExamManagerQuestionExtractor
                                 Unassigned
                               </span>
                             )}
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                deleteExtractedQuestion(q.tempId);
+                              }}
+                              className="p-1 rounded text-slate-300 hover:text-rose-600 hover:bg-rose-50 transition-colors cursor-pointer"
+                              title="Remove this question"
+                            >
+                              <Trash2 className="w-3.5 h-3.5" />
+                            </button>
                           </div>
                         </div>
 
                         {/* Question Preview Snippet */}
-                        <p className="text-slate-700 line-clamp-2 text-[11px] leading-relaxed">
-                          {q.content_text}
-                        </p>
+                        <div className="text-slate-700 line-clamp-2 text-[11px] leading-relaxed">
+                          <LaTeXText text={q.content_text} />
+                        </div>
 
                         {/* Diagram Indicator Badge */}
                         {(q.diagram_url || q.diagram_data) && (
@@ -2026,8 +2353,8 @@ export const ExamManagerQuestionExtractor: React.FC<ExamManagerQuestionExtractor
             <div className="lg:col-span-7 bg-white border border-slate-200 rounded-2xl p-6 shadow-xs space-y-5">
               {activeQuestion ? (
                 <>
-                  {/* Header with Navigation & Quick Actions */}
-                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-100 pb-4">
+                  {/* Sticky Header with Navigation & Quick Actions */}
+                  <div className="sticky top-0 z-20 bg-white/95 backdrop-blur-xs py-3 px-4 -mx-6 -mt-6 rounded-t-2xl border-b border-slate-200 shadow-2xs flex flex-col sm:flex-row sm:items-center justify-between gap-3">
                     <div className="flex flex-wrap items-center gap-2">
                       <span className="px-2.5 py-1 rounded-lg bg-emerald-700 text-white font-bold text-xs shadow-2xs">
                         Question Paper {activeQuestion.paper_number || 1}
@@ -2065,6 +2392,50 @@ export const ExamManagerQuestionExtractor: React.FC<ExamManagerQuestionExtractor
                       >
                         <Crop className="w-3.5 h-3.5 text-emerald-200" />
                         <span>Edit Boundary</span>
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => handleOcrSpaceForQuestion(activeQuestion, '2')}
+                        disabled={isOcrSpaceLoading !== null || isNavidcOcrLoading || isPuterOcrLoading !== null}
+                        className="px-2.5 py-1.5 rounded-lg bg-sky-700 hover:bg-sky-600 text-white font-bold text-xs flex items-center gap-1 shadow-xs transition cursor-pointer mr-1"
+                        title="Extract question using OCR.space Engine 2 (Fast, General Text, Formulas)"
+                      >
+                        <Sparkles className="w-3.5 h-3.5 text-sky-200" />
+                        <span>{isOcrSpaceLoading === '2' ? 'OCR.space...' : 'OCR.space'}</span>
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => handleOcrSpaceForQuestion(activeQuestion, '3')}
+                        disabled={isOcrSpaceLoading !== null || isNavidcOcrLoading || isPuterOcrLoading !== null}
+                        className="px-2.5 py-1.5 rounded-lg bg-purple-700 hover:bg-purple-600 text-white font-bold text-xs flex items-center gap-1 shadow-xs transition cursor-pointer mr-1"
+                        title="Extract question using OCR.space Engine 3 (Markdown Tables & Handwriting)"
+                      >
+                        <FileText className="w-3.5 h-3.5 text-purple-200" />
+                        <span>{isOcrSpaceLoading === '3' ? 'Table OCR...' : 'Table E3'}</span>
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => handleNavidcOcrForQuestion(activeQuestion)}
+                        disabled={isOcrSpaceLoading !== null || isNavidcOcrLoading || isPuterOcrLoading !== null}
+                        className="px-2.5 py-1.5 rounded-lg bg-teal-700 hover:bg-teal-600 text-white font-bold text-xs flex items-center gap-1 shadow-xs transition cursor-pointer mr-1"
+                        title="Extract text, formulas & tables using local offline 1.2B NaviDC-OCR model"
+                      >
+                        <Cpu className="w-3.5 h-3.5 text-teal-200" />
+                        <span>{isNavidcOcrLoading ? 'NaviDC...' : 'NaviDC 1.2B'}</span>
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => handlePuterOcrForQuestion(activeQuestion, 'vision')}
+                        disabled={isOcrSpaceLoading !== null || isPuterOcrLoading !== null || isNavidcOcrLoading}
+                        className="px-2.5 py-1.5 rounded-lg bg-indigo-700 hover:bg-indigo-600 text-white font-bold text-xs flex items-center gap-1 shadow-xs transition cursor-pointer mr-1"
+                        title="Extract question, tables & options using Puter.js AI Vision (Claude / Mistral Vision - 100% Free)"
+                      >
+                        <Sparkles className="w-3.5 h-3.5 text-amber-300" />
+                        <span>{isPuterOcrLoading ? 'Puter AI...' : 'Puter Vision AI'}</span>
                       </button>
 
                       <button
@@ -2153,15 +2524,32 @@ export const ExamManagerQuestionExtractor: React.FC<ExamManagerQuestionExtractor
 
                   {/* Question Content Editor */}
                   <div className="space-y-1.5 text-xs">
-                    <label className="block text-slate-700 font-bold">
-                      Question Statement *
-                    </label>
+                    <div className="flex items-center justify-between">
+                      <label className="block text-slate-700 font-bold">
+                        Question Statement *
+                      </label>
+                      {activeQuestion.content_text.includes('$') && (
+                        <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-indigo-100 text-indigo-800 font-bold">
+                          LaTeX Math Active
+                        </span>
+                      )}
+                    </div>
                     <textarea
                       rows={3}
                       value={activeQuestion.content_text}
                       onChange={e => updateActiveQuestion({ content_text: e.target.value })}
                       className="w-full px-3 py-2 rounded-xl bg-slate-50 border border-slate-300 text-slate-900 text-xs focus:bg-white focus:border-emerald-800 focus:outline-hidden"
                     />
+                    {activeQuestion.content_text.includes('$') && (
+                      <div className="p-2.5 rounded-xl bg-indigo-50/60 border border-indigo-200 text-xs text-slate-900 space-y-1">
+                        <span className="text-[10px] font-bold text-indigo-700 uppercase tracking-wider block">
+                          LaTeX Rendered Math Preview
+                        </span>
+                        <div className="text-xs text-slate-800 leading-relaxed">
+                          <LaTeXText text={activeQuestion.content_text} />
+                        </div>
+                      </div>
+                    )}
                   </div>
 
                   {/* Diagram / Visual Figure Asset */}
@@ -2207,7 +2595,10 @@ export const ExamManagerQuestionExtractor: React.FC<ExamManagerQuestionExtractor
                     </div>
 
                     {(() => {
-                      const displayImageUrl = activeQuestion.diagram_url || (activeQuestion.question_images && activeQuestion.question_images[0]) || activeQuestion.diagram_data;
+                      const rawUrl = activeQuestion.diagram_url || (activeQuestion.question_images && activeQuestion.question_images[0]) || activeQuestion.diagram_data;
+                      const displayImageUrl = rawUrl && typeof rawUrl === 'string' && (rawUrl.startsWith('/questions/') || rawUrl.startsWith('public/questions/')) && !rawUrl.includes('?')
+                        ? `${rawUrl}?v=clean300dpi_v5`
+                        : rawUrl;
                       return displayImageUrl ? (
                         <div className="space-y-2">
                           {activeQuestion.options_extraction_status === 'uncertain' && (
@@ -2540,7 +2931,7 @@ export const ExamManagerQuestionExtractor: React.FC<ExamManagerQuestionExtractor
                 <button
                   type="button"
                   onClick={() => setAssignTargetRole('TRANSLATOR')}
-                  className={`py-2 px-3 rounded-lg font-bold text-xs flex items-center justify-center gap-1.5 transition-colors ${
+                  className={`py-2 px-2.5 rounded-lg font-bold text-xs flex items-center justify-center gap-1.5 transition-colors cursor-pointer ${
                     assignTargetRole === 'TRANSLATOR'
                       ? 'bg-purple-600 text-white'
                       : 'bg-slate-800 text-slate-300 hover:bg-slate-700'
@@ -2563,7 +2954,6 @@ export const ExamManagerQuestionExtractor: React.FC<ExamManagerQuestionExtractor
                   <span>Direct Question Bank Import</span>
                 </button>
               </div>
-
               {/* Translator User & Language Selection */}
               {assignTargetRole === 'TRANSLATOR' && (
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">

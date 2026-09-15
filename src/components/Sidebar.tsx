@@ -101,10 +101,6 @@ export const Sidebar: React.FC<SidebarProps> = ({
               { id: 'trusted_devices', label: 'Trusted Workstations', icon: Laptop },
             ],
           },
-          {
-            title: 'Leak Avoidance Surveillance',
-            items: [{ id: 'proctor_dashboard', label: 'Authority Camera Surveillance', icon: ShieldAlert }],
-          },
         ];
 
       case 'EXAM_MANAGER':
@@ -112,10 +108,6 @@ export const Sidebar: React.FC<SidebarProps> = ({
           {
             title: 'Overview',
             items: [{ id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard }],
-          },
-          {
-            title: 'Leak Avoidance Surveillance',
-            items: [{ id: 'proctor_dashboard', label: 'Authority Camera Surveillance', icon: ShieldAlert }],
           },
           {
             title: 'Examinations',
@@ -152,6 +144,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
             items: [{ id: 'security_events', label: 'Security Events', icon: ShieldAlert }],
           },
         ];
+
 
       case 'TRANSLATOR':
         return [

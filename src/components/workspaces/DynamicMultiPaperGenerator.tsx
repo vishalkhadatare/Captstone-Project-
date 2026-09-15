@@ -19,6 +19,8 @@ import {
   Plus,
   Trash2,
   Database,
+  Lock,
+  Building2,
   X,
 } from 'lucide-react';
 import { api } from '../../api';
@@ -35,11 +37,13 @@ import {
 interface DynamicMultiPaperGeneratorProps {
   examinations?: Examination[];
   selectedExamId?: string;
+  onNavigateSubTab?: (subTab: string) => void;
 }
 
 export const DynamicMultiPaperGenerator: React.FC<DynamicMultiPaperGeneratorProps> = ({
   examinations = [],
   selectedExamId: initialExamId,
+  onNavigateSubTab,
 }) => {
   // Navigation & Sub-views
   const [activeView, setActiveView] = useState<'generate' | 'papers' | 'dispatch' | 'forensics'>('generate');
@@ -54,9 +58,9 @@ export const DynamicMultiPaperGenerator: React.FC<DynamicMultiPaperGeneratorProp
 
   // Blueprint State
   const [paperTitle, setPaperTitle] = useState<string>('National Standard Mock Examination 2026');
-  const [preset, setPreset] = useState<'neet' | 'jee' | 'balanced' | 'custom'>('neet');
-  const [totalQuestions, setTotalQuestions] = useState<number>(180);
-  const [maxContributionPercent, setMaxContributionPercent] = useState<number>(40);
+  const [preset, setPreset] = useState<'adaptive' | 'neet' | 'jee' | 'balanced' | 'custom'>('adaptive');
+  const [totalQuestions, setTotalQuestions] = useState<number>(30);
+  const [maxContributionPercent, setMaxContributionPercent] = useState<number>(100);
   const [numSets, setNumSets] = useState<number>(4);
 
   // Subject Quotas
@@ -122,6 +126,46 @@ export const DynamicMultiPaperGenerator: React.FC<DynamicMultiPaperGeneratorProp
     setTimeout(() => setCopiedFingerprint(null), 2000);
   };
 
+  // Auto-fit quotas and rules directly from selected/available source papers
+  const applyAutoFitPreset = (targetPapers?: MultiPaperSourcePaper[]) => {
+    const papersToUse = targetPapers || sourcePapers.filter((p) => selectedPaperIds.includes(p.id));
+    if (papersToUse.length === 0) return;
+
+    const subjectMap: Record<string, number> = {};
+    let totalQ = 0;
+
+    papersToUse.forEach((p) => {
+      if (Array.isArray(p.breakdown) && p.breakdown.length > 0) {
+        p.breakdown.forEach((b: any) => {
+          const sub = (b.subject || p.subject || 'General').trim();
+          subjectMap[sub] = (subjectMap[sub] || 0) + Number(b.count || 0);
+          totalQ += Number(b.count || 0);
+        });
+      } else {
+        const sub = (p.subject || 'General').trim();
+        const cnt = Number(p.actualQuestionCount || p.question_count || 0);
+        subjectMap[sub] = (subjectMap[sub] || 0) + cnt;
+        totalQ += cnt;
+      }
+    });
+
+    const entries = Object.entries(subjectMap);
+    const quotas = entries.length > 0
+      ? entries.map(([subject, count]) => ({ subject, count: Math.max(1, count) }))
+      : [{ subject: (papersToUse[0]?.subject || 'General').trim(), count: Math.max(1, totalQ || 20) }];
+
+    const calcTotal = quotas.reduce((sum, q) => sum + q.count, 0);
+    const primaryName = (papersToUse[0]?.original_filename || '').replace(/\.pdf$/i, '') || papersToUse[0]?.subject || 'Academic';
+
+    setPreset('adaptive');
+    setPaperTitle(`${primaryName} Multi-Set Examination 2026`);
+    setTotalQuestions(calcTotal > 0 ? calcTotal : 30);
+    setSubjectQuotas(quotas);
+    setDiffDistribution({ easy: 30, medium: 50, hard: 20 });
+    setNumSets(4);
+    setMaxContributionPercent(papersToUse.length === 1 ? 100 : Math.min(100, Math.ceil(100 / papersToUse.length) + 15));
+  };
+
   // Load Source Papers
   const fetchSourcePapers = async () => {
     setLoadingSources(true);
@@ -130,10 +174,16 @@ export const DynamicMultiPaperGenerator: React.FC<DynamicMultiPaperGeneratorProp
       if (res.success && (res.papers || (res as any).sourcePapers)) {
         const papers = res.papers || (res as any).sourcePapers || [];
         setSourcePapers(papers);
-        setSelectedPaperIds(papers.map((p: any) => p.id));
         // By default select all papers that have questions
         const withQuestions = papers.filter((p: any) => (p.actualQuestionCount || p.question_count || 0) > 0);
-        setSelectedPaperIds(withQuestions.length > 0 ? withQuestions.map((p: any) => p.id) : papers.map((p: any) => p.id));
+        const toSelect = withQuestions.length > 0 ? withQuestions.map((p: any) => p.id) : papers.map((p: any) => p.id);
+        setSelectedPaperIds(toSelect);
+
+        // Auto-adapt blueprint if papers exist
+        if (papers.length > 0) {
+          const eligible = withQuestions.length > 0 ? withQuestions : papers;
+          applyAutoFitPreset(eligible);
+        }
       }
     } catch (err: any) {
       console.error('Failed to load source papers', err);
@@ -179,9 +229,11 @@ export const DynamicMultiPaperGenerator: React.FC<DynamicMultiPaperGeneratorProp
   }, [selectedExamId]);
 
   // Handle Preset Changes
-  const applyPreset = (presetKey: 'neet' | 'jee' | 'balanced' | 'custom') => {
+  const applyPreset = (presetKey: 'adaptive' | 'neet' | 'jee' | 'balanced' | 'custom') => {
     setPreset(presetKey);
-    if (presetKey === 'neet') {
+    if (presetKey === 'adaptive') {
+      applyAutoFitPreset();
+    } else if (presetKey === 'neet') {
       setPaperTitle('NEET UG National Medical Entrance Simulation 2026');
       setTotalQuestions(180);
       setSubjectQuotas([
@@ -191,7 +243,7 @@ export const DynamicMultiPaperGenerator: React.FC<DynamicMultiPaperGeneratorProp
         { subject: 'Zoology', count: 45 },
       ]);
       setDiffDistribution({ easy: 30, medium: 50, hard: 20 });
-      setMaxContributionPercent(40);
+      setMaxContributionPercent(selectedPaperIds.length === 1 ? 100 : 40);
     } else if (presetKey === 'jee') {
       setPaperTitle('JEE Main Engineering Entrance Simulation 2026');
       setTotalQuestions(75);
@@ -201,21 +253,21 @@ export const DynamicMultiPaperGenerator: React.FC<DynamicMultiPaperGeneratorProp
         { subject: 'Mathematics', count: 25 },
       ]);
       setDiffDistribution({ easy: 25, medium: 50, hard: 25 });
-      setMaxContributionPercent(40);
+      setMaxContributionPercent(selectedPaperIds.length === 1 ? 100 : 40);
     } else if (presetKey === 'balanced') {
       setPaperTitle('Balanced Multi-Disciplinary Assessment 2026');
-      setTotalQuestions(90);
+      setTotalQuestions(60);
       const availSubjects = Array.from(new Set(sourcePapers.map((p) => p.subject).filter(Boolean)));
-      const subjectsToUse = availSubjects.length > 0 ? availSubjects : ['Physics', 'Chemistry', 'Mathematics'];
-      const perSub = Math.floor(90 / subjectsToUse.length);
+      const subjectsToUse = availSubjects.length > 0 ? availSubjects : ['Academic Assessment'];
+      const perSub = Math.floor(60 / subjectsToUse.length);
       setSubjectQuotas(
         subjectsToUse.map((s, idx) => ({
           subject: s,
-          count: idx === 0 ? 90 - perSub * (subjectsToUse.length - 1) : perSub,
+          count: idx === 0 ? 60 - perSub * (subjectsToUse.length - 1) : perSub,
         }))
       );
       setDiffDistribution({ easy: 33, medium: 34, hard: 33 });
-      setMaxContributionPercent(40);
+      setMaxContributionPercent(selectedPaperIds.length === 1 ? 100 : 40);
     }
   };
 
@@ -236,12 +288,12 @@ export const DynamicMultiPaperGenerator: React.FC<DynamicMultiPaperGeneratorProp
     if (selectedPaperIds.length === 0) {
       setValidation({
         feasible: false,
-        errors: ['Please select at least 2 source papers.'],
+        errors: ['Please select at least 1 source paper.'],
         stats: {
           availableCount: 0,
           requiredCount: totalQuestions,
           maxAllowedPerPaper: Math.ceil((totalQuestions * maxContributionPercent) / 100),
-          minRequiredPapers: 2,
+          minRequiredPapers: 1,
         },
       });
       return;
@@ -483,6 +535,29 @@ export const DynamicMultiPaperGenerator: React.FC<DynamicMultiPaperGeneratorProp
               <Search className="w-3.5 h-3.5" /> Forensic Leak Tracer
             </button>
           </div>
+
+          {onNavigateSubTab && (
+            <div className="flex flex-wrap items-center gap-2 border-t md:border-t-0 md:border-l border-white/10 md:pl-3 pt-2 md:pt-0">
+              <button
+                type="button"
+                onClick={() => onNavigateSubTab('paper_versions')}
+                className="px-3 py-1.5 rounded-lg bg-emerald-700/80 hover:bg-emerald-600 text-white font-bold text-xs flex items-center gap-1.5 transition-all shadow-2xs cursor-pointer"
+                title="Open Paper Versions Studio to inspect cryptographic release sets & Shamir keys"
+              >
+                <Lock className="w-3.5 h-3.5 text-emerald-300" />
+                <span>Paper Versions</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => onNavigateSubTab('examination_centres')}
+                className="px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-white font-bold text-xs flex items-center gap-1.5 transition-all shadow-2xs cursor-pointer"
+                title="Configure Delivery Centres & Copy Control quotas"
+              >
+                <Building2 className="w-3.5 h-3.5 text-slate-300" />
+                <span>Centres</span>
+              </button>
+            </div>
+          )}
         </div>
       </div>
 
@@ -655,7 +730,17 @@ export const DynamicMultiPaperGenerator: React.FC<DynamicMultiPaperGeneratorProp
                 </div>
 
                 {/* Preset Selector */}
-                <div className="flex items-center gap-1 bg-slate-100 p-1 rounded-lg text-xs">
+                <div className="flex flex-wrap items-center gap-1 bg-slate-100 p-1 rounded-lg text-xs">
+                  <button
+                    onClick={() => applyAutoFitPreset()}
+                    className={`px-2.5 py-1 rounded font-bold transition-all flex items-center gap-1 ${
+                      preset === 'adaptive' ? 'bg-white text-emerald-800 shadow-xs' : 'text-slate-600 hover:text-slate-900'
+                    }`}
+                    title="Auto-detect subjects and question quotas from selected papers"
+                  >
+                    <Sparkles className="w-3.5 h-3.5 text-emerald-600" />
+                    Auto-Fit Papers
+                  </button>
                   <button
                     onClick={() => applyPreset('neet')}
                     className={`px-2.5 py-1 rounded font-semibold transition-all ${
@@ -680,7 +765,7 @@ export const DynamicMultiPaperGenerator: React.FC<DynamicMultiPaperGeneratorProp
                         : 'text-slate-600 hover:text-slate-900'
                     }`}
                   >
-                    Balanced (90Q)
+                    Balanced
                   </button>
                   <button
                     onClick={() => setPreset('custom')}
@@ -728,21 +813,23 @@ export const DynamicMultiPaperGenerator: React.FC<DynamicMultiPaperGeneratorProp
                     <ShieldCheck className="w-4 h-4 text-emerald-600" /> Max Source Contribution Cap
                   </span>
                   <span className="font-black text-emerald-700 bg-emerald-100 px-2 py-0.5 rounded">
-                    {maxContributionPercent}% per paper
+                    {selectedPaperIds.length === 1 ? 100 : maxContributionPercent}% per paper
                   </span>
                 </div>
                 <input
                   type="range"
-                  min={15}
-                  max={80}
+                  min={selectedPaperIds.length === 1 ? 100 : 15}
+                  max={100}
                   step={5}
-                  value={maxContributionPercent}
+                  disabled={selectedPaperIds.length === 1}
+                  value={selectedPaperIds.length === 1 ? 100 : maxContributionPercent}
                   onChange={(e) => setMaxContributionPercent(parseInt(e.target.value))}
-                  className="w-full h-1.5 bg-slate-200 rounded-lg appearance-none cursor-pointer accent-emerald-600"
+                  className="w-full h-1.5 bg-slate-200 rounded-lg appearance-none cursor-pointer accent-emerald-600 disabled:opacity-60"
                 />
                 <p className="text-[11px] text-slate-500">
-                  Enforces mathematical balance. At {maxContributionPercent}% cap, no single uploaded source paper can
-                  dominate more than {Math.ceil((totalQuestions * maxContributionPercent) / 100)} questions.
+                  {selectedPaperIds.length === 1
+                    ? 'Single master paper selected: 100% contribution enabled. The generator will create 4 distinct randomized paper sets (Sets A, B, C, D) with shuffled question orders and shuffled option keys.'
+                    : `Enforces mathematical balance. At ${maxContributionPercent}% cap, no single uploaded source paper can dominate more than ${Math.ceil((totalQuestions * maxContributionPercent) / 100)} questions.`}
                 </p>
               </div>
 
@@ -1542,6 +1629,16 @@ export const DynamicMultiPaperGenerator: React.FC<DynamicMultiPaperGeneratorProp
                         <span className="w-7 h-7 rounded-lg bg-emerald-100 text-emerald-900 font-black text-xs flex items-center justify-center">
                           Q{q.display_order}
                         </span>
+                        {(q as any).question_number && (
+                          <span className="px-2 py-0.5 rounded text-[10px] font-mono bg-slate-200 text-slate-700">
+                            Orig #{ (q as any).question_number }
+                          </span>
+                        )}
+                        {(q as any).question_type && (
+                          <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-indigo-100 text-indigo-800">
+                            {(q as any).question_type}
+                          </span>
+                        )}
                         <span className="px-2 py-0.5 rounded text-[11px] font-bold bg-slate-100 text-slate-700">
                           {q.subject || 'General'}
                         </span>
@@ -1566,15 +1663,15 @@ export const DynamicMultiPaperGenerator: React.FC<DynamicMultiPaperGeneratorProp
                     </div>
 
                     {/* Question Text */}
-                    <div className="text-xs text-slate-800 font-medium leading-relaxed">{q.content_text}</div>
+                    <div className="text-xs text-slate-800 font-medium leading-relaxed whitespace-pre-wrap">{q.content_text}</div>
 
                     {/* Preserved Question Image / Diagram */}
-                    {q.diagram_url && (
+                    {(q.diagram_url || (q as any).image_url || (q as any).imageUrl || (q as any).diagramUrl) && (
                       <div className="p-2 rounded-lg bg-slate-50 border border-slate-200 inline-block max-w-md">
                         <img
-                          src={q.diagram_url}
-                          alt={`Question diagram ${q.display_order}`}
-                          className="max-h-64 object-contain rounded"
+                          src={q.diagram_url || (q as any).image_url || (q as any).imageUrl || (q as any).diagramUrl}
+                          alt={`Question crop ${q.display_order}`}
+                          className="max-h-72 object-contain rounded"
                         />
                       </div>
                     )}

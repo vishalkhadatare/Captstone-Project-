@@ -31,6 +31,59 @@ function getAiClient(): GoogleGenAI | null {
   return aiClient;
 }
 
+/**
+ * Groq AI Client Integration
+ * Ultra-fast inference using OpenAI-compatible Groq API
+ */
+export async function callGroqChat(
+  messages: Array<{ role: 'system' | 'user' | 'assistant'; content: string }>,
+  options: {
+    model?: string;
+    temperature?: number;
+    max_tokens?: number;
+    response_format?: { type: 'json_object' };
+  } = {}
+): Promise<string> {
+  const apiKey = process.env.GROQ_API_KEY || 'REDACTED_GROQ_KEY';
+  if (!apiKey) {
+    throw new Error('GROQ_API_KEY is not configured in environment.');
+  }
+
+  const model = options.model || process.env.GROQ_MODEL || 'openai/gpt-oss-120b';
+
+  const payload: any = {
+    model,
+    messages,
+    temperature: options.temperature ?? 0.1,
+    max_tokens: options.max_tokens ?? 3000,
+  };
+
+  if (options.response_format) {
+    payload.response_format = options.response_format;
+  }
+
+  const response = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+    method: 'POST',
+    headers: {
+      'Authorization': `Bearer ${apiKey}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify(payload),
+  });
+
+  if (!response.ok) {
+    const errText = await response.text();
+    throw new Error(`Groq API error (${response.status}): ${errText}`);
+  }
+
+  const data: any = await response.json();
+  const choice = data?.choices?.[0];
+  if (!choice?.message?.content) {
+    throw new Error('Groq returned empty response content.');
+  }
+  return choice.message.content;
+}
+
 export interface TheoryPatternAnalysisResult {
   detectedSections: Array<{
     name: string;
@@ -58,7 +111,7 @@ export interface QuestionSimilarityResult {
 }
 
 /**
- * Uses Gemini AI to analyze a Theory reference template / syllabus blueprint
+ * Uses Groq / Gemini AI to analyze a Theory reference template / syllabus blueprint
  * to automatically detect sections, question counts, marks, and attempt rules.
  */
 export async function analyzeTheoryPatternWithAI(
@@ -66,11 +119,7 @@ export async function analyzeTheoryPatternWithAI(
   subject: string,
   category: string
 ): Promise<TheoryPatternAnalysisResult> {
-  const client = getAiClient();
-
-  if (client) {
-    try {
-      const prompt = `You are a high-security academic examination pattern analyzer for ZeroLeak.
+  const prompt = `You are a high-security academic examination pattern analyzer for ZeroLeak.
 Analyze the following reference examination structure/template for Subject: "${subject}", Category: "${category}".
 
 Reference Template Text:
@@ -100,6 +149,32 @@ Extract the exact structural blueprint as a strict JSON object with the followin
 
 Return ONLY the JSON object.`;
 
+  // 1. Primary Engine: Ultra-fast Groq AI
+  try {
+    const groqText = await callGroqChat([
+      { role: 'system', content: 'You are an academic examination blueprint parser. Return strictly valid JSON.' },
+      { role: 'user', content: prompt }
+    ], { temperature: 0.1 });
+
+    const jsonMatch = groqText.match(/\{[\s\S]*\}/);
+    if (jsonMatch) {
+      const parsed = JSON.parse(jsonMatch[0]);
+      return {
+        detectedSections: parsed.detectedSections || [],
+        totalQuestions: Number(parsed.totalQuestions) || 10,
+        totalMarks: Number(parsed.totalMarks) || 100,
+        attemptRules: parsed.attemptRules || 'Standard examination attempt guidelines apply.',
+        aiConfidenceScore: parsed.aiConfidenceScore || 0.95,
+        patternSummary: parsed.patternSummary || 'Automated pattern extraction verified by Groq AI engine.',
+      };
+    }
+  } catch (groqErr) {
+    console.warn('[ZeroLeak AI] Groq theory pattern analysis skipped, trying Gemini fallback:', groqErr);
+  }
+
+  const client = getAiClient();
+  if (client) {
+    try {
       const response = await client.models.generateContent({
         model: 'gemini-3.7-flash',
         contents: prompt,
@@ -120,8 +195,8 @@ Return ONLY the JSON object.`;
           patternSummary: parsed.patternSummary || 'Automated pattern extraction verified by AI engine.',
         };
       }
-    } catch (err) {
-      console.warn('Gemini pattern analysis error, using algorithmic fallback:', err);
+    } catch (e) {
+      console.warn('Gemini pattern analysis fallback skipped:', e);
     }
   }
 
@@ -180,11 +255,8 @@ export async function checkQuestionSimilarityWithAI(
     };
   }
 
-  const client = getAiClient();
-  if (client && existingQuestions.length > 0) {
-    try {
-      const topCandidates = existingQuestions.slice(0, 15);
-      const prompt = `You are an AI Question Similarity and Plagiarism Detector for ZeroLeak.
+  const topCandidates = existingQuestions.slice(0, 15);
+  const prompt = `You are an AI Question Similarity and Plagiarism Detector for ZeroLeak.
 Check if this new question is a semantic duplicate or overly similar to any question in the current pool:
 
 New Question:
@@ -204,6 +276,24 @@ Analyze similarity and return ONLY a JSON response:
   "recommendedAction": "ACCEPT"
 }`;
 
+  // 1. Primary Engine: Groq AI
+  try {
+    const groqText = await callGroqChat([
+      { role: 'system', content: 'You are an AI examination deduplication analyzer. Return ONLY JSON.' },
+      { role: 'user', content: prompt }
+    ], { temperature: 0.1 });
+
+    const jsonMatch = groqText.match(/\{[\s\S]*\}/);
+    if (jsonMatch) {
+      return JSON.parse(jsonMatch[0]);
+    }
+  } catch (groqErr) {
+    console.warn('[ZeroLeak AI] Groq similarity check skipped, trying Gemini fallback:', groqErr);
+  }
+
+  const client = getAiClient();
+  if (client && existingQuestions.length > 0) {
+    try {
       const response = await client.models.generateContent({
         model: 'gemini-3.7-flash',
         contents: prompt,
@@ -284,7 +374,7 @@ export interface QuestionTranslationResult {
 
 /**
  * Translates an examination question and its options into the specified official Indian language
- * using Gemini AI with accurate scientific & mathematical terminology preservation.
+ * using Groq / Gemini AI with accurate scientific & mathematical terminology preservation.
  */
 export async function translateQuestionWithAI(
   content: string,
@@ -292,22 +382,18 @@ export async function translateQuestionWithAI(
   targetLanguage: string,
   subject: string
 ): Promise<QuestionTranslationResult> {
-  const client = getAiClient();
-
-  if (client) {
-    try {
-      const prompt = `You are an expert academic examination translator.
-    Translate the ORIGINAL examination question from the source language to the requested target language.
-    Subject: "${subject}". Target language: "${targetLanguage}".
-    Rules:
-    1. Preserve the exact meaning.
-    2. Do not add or remove information, solve the question, or change its difficulty.
-    3. Preserve question numbering, all answer options, numbers, formulas, symbols, units, and programming code.
-    4. Preserve technical terminology when appropriate and do not incorrectly translate programming keywords.
-    5. Preserve the correct-answer relationship.
-    6. Always translate from the ORIGINAL question, never from a prior translation.
-    7. Return a structured response containing the translated question and options.
-    8. Output ONLY a valid JSON object:
+  const prompt = `You are an expert academic examination translator.
+Translate the ORIGINAL examination question from the source language to the requested target language.
+Subject: "${subject}". Target language: "${targetLanguage}".
+Rules:
+1. Preserve the exact meaning.
+2. Do not add or remove information, solve the question, or change its difficulty.
+3. Preserve question numbering, all answer options, numbers, formulas, symbols, units, and programming code.
+4. Preserve technical terminology when appropriate and do not incorrectly translate programming keywords.
+5. Preserve the correct-answer relationship.
+6. Always translate from the ORIGINAL question, never from a prior translation.
+7. Return a structured response containing the translated question and options.
+8. Output ONLY a valid JSON object:
 
 Original Content:
 """
@@ -325,6 +411,31 @@ Output Schema:
   "aiConfidence": 0.96
 }`;
 
+  // 1. Primary Engine: Ultra-fast Groq AI
+  try {
+    const groqText = await callGroqChat([
+      { role: 'system', content: `You are an expert linguistic translator specializing in ${targetLanguage} for academic exams. Output ONLY JSON.` },
+      { role: 'user', content: prompt }
+    ], { temperature: 0.1 });
+
+    const jsonMatch = groqText.match(/\{[\s\S]*\}/);
+    if (jsonMatch) {
+      const parsed = JSON.parse(jsonMatch[0]);
+      return {
+        translatedContent: parsed.translatedContent || content,
+        translatedOptions: parsed.translatedOptions || options,
+        targetLanguage,
+        linguisticNotes: parsed.linguisticNotes || `Translated accurately into ${targetLanguage} by Groq AI linguistic engine.`,
+        aiConfidence: parsed.aiConfidence || 0.98,
+      };
+    }
+  } catch (groqErr) {
+    console.warn('[ZeroLeak AI] Groq translation skipped, trying Gemini fallback:', groqErr);
+  }
+
+  const client = getAiClient();
+  if (client) {
+    try {
       const response = await client.models.generateContent({
         model: 'gemini-3.7-flash',
         contents: prompt,
@@ -947,4 +1058,103 @@ REQUIREMENTS:
   };
 }
 
+export interface NaviDcOcrResult {
+  success: boolean;
+  markdown?: string;
+  questions?: Array<{
+    question_number: string;
+    content_text: string;
+    options: Array<{ id: string; text: string }> | null;
+    correct_answer: string;
+    has_latex: boolean;
+    has_table: boolean;
+    marks: number;
+  }>;
+  execution_time_ms?: number;
+  device?: string;
+  model?: string;
+  error?: string;
+}
 
+export async function runNaviDcOcr(payload: {
+  image_data?: string;
+  image_path?: string;
+  mode?: 'markdown' | 'mcq' | 'table';
+  prompt?: string;
+}): Promise<NaviDcOcrResult> {
+  return new Promise((resolve) => {
+    const pythonExe = process.env.PYTHON_PATH || 'python';
+    const scriptPath = path.resolve(process.cwd(), 'server', 'navidc_ocr.py');
+
+    if (!fs.existsSync(scriptPath)) {
+      return resolve({
+        success: false,
+        error: `NaviDC-OCR service script not found at ${scriptPath}`,
+      });
+    }
+
+    const proc = spawn(pythonExe, ['-u', scriptPath, '--stdin'], {
+      windowsHide: true,
+      stdio: ['pipe', 'pipe', 'pipe'],
+      env: {
+        ...process.env,
+        PYTHONIOENCODING: 'utf-8',
+        PYTHONUTF8: '1',
+      },
+    });
+
+    let stdoutData = '';
+    let stderrData = '';
+
+    proc.stdout.on('data', (chunk: Buffer) => {
+      stdoutData += chunk.toString('utf-8');
+    });
+
+    proc.stderr.on('data', (chunk: Buffer) => {
+      stderrData += chunk.toString('utf-8');
+    });
+
+    proc.on('close', (code) => {
+      try {
+        const trimmed = stdoutData.trim();
+        const jsonMatch = trimmed.match(/\{[\s\S]*\}/);
+        if (jsonMatch) {
+          const parsed = JSON.parse(jsonMatch[0]);
+          return resolve(parsed);
+        }
+        if (code !== 0) {
+          return resolve({
+            success: false,
+            error: stderrData || `NaviDC-OCR exited with code ${code}`,
+          });
+        }
+        return resolve({
+          success: true,
+          markdown: trimmed,
+        });
+      } catch (err: any) {
+        return resolve({
+          success: false,
+          error: `Failed to parse NaviDC-OCR output: ${err?.message || err}`,
+        });
+      }
+    });
+
+    proc.on('error', (err) => {
+      resolve({
+        success: false,
+        error: `Failed to spawn Python process: ${err.message}`,
+      });
+    });
+
+    try {
+      proc.stdin.write(JSON.stringify(payload));
+      proc.stdin.end();
+    } catch (writeErr: any) {
+      resolve({
+        success: false,
+        error: `Failed to write input to NaviDC-OCR process: ${writeErr?.message}`,
+      });
+    }
+  });
+}
