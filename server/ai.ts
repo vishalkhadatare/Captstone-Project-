@@ -748,7 +748,7 @@ export async function recropQuestionWithPython(payload: {
 }
 
 const OLLAMA_BASE_URL = (process.env.OLLAMA_BASE_URL || 'http://localhost:11434').replace(/\/$/, '');
-const OLLAMA_MODEL = process.env.OLLAMA_MODEL || 'llama3.2:latest';
+const OLLAMA_MODEL = process.env.OLLAMA_MODEL || 'qwen2.5vl:7b';
 
 export async function checkOllamaHealth(): Promise<{ connected: boolean; model: string; error?: string }> {
   try {
@@ -853,6 +853,54 @@ ${paperText.slice(0, 60000)}
     aiEngineUsed: true,
     pages,
   };
+}
+
+export async function filterQuestionCandidatesWithOllama<T extends { question_number?: string; content_text?: string }>(
+  questions: T[]
+): Promise<T[]> {
+  if (!questions.length) return questions;
+
+  const candidates = questions.map((question, index) => ({
+    index,
+    question_number: question.question_number || String(index + 1),
+    text: String(question.content_text || '').slice(0, 1800),
+  }));
+  const prompt = `Classify extracted examination-paper candidates. Keep only real questions or subquestions.
+Reject instructions, page headers, marks/duration lines, section titles, answer-key text, and unrelated fragments.
+Do not rewrite text. Return ONLY JSON in this exact shape: {"keep_indices":[0,1]}.
+Candidates:
+${JSON.stringify(candidates)}`;
+
+  try {
+    const response = await fetch(`${OLLAMA_BASE_URL}/api/chat`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        model: OLLAMA_MODEL,
+        stream: false,
+        format: 'json',
+        keep_alive: '10m',
+        options: { temperature: 0 },
+        messages: [
+          { role: 'system', content: 'You are a strict question-versus-instruction classifier. Return JSON only.' },
+          { role: 'user', content: prompt },
+        ],
+      }),
+      signal: AbortSignal.timeout(120000),
+    });
+    if (!response.ok) return questions;
+    const payload = await response.json() as { message?: { content?: string } };
+    const parsed = JSON.parse(payload.message?.content || '{}') as { keep_indices?: unknown };
+    if (!Array.isArray(parsed.keep_indices)) return questions;
+    const keep = new Set(
+      parsed.keep_indices
+        .filter((index): index is number => Number.isInteger(index) && index >= 0 && index < questions.length)
+    );
+    return questions.filter((_question, index) => keep.has(index));
+  } catch (error) {
+    console.warn('[ZeroLeak AI] Ollama candidate classification skipped:', error);
+    return questions;
+  }
 }
 /**
  * Employs Gemini 3.7 Flash with high-precision structured parsing and a deterministic fallback engine.

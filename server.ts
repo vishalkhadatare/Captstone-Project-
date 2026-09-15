@@ -28,6 +28,7 @@ import {
   recropQuestionWithPython,
   extractQuestionsFromPaperWithAI,
   extractQuestionsFromPaperWithOllama,
+  filterQuestionCandidatesWithOllama,
   checkOllamaHealth,
   runNaviDcOcr,
   callGroqChat,
@@ -3963,7 +3964,7 @@ async function startServer() {
     try {
       const { messages, model, temperature } = req.body;
       const baseUrl = (process.env.OLLAMA_BASE_URL || 'http://localhost:11434').replace(/\/$/, '');
-      const defaultModel = model || process.env.OLLAMA_MODEL || 'llama3.2:latest';
+      const defaultModel = model || process.env.OLLAMA_MODEL || 'qwen2.5vl:7b';
       const apiKey = process.env.OLLAMA_API_KEY || '';
 
       const headers: Record<string, string> = {
@@ -3999,7 +4000,7 @@ async function startServer() {
     } catch (err: any) {
       console.error('Ollama chat error:', err);
       return res.status(500).json({
-        error: err?.message || `Ollama is not reachable at ${process.env.OLLAMA_BASE_URL || 'http://localhost:11434'}. Start with "ollama run llama3.2".`,
+        error: err?.message || `Ollama is not reachable at ${process.env.OLLAMA_BASE_URL || 'http://localhost:11434'}. Start Ollama and try again.`,
       });
     }
   });
@@ -4153,6 +4154,14 @@ async function startServer() {
           aiEngineUsed: false,
           engine: 'PyMuPDF + Python Engine (Local & Free)',
         };
+      }
+
+      if (extraction?.extractedQuestions?.length && process.env.OLLAMA_MODEL) {
+        const beforeOllamaCount = extraction.extractedQuestions.length;
+        extraction.extractedQuestions = await filterQuestionCandidatesWithOllama(extraction.extractedQuestions);
+        extraction.questions = extraction.extractedQuestions;
+        extraction.totalExtracted = extraction.extractedQuestions.length;
+        extraction.extractionSummary = `${extraction.extractionSummary || ''} Ollama classified ${extraction.extractedQuestions.length} of ${beforeOllamaCount} candidates as real questions.`.trim();
       }
 
       const sourcePaperId = `PAPER-${uuidv4().substring(0, 8).toUpperCase()}`;
@@ -4472,6 +4481,10 @@ async function startServer() {
       if (!questionId) {
         return res.status(400).json({ error: 'questionId is required.' });
       }
+      const requestedCoords = [x1, y1, x2, y2].map(Number);
+      if (requestedCoords.some(value => !Number.isFinite(value)) || requestedCoords[0] >= requestedCoords[2] || requestedCoords[1] >= requestedCoords[3]) {
+        return res.status(400).json({ error: 'Valid crop coordinates are required.' });
+      }
 
       const db = await getDb();
       const [question] = executeQuery(db, `SELECT * FROM questions WHERE id = ?`, [questionId]);
@@ -4510,15 +4523,13 @@ async function startServer() {
       const docCropsDir = path.join(process.cwd(), 'public', 'papers', question.question_paper_id || 'manual', 'crops');
       fs.mkdirSync(docCropsDir, { recursive: true });
       const outputCropPath = path.join(docCropsDir, cropFilename);
-      const publicCropPath = path.join(process.cwd(), 'public', 'questions', `q_${question.question_number}.png`);
-
       const ok = await recropQuestionWithPython({
         file_path: pageDiskPath,
         page_num: effectivePage,
-        x1: Math.max(0, Math.round(x1)),
-        y1: Math.max(0, Math.round(y1)),
-        x2: Math.round(x2),
-        y2: Math.round(y2),
+        x1: Math.max(0, Math.round(requestedCoords[0])),
+        y1: Math.max(0, Math.round(requestedCoords[1])),
+        x2: Math.round(requestedCoords[2]),
+        y2: Math.round(requestedCoords[3]),
         output_path: outputCropPath,
       });
 
@@ -4526,16 +4537,12 @@ async function startServer() {
         return res.status(500).json({ error: 'Failed to recrop question boundary image.' });
       }
 
-      try {
-        fs.copyFileSync(outputCropPath, publicCropPath);
-      } catch {}
-
       const cropUrl = `/papers/${question.question_paper_id || 'manual'}/crops/${cropFilename}`;
       const cropCoords = {
-        x1: Math.max(0, Math.round(x1)),
-        y1: Math.max(0, Math.round(y1)),
-        x2: Math.round(x2),
-        y2: Math.round(y2),
+        x1: Math.max(0, Math.round(requestedCoords[0])),
+        y1: Math.max(0, Math.round(requestedCoords[1])),
+        x2: Math.round(requestedCoords[2]),
+        y2: Math.round(requestedCoords[3]),
         pageNumber: effectivePage,
         unit: 'px',
       };

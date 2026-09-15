@@ -1336,6 +1336,18 @@ export const ExamManagerWorkspace: React.FC<ExamManagerWorkspaceProps> = ({
                           <span>{ex.status === 'GENERATED' ? 'Re-Generate & Encrypt' : 'Generate Encrypted Paper'}</span>
                         </button>
 
+                        {ex.status === 'CONFIGURING' && onSelectSubTab && (
+                          <button
+                            type="button"
+                            onClick={() => onSelectSubTab('blueprint_pattern')}
+                            className="px-3 py-1.5 rounded-xl bg-amber-50 hover:bg-amber-100 text-amber-800 border border-amber-200 font-bold text-xs flex items-center gap-1.5 cursor-pointer"
+                            title="Configure the examination blueprint and marks pattern"
+                          >
+                            <FileCheck className="w-3.5 h-3.5 text-amber-600" />
+                            <span>Configure Blueprint</span>
+                          </button>
+                        )}
+
                         {onLaunchCandidateSimulator && (
                           <button
                             type="button"
@@ -1359,14 +1371,16 @@ export const ExamManagerWorkspace: React.FC<ExamManagerWorkspaceProps> = ({
                           <span>Add Centre</span>
                         </button>
 
-                        <button
-                          type="button"
-                          onClick={() => setEmergencyRegenModalExam(ex)}
-                          className="text-rose-600 hover:text-rose-800 text-xs font-semibold px-2 py-1 rounded hover:bg-rose-50 cursor-pointer flex items-center gap-1"
-                        >
-                          <RotateCcw className="w-3 h-3 text-rose-500" />
-                          <span>Emergency Re-Gen</span>
-                        </button>
+                        {(ex.status === 'GENERATED' || ex.status === 'GENERATED_ENCRYPTED') && (
+                          <button
+                            type="button"
+                            onClick={() => setEmergencyRegenModalExam(ex)}
+                            className="text-rose-600 hover:text-rose-800 text-xs font-semibold px-2 py-1 rounded hover:bg-rose-50 cursor-pointer flex items-center gap-1"
+                          >
+                            <RotateCcw className="w-3 h-3 text-rose-500" />
+                            <span>Emergency Re-Gen</span>
+                          </button>
+                        )}
                       </div>
                     </div>
                   </div>
