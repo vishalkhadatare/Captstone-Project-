@@ -54,8 +54,6 @@ export function App() {
     multi_paper_generator: 'multi-paper-generator',
     paper_versions: 'paper-versions',
     examination_centres: 'examination-centres',
-    assigned_questions: 'assigned-questions',
-    question_verification: 'question-verification',
     translation_tasks: 'translation-tasks',
     verification_history: 'verification-history',
     released_examinations: 'released-examinations',
@@ -137,7 +135,7 @@ export function App() {
   const handleLoginSuccess = (user: User, token: string) => {
     setStoredAuth(token, user);
     setCurrentUser(user);
-    const initialTab: NavSubTab = user.role === 'SME' ? 'assigned_questions' : 'dashboard';
+    const initialTab: NavSubTab = 'dashboard';
     setActiveSubTab(initialTab);
     window.history.pushState({}, '', `${window.location.pathname}${window.location.search}#${tabToHashMap[initialTab]}`);
     setRefreshTrigger(prev => prev + 1);

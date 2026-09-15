@@ -228,6 +228,7 @@ export const ExamManagerWorkspace: React.FC<ExamManagerWorkspaceProps> = ({
   const [org, setOrg] = useState<Organization | null>(null);
   const [examinations, setExaminations] = useState<Examination[]>([]);
   const [questions, setQuestions] = useState<Question[]>([]);
+  const [smes, setSmes] = useState<User[]>([]);
   const [translators, setTranslators] = useState<User[]>([]);
   const [assignments, setAssignments] = useState<QuestionAssignment[]>([]);
   const [selectedExamId, setSelectedExamId] = useState<string>('');
