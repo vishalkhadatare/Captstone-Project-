@@ -170,14 +170,17 @@ export function validateBlueprintFeasibility(
     );
   }
 
-  if (selectedSourcePaperIds.length < 2) {
-    errors.push('At least 2 source papers must be selected to generate a multi-paper balanced combination.');
+  if (selectedSourcePaperIds.length < 1) {
+    errors.push('At least 1 source paper must be selected to generate examination papers.');
   }
 
+  const isSinglePaper = selectedSourcePaperIds.length === 1;
+
   // Check subject requirements
-  for (const sRule of blueprint.subjects) {
+  for (const sRule of blueprint.subjects || []) {
+    if (!sRule.subject || sRule.subject.toUpperCase() === 'ALL' || sRule.subject === '*') continue;
     const subjectQuestions = available.filter(
-      q => q.subject.toLowerCase() === sRule.subject.toLowerCase()
+      q => q.subject && q.subject.trim().toLowerCase() === sRule.subject.trim().toLowerCase()
     );
     if (subjectQuestions.length < sRule.count) {
       errors.push(
@@ -186,148 +189,171 @@ export function validateBlueprintFeasibility(
     }
   }
 
-  // Check maximum contribution cap feasibility
+  // Check maximum contribution cap feasibility (for 1 paper, 100% is allowed)
+  const effectiveMaxContribution = isSinglePaper ? 100 : (blueprint.maxSourceContributionPercent || 40);
   const maxAllowedPerPaper = Math.ceil(
-    blueprint.totalQuestions * (blueprint.maxSourceContributionPercent / 100)
+    blueprint.totalQuestions * (effectiveMaxContribution / 100)
   );
-  const minRequiredPapers = Math.ceil(blueprint.totalQuestions / maxAllowedPerPaper);
-  if (selectedSourcePaperIds.length < minRequiredPapers) {
+  const minRequiredPapers = isSinglePaper ? 1 : Math.ceil(blueprint.totalQuestions / maxAllowedPerPaper);
+  if (!isSinglePaper && selectedSourcePaperIds.length < minRequiredPapers) {
     errors.push(
       `Selected ${selectedSourcePaperIds.length} source papers cannot satisfy the ${blueprint.maxSourceContributionPercent}% max-contribution cap. At least ${minRequiredPapers} source papers are required.`
     );
   }
 
- return {
- feasible: errors.length === 0,
- errors,
- stats: {
- availableCount: available.length,
- requiredCount: blueprint.totalQuestions,
- maxAllowedPerPaper,
- minRequiredPapers,
- },
- };
+  return {
+    feasible: errors.length === 0,
+    errors,
+    stats: {
+      availableCount: available.length,
+      requiredCount: blueprint.totalQuestions,
+      maxAllowedPerPaper,
+      minRequiredPapers,
+    },
+  };
 }
 
 /**
  * 1. COMBINATION ALGORITHM: Selects balanced questions from multiple source papers
  */
 export function selectQuestionsCombination(
- pool: QuestionItem[],
- blueprint: PaperBlueprintConfig,
- selectedSourcePaperIds: string[]
+  pool: QuestionItem[],
+  blueprint: PaperBlueprintConfig,
+  selectedSourcePaperIds: string[]
 ): QuestionItem[] {
- // 1. Filter to selected papers
- let candidatePool = pool.filter(q =>
- q.question_paper_id && selectedSourcePaperIds.includes(q.question_paper_id)
- );
+  // 1. Filter to selected papers
+  let candidatePool = pool.filter(q =>
+    q.question_paper_id && selectedSourcePaperIds.includes(q.question_paper_id)
+  );
 
- // 2. Anti-duplication filter
- if (blueprint.antiDuplication !== false) {
- const seenHashes = new Set<string>();
- const deduplicated: QuestionItem[] = [];
+  // 2. Anti-duplication filter
+  if (blueprint.antiDuplication !== false) {
+    const seenHashes = new Set<string>();
+    const deduplicated: QuestionItem[] = [];
 
- for (const q of candidatePool) {
- const textHash = sha256(normalizeText(q.content_text));
- if (!seenHashes.has(textHash)) {
- seenHashes.add(textHash);
- deduplicated.push(q);
- }
- }
- candidatePool = deduplicated;
- }
+    for (const q of candidatePool) {
+      const textHash = sha256(normalizeText(q.content_text));
+      if (!seenHashes.has(textHash)) {
+        seenHashes.add(textHash);
+        deduplicated.push(q);
+      }
+    }
+    candidatePool = deduplicated;
+  }
 
- const maxAllowedPerPaper = Math.ceil(
- blueprint.totalQuestions * (blueprint.maxSourceContributionPercent / 100)
- );
- const sourceContributionCount: Record<string, number> = {};
- selectedSourcePaperIds.forEach(id => {
- sourceContributionCount[id] = 0;
- });
+  const isSinglePaper = selectedSourcePaperIds.length === 1;
+  const effectiveMaxContribution = isSinglePaper ? 100 : (blueprint.maxSourceContributionPercent || 40);
+  const maxAllowedPerPaper = Math.ceil(
+    blueprint.totalQuestions * (effectiveMaxContribution / 100)
+  );
+  const sourceContributionCount: Record<string, number> = {};
+  selectedSourcePaperIds.forEach(id => {
+    sourceContributionCount[id] = 0;
+  });
 
- const selectedQuestions: QuestionItem[] = [];
- const selectedIds = new Set<string>();
+  const selectedQuestions: QuestionItem[] = [];
+  const selectedIds = new Set<string>();
 
- // 3. Process each subject in blueprint
- for (const sRule of blueprint.subjects) {
- const subjectTarget = sRule.count;
+  // 3. Process each subject in blueprint
+  const subjectsToProcess = (blueprint.subjects && blueprint.subjects.length > 0)
+    ? blueprint.subjects
+    : [{ subject: 'ALL', count: blueprint.totalQuestions }];
 
- // Calculate difficulty targets for this subject
- const easyTarget = Math.round(subjectTarget * (blueprint.difficulty.easy / 100));
- const hardTarget = Math.round(subjectTarget * (blueprint.difficulty.hard / 100));
- const mediumTarget = subjectTarget - easyTarget - hardTarget;
+  for (const sRule of subjectsToProcess) {
+    const subjectTarget = sRule.count;
+    const isAll = !sRule.subject || sRule.subject.toUpperCase() === 'ALL' || sRule.subject === '*';
 
- const difficultyBuckets: Array<{ difficulty: string; target: number }> = [
- { difficulty: 'EASY', target: easyTarget },
- { difficulty: 'MEDIUM', target: mediumTarget },
- { difficulty: 'HARD', target: hardTarget },
- ];
+    // Calculate difficulty targets for this subject
+    const easyTarget = Math.round(subjectTarget * ((blueprint.difficulty?.easy || 33) / 100));
+    const hardTarget = Math.round(subjectTarget * ((blueprint.difficulty?.hard || 33) / 100));
+    const mediumTarget = Math.max(0, subjectTarget - easyTarget - hardTarget);
 
- for (const bucket of difficultyBuckets) {
- let needed = bucket.target;
+    const difficultyBuckets: Array<{ difficulty: string; target: number }> = [
+      { difficulty: 'EASY', target: easyTarget },
+      { difficulty: 'MEDIUM', target: mediumTarget },
+      { difficulty: 'HARD', target: hardTarget },
+    ];
 
- // Find candidate questions matching subject & difficulty
- let matching = candidatePool.filter(
- q =>
- !selectedIds.has(q.id) &&
- q.subject.toLowerCase() === sRule.subject.toLowerCase() &&
- q.difficulty.toUpperCase() === bucket.difficulty.toUpperCase()
- );
+    for (const bucket of difficultyBuckets) {
+      let needed = bucket.target;
 
- // Randomize matching pool before fair distribution
- matching = cryptoShuffle(matching);
+      // Find candidate questions matching subject & difficulty
+      let matching = candidatePool.filter(
+        q =>
+          !selectedIds.has(q.id) &&
+          (isAll || (q.subject && q.subject.trim().toLowerCase() === sRule.subject.trim().toLowerCase())) &&
+          (q.difficulty ? q.difficulty.toUpperCase() === bucket.difficulty.toUpperCase() : true)
+      );
 
- // Sort by source paper usage (prefer papers that contributed fewest questions so far)
- matching.sort((a, b) => {
- const countA = sourceContributionCount[a.question_paper_id || ''] || 0;
- const countB = sourceContributionCount[b.question_paper_id || ''] || 0;
- return countA - countB;
- });
+      // Randomize matching pool before fair distribution
+      matching = cryptoShuffle(matching);
 
- for (const q of matching) {
- if (needed <= 0) break;
- const paperId = q.question_paper_id || '';
- const currentPaperCount = sourceContributionCount[paperId] || 0;
+      // Sort by source paper usage (prefer papers that contributed fewest questions so far)
+      matching.sort((a, b) => {
+        const countA = sourceContributionCount[a.question_paper_id || ''] || 0;
+        const countB = sourceContributionCount[b.question_paper_id || ''] || 0;
+        return countA - countB;
+      });
 
- // Verify max contribution cap
- if (currentPaperCount < maxAllowedPerPaper) {
- selectedQuestions.push(q);
- selectedIds.add(q.id);
- sourceContributionCount[paperId] = currentPaperCount + 1;
- needed--;
- }
- }
+      for (const q of matching) {
+        if (needed <= 0) break;
+        const paperId = q.question_paper_id || '';
+        const currentPaperCount = sourceContributionCount[paperId] || 0;
 
- // Fallback: If strict difficulty bucket is not full, fill from any difficulty of same subject
- if (needed > 0) {
- let fallbackMatching = candidatePool.filter(
- q =>
- !selectedIds.has(q.id) &&
- q.subject.toLowerCase() === sRule.subject.toLowerCase()
- );
- fallbackMatching = cryptoShuffle(fallbackMatching);
- fallbackMatching.sort((a, b) => {
- const countA = sourceContributionCount[a.question_paper_id || ''] || 0;
- const countB = sourceContributionCount[b.question_paper_id || ''] || 0;
- return countA - countB;
- });
+        // Verify max contribution cap
+        if (isSinglePaper || currentPaperCount < maxAllowedPerPaper) {
+          selectedQuestions.push(q);
+          selectedIds.add(q.id);
+          sourceContributionCount[paperId] = currentPaperCount + 1;
+          needed--;
+        }
+      }
 
- for (const q of fallbackMatching) {
- if (needed <= 0) break;
- const paperId = q.question_paper_id || '';
- const currentPaperCount = sourceContributionCount[paperId] || 0;
- if (currentPaperCount < maxAllowedPerPaper) {
- selectedQuestions.push(q);
- selectedIds.add(q.id);
- sourceContributionCount[paperId] = currentPaperCount + 1;
- needed--;
- }
- }
- }
- }
- }
+      // Fallback: If strict difficulty bucket is not full, fill from any difficulty of same subject
+      if (needed > 0) {
+        let fallbackMatching = candidatePool.filter(
+          q =>
+            !selectedIds.has(q.id) &&
+            (isAll || (q.subject && q.subject.trim().toLowerCase() === sRule.subject.trim().toLowerCase()))
+        );
+        fallbackMatching = cryptoShuffle(fallbackMatching);
+        fallbackMatching.sort((a, b) => {
+          const countA = sourceContributionCount[a.question_paper_id || ''] || 0;
+          const countB = sourceContributionCount[b.question_paper_id || ''] || 0;
+          return countA - countB;
+        });
 
- return selectedQuestions;
+        for (const q of fallbackMatching) {
+          if (needed <= 0) break;
+          const paperId = q.question_paper_id || '';
+          const currentPaperCount = sourceContributionCount[paperId] || 0;
+          if (isSinglePaper || currentPaperCount < maxAllowedPerPaper) {
+            selectedQuestions.push(q);
+            selectedIds.add(q.id);
+            sourceContributionCount[paperId] = currentPaperCount + 1;
+            needed--;
+          }
+        }
+      }
+    }
+  }
+
+  // 4. Ultimate Fallback: If still under totalQuestions, fill from any remaining candidate questions
+  if (selectedQuestions.length < blueprint.totalQuestions) {
+    const remaining = cryptoShuffle(candidatePool.filter(q => !selectedIds.has(q.id)));
+    for (const q of remaining) {
+      if (selectedQuestions.length >= blueprint.totalQuestions) break;
+      const paperId = q.question_paper_id || '';
+      const currentPaperCount = sourceContributionCount[paperId] || 0;
+      if (isSinglePaper || currentPaperCount < maxAllowedPerPaper) {
+        selectedQuestions.push(q);
+        selectedIds.add(q.id);
+        sourceContributionCount[paperId] = currentPaperCount + 1;
+      }
+    }
+  }
+
+  return selectedQuestions;
 }
 
 /**

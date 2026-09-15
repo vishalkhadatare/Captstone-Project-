@@ -39,6 +39,7 @@ import { User, ExtractedQuestion, Organization, QuestionAssignment } from '../..
 import { api } from '../../api';
 import { QuestionBoundaryEditor } from './QuestionBoundaryEditor';
 import { LaTeXText } from '../common/LaTeXText';
+import { runPuterOcr, parsePuterOcrText } from '../../utils/puterOcr';
 
 interface ExamManagerQuestionExtractorProps {
   smes: User[];
@@ -46,6 +47,7 @@ interface ExamManagerQuestionExtractorProps {
   org: Organization | null;
   currentUser: User | null;
   onAssignmentsUpdated: () => void;
+  onNavigateSubTab?: (subTab: string) => void;
 }
 
 interface UploadedQuestionFile {
@@ -185,6 +187,7 @@ export const ExamManagerQuestionExtractor: React.FC<ExamManagerQuestionExtractor
   org,
   currentUser,
   onAssignmentsUpdated,
+  onNavigateSubTab,
 }) => {
   // Upload & Extraction Input State
   const [pdfFileName, setPdfFileName] = useState('');
@@ -223,7 +226,9 @@ export const ExamManagerQuestionExtractor: React.FC<ExamManagerQuestionExtractor
   const [assignModalOpen, setAssignModalOpen] = useState(false);
   const [assignMode, setAssignMode] = useState<'SELECTED' | 'BY_COUNT'>('SELECTED');
   const [assignCountInput, setAssignCountInput] = useState<number>(5);
-  const [assignTargetRole, setAssignTargetRole] = useState<'SME' | 'TRANSLATOR' | 'BOTH'>('SME');
+  const [assignTargetRole, setAssignTargetRole] = useState<'SME' | 'TRANSLATOR' | 'BOTH' | 'DIRECT'>(
+    smes.length > 0 ? 'SME' : 'DIRECT'
+  );
   const [assignTargetSmeId, setAssignTargetSmeId] = useState<string>(smes[0]?.id || '');
   const [assignTargetTranslatorId, setAssignTargetTranslatorId] = useState<string>(translators[0]?.id || '');
   const [assignTargetLanguage, setAssignTargetLanguage] = useState<string>('Hindi');
@@ -237,7 +242,43 @@ export const ExamManagerQuestionExtractor: React.FC<ExamManagerQuestionExtractor
   const [activeDebugView, setActiveDebugView] = useState<string | null>(null);
   const [currentPaperId, setCurrentPaperId] = useState<string | null>(null);
   const [boundaryEditorOpen, setBoundaryEditorOpen] = useState(false);
+  const [isPuterOcrLoading, setIsPuterOcrLoading] = useState(false);
   const diagramInputRef = useRef<HTMLInputElement | null>(null);
+
+  const handlePuterOcrForQuestion = async (q: ExtractedQuestion) => {
+    const targetSource = q.image_url || q.diagram_url;
+    if (!targetSource) {
+      setStatusMessage({ type: 'error', text: 'No cropped question image available for Puter OCR.' });
+      return;
+    }
+    setIsPuterOcrLoading(true);
+    try {
+      const text = await runPuterOcr(targetSource, { provider: 'aws-textract' });
+      if (text) {
+        const parsed = parsePuterOcrText(text);
+        setExtractedQuestions(prev =>
+          prev.map(item => {
+            if (item.tempId === q.tempId) {
+              return {
+                ...item,
+                content_text: parsed.contentText || item.content_text,
+                options: parsed.options && parsed.options.length > 0 ? parsed.options.map(o => `${o.label}) ${o.text}`) : item.options,
+                correct_answer: parsed.suggestedAnswer || item.correct_answer,
+              };
+            }
+            return item;
+          })
+        );
+        setStatusMessage({ type: 'success', text: `Extracted ${text.length} chars with Puter.js AI OCR!` });
+      } else {
+        setStatusMessage({ type: 'error', text: 'Puter OCR returned empty text for this question.' });
+      }
+    } catch (err: any) {
+      setStatusMessage({ type: 'error', text: `Puter OCR Error: ${err.message || err}` });
+    } finally {
+      setIsPuterOcrLoading(false);
+    }
+  };
 
   const handleDiagramUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -1050,8 +1091,9 @@ export const ExamManagerQuestionExtractor: React.FC<ExamManagerQuestionExtractor
     }
 
     // Role validation
-    const needSme = assignTargetRole === 'SME' || assignTargetRole === 'BOTH';
-    const needTranslator = assignTargetRole === 'TRANSLATOR' || assignTargetRole === 'BOTH';
+    const isDirect = assignTargetRole === 'DIRECT';
+    const needSme = !isDirect && (assignTargetRole === 'SME' || assignTargetRole === 'BOTH');
+    const needTranslator = !isDirect && (assignTargetRole === 'TRANSLATOR' || assignTargetRole === 'BOTH');
 
     if (needSme && !assignTargetSmeId) {
       setStatusMessage({ type: 'error', text: 'Please select an SME from your organization.' });
@@ -1075,7 +1117,8 @@ export const ExamManagerQuestionExtractor: React.FC<ExamManagerQuestionExtractor
         auto_assign_sme_id: needSme ? assignTargetSmeId : undefined,
         auto_assign_translator_id: needTranslator ? assignTargetTranslatorId : undefined,
         target_language: needTranslator ? assignTargetLanguage : undefined,
-        assignment_notes: assignNotes || undefined,
+        assignment_notes: assignNotes || (isDirect ? 'Directly verified & approved by Exam Manager' : undefined),
+        initial_status: isDirect ? 'VERIFIED' : undefined,
       });
 
       // Update local assignment tags for real-time sidebar feedback
@@ -1083,7 +1126,7 @@ export const ExamManagerQuestionExtractor: React.FC<ExamManagerQuestionExtractor
       targetQuestionList.forEach(q => {
         updatedAssignments[q.tempId] = {
           smeId: needSme ? assignTargetSmeId : updatedAssignments[q.tempId]?.smeId,
-          smeName: needSme ? targetSme?.full_name || 'Assigned SME' : updatedAssignments[q.tempId]?.smeName,
+          smeName: isDirect ? 'Verified & Ready' : (needSme ? targetSme?.full_name || 'Assigned SME' : updatedAssignments[q.tempId]?.smeName),
           translatorId: needTranslator ? assignTargetTranslatorId : updatedAssignments[q.tempId]?.translatorId,
           translatorName: needTranslator ? targetTranslator?.full_name || 'Assigned Translator' : updatedAssignments[q.tempId]?.translatorName,
           targetLanguage: needTranslator ? assignTargetLanguage : updatedAssignments[q.tempId]?.targetLanguage,
@@ -1092,7 +1135,9 @@ export const ExamManagerQuestionExtractor: React.FC<ExamManagerQuestionExtractor
       setLocalAssignments(updatedAssignments);
 
       let assignmentDesc = '';
-      if (needSme && needTranslator) {
+      if (isDirect) {
+        assignmentDesc = 'directly verified and made eligible for Paper Generation';
+      } else if (needSme && needTranslator) {
         assignmentDesc = `assigned to SME ${targetSme?.full_name} and Translator ${targetTranslator?.full_name} (${assignTargetLanguage})`;
       } else if (needSme) {
         assignmentDesc = `assigned to SME ${targetSme?.full_name}`;
@@ -1102,7 +1147,7 @@ export const ExamManagerQuestionExtractor: React.FC<ExamManagerQuestionExtractor
 
       setStatusMessage({
         type: 'success',
-        text: `Successfully created ${res.createdCount} questions in secure question repository and ${assignmentDesc}.`,
+        text: `Successfully imported ${res.createdCount} question(s) into question repository (${assignmentDesc}).`,
       });
 
       setAssignModalOpen(false);
@@ -1149,12 +1194,34 @@ export const ExamManagerQuestionExtractor: React.FC<ExamManagerQuestionExtractor
             )}
             <span className="font-medium">{statusMessage.text}</span>
           </div>
-          <button
-            onClick={() => setStatusMessage(null)}
-            className="p-1 text-slate-400 hover:text-slate-700 rounded"
-          >
-            <X className="w-3.5 h-3.5" />
-          </button>
+          <div className="flex items-center gap-2 shrink-0">
+            {statusMessage.type === 'success' && onNavigateSubTab && (
+              <>
+                <button
+                  type="button"
+                  onClick={() => onNavigateSubTab('question_pools')}
+                  className="px-2.5 py-1 rounded-lg bg-emerald-700 hover:bg-emerald-800 text-white font-bold text-[11px] flex items-center gap-1 cursor-pointer transition-all shadow-2xs"
+                >
+                  <span>Question Pools</span>
+                  <ArrowRight className="w-3 h-3" />
+                </button>
+                <button
+                  type="button"
+                  onClick={() => onNavigateSubTab('paper_generation')}
+                  className="px-2.5 py-1 rounded-lg bg-slate-900 hover:bg-slate-800 text-white font-bold text-[11px] flex items-center gap-1 cursor-pointer transition-all shadow-2xs"
+                >
+                  <span>Paper Generator</span>
+                  <ArrowRight className="w-3 h-3" />
+                </button>
+              </>
+            )}
+            <button
+              onClick={() => setStatusMessage(null)}
+              className="p-1 text-slate-400 hover:text-slate-700 rounded cursor-pointer"
+            >
+              <X className="w-3.5 h-3.5" />
+            </button>
+          </div>
         </div>
       )}
 
@@ -1185,9 +1252,9 @@ export const ExamManagerQuestionExtractor: React.FC<ExamManagerQuestionExtractor
               <span>Load Sample 10-Q Master PDF</span>
             </button>
 
-            <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[11px] font-bold bg-emerald-50 text-emerald-800 border border-emerald-200">
-              <Sparkles className="w-3.5 h-3.5 text-emerald-600" />
-              <span>Gemini 3.7 Flash Engine</span>
+            <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-[11px] font-bold bg-indigo-50 text-indigo-900 border border-indigo-200">
+              <Sparkles className="w-3.5 h-3.5 text-indigo-600" />
+              <span>Puter.js AI OCR + Gemini Flash Engine</span>
             </span>
           </div>
         </div>
@@ -2209,6 +2276,17 @@ export const ExamManagerQuestionExtractor: React.FC<ExamManagerQuestionExtractor
 
                       <button
                         type="button"
+                        onClick={() => handlePuterOcrForQuestion(activeQuestion)}
+                        disabled={isPuterOcrLoading}
+                        className="px-2.5 py-1.5 rounded-lg bg-indigo-700 hover:bg-indigo-600 text-white font-bold text-xs flex items-center gap-1 shadow-xs transition cursor-pointer mr-1"
+                        title="Extract & recognized text from question image using Puter.js AI OCR"
+                      >
+                        <Sparkles className="w-3.5 h-3.5 text-indigo-200" />
+                        <span>{isPuterOcrLoading ? 'Puter OCR...' : 'Puter OCR'}</span>
+                      </button>
+
+                      <button
+                        type="button"
                         onClick={handlePrevQuestion}
                         disabled={currentFilteredIndex <= 0}
                         className="p-1.5 rounded-lg bg-slate-100 hover:bg-slate-200 disabled:opacity-30 text-slate-700 cursor-pointer"
@@ -2696,11 +2774,24 @@ export const ExamManagerQuestionExtractor: React.FC<ExamManagerQuestionExtractor
               </label>
 
               {/* Role Toggle Tabs */}
-              <div className="grid grid-cols-3 gap-2">
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                <button
+                  type="button"
+                  onClick={() => setAssignTargetRole('DIRECT')}
+                  className={`py-2 px-2.5 rounded-lg font-bold text-xs flex items-center justify-center gap-1.5 transition-colors cursor-pointer ${
+                    assignTargetRole === 'DIRECT'
+                      ? 'bg-emerald-600 text-white shadow-xs'
+                      : 'bg-slate-800 text-slate-300 hover:bg-slate-700'
+                  }`}
+                >
+                  <CheckCircle2 className="w-3.5 h-3.5" />
+                  <span>Direct Approve</span>
+                </button>
+
                 <button
                   type="button"
                   onClick={() => setAssignTargetRole('SME')}
-                  className={`py-2 px-3 rounded-lg font-bold text-xs flex items-center justify-center gap-1.5 transition-colors ${
+                  className={`py-2 px-2.5 rounded-lg font-bold text-xs flex items-center justify-center gap-1.5 transition-colors cursor-pointer ${
                     assignTargetRole === 'SME'
                       ? 'bg-blue-600 text-white'
                       : 'bg-slate-800 text-slate-300 hover:bg-slate-700'
@@ -2713,7 +2804,7 @@ export const ExamManagerQuestionExtractor: React.FC<ExamManagerQuestionExtractor
                 <button
                   type="button"
                   onClick={() => setAssignTargetRole('TRANSLATOR')}
-                  className={`py-2 px-3 rounded-lg font-bold text-xs flex items-center justify-center gap-1.5 transition-colors ${
+                  className={`py-2 px-2.5 rounded-lg font-bold text-xs flex items-center justify-center gap-1.5 transition-colors cursor-pointer ${
                     assignTargetRole === 'TRANSLATOR'
                       ? 'bg-purple-600 text-white'
                       : 'bg-slate-800 text-slate-300 hover:bg-slate-700'
@@ -2726,16 +2817,29 @@ export const ExamManagerQuestionExtractor: React.FC<ExamManagerQuestionExtractor
                 <button
                   type="button"
                   onClick={() => setAssignTargetRole('BOTH')}
-                  className={`py-2 px-3 rounded-lg font-bold text-xs flex items-center justify-center gap-1.5 transition-colors ${
+                  className={`py-2 px-2.5 rounded-lg font-bold text-xs flex items-center justify-center gap-1.5 transition-colors cursor-pointer ${
                     assignTargetRole === 'BOTH'
-                      ? 'bg-emerald-600 text-white'
+                      ? 'bg-emerald-700 text-white'
                       : 'bg-slate-800 text-slate-300 hover:bg-slate-700'
                   }`}
                 >
                   <Users className="w-3.5 h-3.5" />
-                  <span>Both (SME + Trans)</span>
+                  <span>Both (SME+Trans)</span>
                 </button>
               </div>
+
+              {/* Direct Approval Info Banner */}
+              {assignTargetRole === 'DIRECT' && (
+                <div className="p-3 rounded-xl bg-emerald-950/40 border border-emerald-500/30 text-xs text-emerald-200 space-y-1">
+                  <div className="font-bold flex items-center gap-1.5 text-emerald-300">
+                    <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
+                    <span>Direct Repository Approval (No SME Required)</span>
+                  </div>
+                  <p className="text-[11px] text-emerald-200/90 leading-relaxed">
+                    Questions will be directly stored as <strong>VERIFIED</strong>. They will immediately become eligible in Question Pools, Blueprint configuration, and Paper Generation without requiring SME review.
+                  </p>
+                </div>
+              )}
 
               {/* SME User Selection */}
               {(assignTargetRole === 'SME' || assignTargetRole === 'BOTH') && (

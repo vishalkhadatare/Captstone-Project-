@@ -332,6 +332,7 @@ export function App() {
                   currentUser={currentUser}
                   activeSubTab={activeSubTab}
                   onRefresh={handleRefreshData}
+                  onSelectSubTab={(tab) => routeToTab(tab)}
                   onLaunchCandidateSimulator={(examId) => {
                     setCandidateSimulatorExamId(examId);
                     setActiveCandidateSimulator(true);

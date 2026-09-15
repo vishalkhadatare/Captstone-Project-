@@ -370,8 +370,10 @@ export const api = {
   getExtractionProgress: (jobId: string) =>
     request<{ jobId: string; status: 'PENDING' | 'PROCESSING' | 'COMPLETED' | 'FAILED'; percent: number; stage: string; message: string; current: number; total: number; updatedAt: number }>(`/api/question-papers/extract-progress/${jobId}`),
   getOllamaHealth: () => request<{ connected: boolean; model: string; error?: string }>('/api/question-papers/ollama-health'),
-  bulkCreateQuestions: (payload: { questions: any[]; auto_assign_sme_id?: string; auto_assign_translator_id?: string; target_language?: string; assignment_notes?: string }) =>
+  bulkCreateQuestions: (payload: { questions: any[]; auto_assign_sme_id?: string; auto_assign_translator_id?: string; target_language?: string; assignment_notes?: string; initial_status?: string }) =>
     request<{ message: string; createdCount: number; questionIds: string[] }>('/api/questions/bulk-create', { method: 'POST', body: JSON.stringify(payload) }),
+  bulkVerifyQuestions: (payload: { question_ids: string[]; status?: string }) =>
+    request<{ message: string; updatedCount: number }>('/api/questions/bulk-verify', { method: 'POST', body: JSON.stringify(payload) }),
   bulkAssignQuestions: (payload: { question_ids: string[]; assignment_type: 'SME_REVIEW' | 'LINGUISTIC_TRANSLATION'; assignee_user_id: string; target_language?: string; notes?: string }) =>
     request<{ message: string; assignedCount: number }>('/api/questions/bulk-assign', { method: 'POST', body: JSON.stringify(payload) }),
   getAssignments: (params?: { assignment_type?: string; status?: string }) => {
@@ -446,6 +448,58 @@ export const api = {
       body: payload ? JSON.stringify(payload) : undefined,
     }),
   getPaperVersions: (examId: string) => request<{ versions: PaperVersion[] }>(`/api/examinations/${examId}/paper-versions`),
+  getPaperVersionDetails: (examId: string, versionId: string) =>
+    request<{
+      success: boolean;
+      version: PaperVersion & { iv_hex?: string; auth_tag_hex?: string; checksum_sha256?: string; key_fingerprint?: string };
+      questions: Array<{
+        paper_question_id: string;
+        section_name: string;
+        order_index: number;
+        question_marks: number;
+        id: string;
+        content_text: string;
+        options_json?: string;
+        options?: any[];
+        correct_answer?: string;
+        difficulty?: string;
+        subject?: string;
+        topic?: string;
+        diagram_url?: string;
+        image_url?: string;
+        question_type?: string;
+      }>;
+      exam?: Examination;
+      shamirDetails: {
+        threshold: number;
+        totalShares: number;
+        status: string;
+      };
+    }>(`/api/examinations/${examId}/paper-versions/${versionId}/details`),
+  getCurrentPaper: (examId: string) =>
+    request<{
+      success: boolean;
+      version: PaperVersion & { iv_hex?: string; auth_tag_hex?: string; checksum_sha256?: string; key_fingerprint?: string };
+      questions: Array<{
+        paper_question_id: string;
+        section_name: string;
+        order_index: number;
+        question_marks: number;
+        id: string;
+        content_text: string;
+        options_json?: string;
+        options?: any[];
+        correct_answer?: string;
+        difficulty?: string;
+        subject?: string;
+        topic?: string;
+        diagram_url?: string;
+        image_url?: string;
+        question_type?: string;
+      }>;
+      allVersions?: Array<{ id: string; version_code: string; is_current: number; status: string; generated_at: string }>;
+      exam: Examination;
+    }>(`/api/examinations/${examId}/current-paper`),
   setActivePaperVersion: (examId: string, versionId: string) =>
     request<{ message: string; activeVersion: PaperVersion }>(`/api/examinations/${examId}/set-active-version`, {
       method: 'POST',
