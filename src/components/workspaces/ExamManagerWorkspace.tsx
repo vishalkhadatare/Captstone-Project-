@@ -55,6 +55,7 @@ import { AddCentreModal } from './AddCentreModal';
 import { EmergencyRegenModal } from './EmergencyRegenModal';
 import { BlueprintPatternModule } from './BlueprintPatternModule';
 import { QuestionPaperPdfModal } from './QuestionPaperPdfModal';
+import { UniversityFormatGenerator } from './UniversityFormatGenerator';
 
 interface ExamManagerWorkspaceProps {
   currentUser: User | null;

@@ -30,6 +30,7 @@ import {
 } from 'lucide-react';
 
 import { AiPdfPaperGenerator } from './AiPdfPaperGenerator';
+import { UniversityFormatGenerator } from './workspaces/UniversityFormatGenerator';
 import { QuestionPaperPdfModal } from './workspaces/QuestionPaperPdfModal';
 
 interface PaperGenProps {
@@ -38,7 +39,7 @@ interface PaperGenProps {
 }
 
 export const PaperGenerationModule: React.FC<PaperGenProps> = ({ currentUser, onRefresh }) => {
-  const [activeTab, setActiveTab] = useState<'ai_pdf_generator' | 'vault_generation'>('ai_pdf_generator');
+  const [activeTab, setActiveTab] = useState<'university_generator' | 'ai_pdf_generator' | 'vault_generation'>('university_generator');
   const [exams, setExams] = useState<Examination[]>([]);
   const [questions, setQuestions] = useState<Question[]>([]);
   const [selectedExamId, setSelectedExamId] = useState<string>('');
@@ -332,6 +333,19 @@ export const PaperGenerationModule: React.FC<PaperGenProps> = ({ currentUser, on
       <div className="flex flex-wrap items-center gap-2 border-b border-slate-200 dark:border-slate-800 pb-3">
         <button
           type="button"
+          onClick={() => setActiveTab('university_generator')}
+          className={`px-4 py-2.5 rounded-xl text-xs font-bold flex items-center gap-2 transition-all cursor-pointer ${
+            activeTab === 'university_generator'
+              ? 'bg-rose-600 text-white shadow-md shadow-rose-900/30'
+              : 'bg-white dark:bg-slate-900 text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800 border border-slate-200 dark:border-slate-800'
+          }`}
+        >
+          <BookOpen className="w-4 h-4 text-rose-400" />
+          <span>🎓 University Format Generator</span>
+        </button>
+
+        <button
+          type="button"
           onClick={() => setActiveTab('ai_pdf_generator')}
           className={`px-4 py-2.5 rounded-xl text-xs font-bold flex items-center gap-2 transition-all cursor-pointer ${
             activeTab === 'ai_pdf_generator'
@@ -357,7 +371,12 @@ export const PaperGenerationModule: React.FC<PaperGenProps> = ({ currentUser, on
         </button>
       </div>
 
-      {activeTab === 'ai_pdf_generator' ? (
+      {activeTab === 'university_generator' ? (
+        <UniversityFormatGenerator
+          currentUser={currentUser}
+          onRefresh={onRefresh}
+        />
+      ) : activeTab === 'ai_pdf_generator' ? (
         <AiPdfPaperGenerator
           currentUser={currentUser}
           existingExams={exams}

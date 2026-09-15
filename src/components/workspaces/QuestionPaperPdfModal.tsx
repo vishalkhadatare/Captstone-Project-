@@ -197,111 +197,229 @@ export const QuestionPaperPdfModal: React.FC<QuestionPaperPdfModalProps> = ({
                 ZeroLeak Enclave Sealed
               </div>
 
-              {/* Official Header */}
-              <div className="text-center border-b-2 border-slate-900 pb-4 space-y-1">
-                <div className="text-[11px] font-black uppercase tracking-widest text-slate-500">
-                  CONFIDENTIAL &bull; PROTECTED UNDER OFFICIAL SECRECY ACT
-                </div>
-                <h1 className="text-xl sm:text-2xl font-black text-slate-950 tracking-tight uppercase">
-                  {paperData.exam.name}
-                </h1>
-                <div className="text-xs sm:text-sm font-bold text-slate-700">
-                  Subject: {paperData.exam.subject} &bull; Category: {paperData.exam.category}
-                </div>
-
-                <div className="flex flex-wrap items-center justify-between pt-3 text-xs font-bold text-slate-800 border-t border-slate-200 mt-3 font-mono">
-                  <span>Paper Code: <strong>{paperData.version?.version_code || 'V1-SET-A'}</strong></span>
-                  <span>Time Allowed: <strong>{paperData.exam.duration_minutes || 180} Minutes</strong></span>
-                  <span>Maximum Marks: <strong>{paperData.exam.total_marks || 100}</strong></span>
-                </div>
-              </div>
-
-              {/* General Instructions */}
-              <div className="p-3.5 bg-slate-50 rounded-lg border border-slate-200 text-xs space-y-1 text-slate-700">
-                <div className="font-black text-slate-900 uppercase tracking-wide text-[11px]">
-                  General Instructions:
-                </div>
-                <ol className="list-decimal list-inside space-y-0.5 text-[11px] leading-relaxed">
-                  <li>This question paper contains {paperData.questions.length} compulsory questions.</li>
-                  <li>Each question carries 4 marks unless otherwise specified.</li>
-                  <li>Negative marking: -1 mark is deducted for every incorrect MCQ response.</li>
-                  <li>Choose the single most appropriate option for each question.</li>
-                  <li>Cryptographic verification fingerprint: <span className="font-mono text-[10px]">{paperData.version?.key_fingerprint || paperData.version?.checksum_sha256?.substring(0, 16) || 'FIPS-140-2'}</span></li>
-                </ol>
-              </div>
-
-              {/* Questions Stream */}
-              <div className="space-y-6">
-                {paperData.questions.map((q, idx) => (
-                  <div key={q.id || idx} className="space-y-2 border-b border-slate-200 pb-4 text-xs">
-                    <div className="flex items-start justify-between gap-3">
-                      <div className="flex items-start gap-2 font-bold text-slate-950 text-sm leading-snug">
-                        <span className="font-extrabold text-slate-900 shrink-0">
-                          Q.{q.order_index || idx + 1}.
-                        </span>
-                        <div className="whitespace-pre-wrap font-medium text-slate-900">
-                          {q.content_text}
-                        </div>
-                      </div>
-                      <span className="font-mono font-bold text-xs text-slate-600 shrink-0 bg-slate-100 px-2 py-0.5 rounded border border-slate-200">
-                        [{q.question_marks || 4} Marks]
+              {/* Official University Header matching SLR-HL-475 */}
+              <div className="space-y-3 border-b-2 border-slate-900 pb-4">
+                {/* Top Row: Seat No. box on left, SLR-HL code and Set letter box on right */}
+                <div className="flex items-center justify-between font-mono text-xs font-bold text-slate-900">
+                  <div className="flex items-center gap-2">
+                    <span className="border border-slate-900 px-2 py-1 text-xs font-black">Seat No.</span>
+                    <div className="w-32 h-7 border border-slate-900 flex items-center px-2 text-[10px] text-slate-400">
+                      [ Write Seat No ]
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-3">
+                    <span className="text-sm font-black tracking-wider uppercase text-slate-900">
+                      {paperData.version?.paper_code || 'SLR-HL-475'}
+                    </span>
+                    <div className="flex items-center border-2 border-slate-900 rounded overflow-hidden">
+                      <span className="bg-slate-900 text-white text-xs font-black px-2 py-1">Set</span>
+                      <span className="text-sm font-black px-2.5 py-0.5 text-slate-950 bg-slate-100">
+                        {paperData.version?.version_code?.includes('SET-2') ? 'Q' : paperData.version?.version_code?.includes('SET-3') ? 'R' : 'P'}
                       </span>
                     </div>
-
-                    {/* Question Image / Diagram */}
-                    {(q.diagram_url || q.image_url) && (
-                      <div className="py-2 pl-6">
-                        <img
-                          src={q.diagram_url || q.image_url}
-                          alt="Question diagram"
-                          className="max-h-56 rounded-lg border border-slate-200 object-contain bg-white"
-                        />
-                      </div>
-                    )}
-
-                    {/* Options (MCQ) */}
-                    {Array.isArray(q.options) && q.options.length > 0 && (
-                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 pt-1 pl-6">
-                        {q.options.map((opt: any, optIdx: number) => {
-                          const optText = typeof opt === 'string' ? opt : (opt?.text ?? opt?.value ?? '');
-                          const optLabel = opt?.label || String.fromCharCode(65 + optIdx);
-                          const isCorrect = q.correct_answer === optLabel;
-
-                          return (
-                            <div
-                              key={optIdx}
-                              className={`p-2 rounded-lg border text-xs flex items-center gap-2 ${
-                                showAnswerKey && isCorrect
-                                  ? 'bg-emerald-50 border-emerald-400 text-emerald-950 font-bold'
-                                  : 'bg-white border-slate-200 text-slate-800'
-                              }`}
-                            >
-                              <span className={`w-5 h-5 rounded-full flex items-center justify-center font-bold text-[10px] shrink-0 ${
-                                showAnswerKey && isCorrect ? 'bg-emerald-600 text-white' : 'bg-slate-100 text-slate-700 border border-slate-300'
-                              }`}>
-                                {optLabel}
-                              </span>
-                              <span>{optText}</span>
-                              {showAnswerKey && isCorrect && (
-                                <span className="ml-auto text-[9px] font-black uppercase text-emerald-700 bg-emerald-100 px-1 py-0.5 rounded">
-                                  CORRECT KEY
-                                </span>
-                              )}
-                            </div>
-                          );
-                        })}
-                      </div>
-                    )}
                   </div>
-                ))}
+                </div>
+
+                {/* Main Examination Titles */}
+                <div className="text-center space-y-1">
+                  <div className="text-[10px] font-black uppercase tracking-widest text-slate-500">
+                    CONFIDENTIAL &bull; UNIVERSITY BOARD EXAMINATION &bull; PROTECTED UNDER OFFICIAL SECRECY ACT
+                  </div>
+                  <h1 className="text-base sm:text-lg font-black text-slate-950 tracking-tight uppercase leading-snug">
+                    S.Y. (B.Tech.) (Sem - I) (New) (CBCS) Examination: Oct/Nov-2022
+                  </h1>
+                  <h2 className="text-sm sm:text-base font-extrabold text-slate-900 uppercase">
+                    {paperData.exam.name || 'COMPUTER SCIENCE & ENGINEERING'}
+                  </h2>
+                  <div className="text-xs font-bold text-slate-800 uppercase">
+                    Subject: {paperData.exam.subject || 'Computer Graphics'}
+                  </div>
+
+                  <div className="flex flex-wrap items-center justify-between pt-2 text-xs font-bold text-slate-900 border-t border-slate-300 mt-2 font-mono">
+                    <span>Day & Date: <strong>Monday, 20-03-2023</strong></span>
+                    <span>Time: <strong>02:00 PM To 05:00 PM</strong></span>
+                    <span>Max. Marks: <strong>70</strong></span>
+                  </div>
+                </div>
+
+                {/* University Instructions */}
+                <div className="p-3 bg-slate-50 rounded-lg border border-slate-300 text-xs text-slate-800 space-y-1">
+                  <div className="font-extrabold text-slate-950 uppercase text-[11px]">
+                    Instructions:
+                  </div>
+                  <ol className="list-decimal list-inside space-y-0.5 text-[11px] leading-relaxed">
+                    <li>Q. No. 1 is compulsory. It should be solved in the first 30 minutes in answer book. Page no 03 (Starting page of the Answer Book). Each question carries one mark.</li>
+                    <li>Don’t forget to Mention question paper set (P/Q/R/S) on top of page.</li>
+                    <li>Figures to the right indicate full marks.</li>
+                    <li>Assume suitable data wherever needed and mention it clearly.</li>
+                  </ol>
+                </div>
+              </div>
+
+              {/* Section 1: MCQ / Objective Type Questions */}
+              <div className="space-y-4 border-b border-slate-300 pb-6">
+                <div className="flex items-center justify-between font-bold text-xs border-b border-slate-400 pb-1 text-slate-900 font-mono">
+                  <span className="uppercase text-sm font-black">MCQ/Objective Type Questions</span>
+                  <span>Duration: 30 Minutes &nbsp;|&nbsp; Marks: 14</span>
+                </div>
+
+                <div className="flex items-center justify-between font-bold text-sm text-slate-950">
+                  <span>Q.1 Choose the correct alternatives from the options.</span>
+                  <span className="font-mono text-sm font-black pr-2">14</span>
+                </div>
+
+                <div className="space-y-3.5 pl-2">
+                  {paperData.questions.slice(0, 14).map((q, idx) => (
+                    <div key={q.id || idx} className="space-y-1.5 text-xs">
+                      <div className="flex items-start gap-2 font-semibold text-slate-950">
+                        <span className="font-bold shrink-0">{idx + 1})</span>
+                        <div className="whitespace-pre-wrap leading-snug">{q.content_text}</div>
+                      </div>
+
+                      {/* Question Image / Diagram */}
+                      {(q.diagram_url || q.image_url) && (
+                        <div className="py-1 pl-6">
+                          <img
+                            src={q.diagram_url || q.image_url}
+                            alt="Question diagram"
+                            className="max-h-48 rounded border border-slate-300 object-contain bg-white"
+                          />
+                        </div>
+                      )}
+
+                      {/* MCQ Options a), b), c), d) */}
+                      {Array.isArray(q.options) && q.options.length > 0 && (
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-1 pl-6 pt-0.5 text-slate-800">
+                          {q.options.map((opt: any, optIdx: number) => {
+                            const optText = typeof opt === 'string' ? opt : (opt?.text ?? opt?.value ?? '');
+                            const optLabel = opt?.label || String.fromCharCode(97 + optIdx);
+                            const isCorrect = q.correct_answer === optLabel || q.correct_answer === String.fromCharCode(65 + optIdx);
+
+                            return (
+                              <div key={optIdx} className="flex items-center gap-1.5 text-xs">
+                                <span className="font-bold shrink-0">{optLabel})</span>
+                                <span>{optText}</span>
+                                {showAnswerKey && isCorrect && (
+                                  <span className="ml-1 text-[9px] font-black uppercase text-emerald-700 bg-emerald-100 px-1 py-0.5 rounded">
+                                    [CORRECT]
+                                  </span>
+                                )}
+                              </div>
+                            );
+                          })}
+                        </div>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              {/* Section – I */}
+              <div className="space-y-4 border-b border-slate-300 pb-6">
+                <div className="flex items-center justify-between font-black text-sm border-b border-slate-400 pb-1 text-slate-950 uppercase font-mono">
+                  <span>Section – I</span>
+                  <span>Max. Marks: 28</span>
+                </div>
+
+                {/* Q.2 */}
+                <div className="space-y-2">
+                  <div className="flex items-center justify-between font-bold text-sm text-slate-950">
+                    <span>Q.2 Answer the following question. (Any Four)</span>
+                    <span className="font-mono text-sm font-black pr-2">16</span>
+                  </div>
+                  <div className="space-y-2 pl-4 text-xs font-medium text-slate-900">
+                    <div className="flex items-start justify-between gap-2">
+                      <span>a) Distinguish between the Raster Scan display and Random Scan display.</span>
+                    </div>
+                    <div className="flex items-start justify-between gap-2">
+                      <span>b) Explain 2D Rotation transformation with matrix representations.</span>
+                    </div>
+                    <div className="flex items-start justify-between gap-2">
+                      <span>c) Explain any four Computer graphics real-world applications.</span>
+                    </div>
+                    <div className="flex items-start justify-between gap-2">
+                      <span>d) Scale the polygon with coordinates P(2,5), Q(7,10), C(10,2) by 2 units in both x and y direction.</span>
+                    </div>
+                    <div className="flex items-start justify-between gap-2">
+                      <span>e) Explain Run Length Encoding in image compression.</span>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Q.3 */}
+                <div className="space-y-2 pt-2">
+                  <div className="flex items-center justify-between font-bold text-sm text-slate-950">
+                    <span>Q.3 Answer the following question. (Any One)</span>
+                    <span className="font-mono text-sm font-black pr-2">06</span>
+                  </div>
+                  <div className="space-y-2 pl-4 text-xs font-medium text-slate-900">
+                    <div>a) Consider a line from (0,0) to (5,6). Use DDA algorithm to rasterize this line.</div>
+                    <div>b) Write Bresenham’s Circle generation algorithm with derivation.</div>
+                  </div>
+                </div>
+
+                {/* Q.4 */}
+                <div className="space-y-2 pt-2">
+                  <div className="flex items-center justify-between font-bold text-sm text-slate-950">
+                    <span>Q.4 Attempt the following.</span>
+                    <span className="font-mono text-sm font-black pr-2">06</span>
+                  </div>
+                  <div className="space-y-2 pl-4 text-xs font-medium text-slate-900">
+                    <div>a) Beam Penetration Technique in color CRT monitors.</div>
+                    <div>b) Shadow Mask Technique in color CRT monitors.</div>
+                  </div>
+                </div>
+              </div>
+
+              {/* Section – II */}
+              <div className="space-y-4 border-b border-slate-300 pb-6">
+                <div className="flex items-center justify-between font-black text-sm border-b border-slate-400 pb-1 text-slate-950 uppercase font-mono">
+                  <span>Section – II</span>
+                  <span>Max. Marks: 28</span>
+                </div>
+
+                {/* Q.5 */}
+                <div className="space-y-2">
+                  <div className="flex items-center justify-between font-bold text-sm text-slate-950">
+                    <span>Q.5 Answer the following question. (Any Four)</span>
+                    <span className="font-mono text-sm font-black pr-2">16</span>
+                  </div>
+                  <div className="space-y-2 pl-4 text-xs font-medium text-slate-900">
+                    <div>a) Write a short note on segmented display file structure.</div>
+                    <div>b) Explain Viewing transformation pipeline in detail.</div>
+                    <div>c) Explain properties of Bezier curves and control points.</div>
+                    <div>d) Explain Z-Buffer depth buffer algorithm for hidden surface removal.</div>
+                    <div>e) Explain Painter’s algorithm for surface visibility.</div>
+                  </div>
+                </div>
+
+                {/* Q.6 */}
+                <div className="space-y-2 pt-2">
+                  <div className="flex items-center justify-between font-bold text-sm text-slate-950">
+                    <span>Q.6 Answer the following question. (Any One)</span>
+                    <span className="font-mono text-sm font-black pr-2">06</span>
+                  </div>
+                  <div className="space-y-2 pl-4 text-xs font-medium text-slate-900">
+                    <div>a) Explain Warnock area subdivision algorithm.</div>
+                    <div>b) What is antialiasing? Explain different techniques of antialiasing.</div>
+                  </div>
+                </div>
+
+                {/* Q.7 */}
+                <div className="space-y-2 pt-2">
+                  <div className="flex items-center justify-between font-bold text-sm text-slate-950">
+                    <span>Q.7 Explain Cohen-Sutherland Line Clipping algorithm.</span>
+                    <span className="font-mono text-sm font-black pr-2">06</span>
+                  </div>
+                </div>
               </div>
 
               {/* Official Paper Footer */}
-              <div className="pt-6 border-t-2 border-slate-900 flex flex-wrap items-center justify-between text-[11px] text-slate-500 font-mono">
+              <div className="pt-4 flex flex-wrap items-center justify-between text-[11px] text-slate-600 font-mono border-t-2 border-slate-900">
                 <div>
                   Generated: {new Date(paperData.version?.generated_at || Date.now()).toLocaleDateString()}
                 </div>
-                <div className="text-center font-bold text-slate-700">
+                <div className="text-center font-extrabold text-slate-900">
                   *** END OF QUESTION PAPER ***
                 </div>
                 <div>

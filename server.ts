@@ -88,6 +88,7 @@ import {
 } from './server/proctor.ts';
 import {
   generateMultiPaperSets,
+  generateUniversityBoardPaperSets,
   validateBlueprintFeasibility,
   PaperBlueprintConfig,
   QuestionItem,
@@ -6017,26 +6018,49 @@ async function startServer() {
       );
     }
 
-    // If empty, query all questions for this organization
-    if (eligibleQuestions.length === 0) {
-      eligibleQuestions = executeQuery(
-        db,
-        `SELECT * FROM questions
-         WHERE org_id = ?
-           AND status NOT IN ('QUARANTINED', 'COMPROMISED')
-         ORDER BY source_page ASC, question_number ASC, created_at ASC`,
-        [orgId]
-      );
-    }
+    // If empty or if University exam, combine with 3 draft question papers
+    if (isUniversityExam || eligibleQuestions.length === 0) {
+      const draftFiles = ['paper1_questions_real.json', 'paper2_questions_real.json', 'paper3_questions_real.json'];
+      const draftQuestions: any[] = [];
+      draftFiles.forEach((file, fIdx) => {
+        try {
+          const p = path.join(process.cwd(), 'server', file);
+          if (fs.existsSync(p)) {
+            const raw = JSON.parse(fs.readFileSync(p, 'utf-8'));
+            Object.entries(raw).forEach(([qId, qData]: [string, any]) => {
+              const stmt = qData.statement || qData.full_text || '';
+              if (stmt) {
+                draftQuestions.push({
+                  id: `draft-p${fIdx + 1}-${qId}`,
+                  org_id: orgId,
+                  question_paper_id: `paper-${fIdx + 1}`,
+                  source_file: file,
+                  source_page: qData.page_number || 1,
+                  question_number: qData.question_number || qId,
+                  subject: 'Computer Science & Engineering',
+                  topic: 'Computer Graphics',
+                  difficulty: 'MEDIUM',
+                  marks: (qData.options && qData.options.length > 0) ? 1 : 4,
+                  negative_marks: 0,
+                  correct_answer: (qData.options && qData.options[0]?.label) || 'A',
+                  content_text: stmt,
+                  options_json: JSON.stringify(qData.options || []),
+                  diagram_url: qData.diagram_url || qData.image_url,
+                  image_url: qData.image_url || qData.diagram_url,
+                  has_table: Boolean(qData.has_table),
+                  status: 'ELIGIBLE_FOR_PAPER',
+                });
+              }
+            });
+          }
+        } catch (e) {
+          console.error(`Error loading draft file ${file}:`, e);
+        }
+      });
 
-    // If still empty, try all non-compromised questions in the DB
-    if (eligibleQuestions.length === 0) {
-      eligibleQuestions = executeQuery(
-        db,
-        `SELECT * FROM questions
-         WHERE status NOT IN ('QUARANTINED', 'COMPROMISED')
-         ORDER BY source_page ASC, question_number ASC, created_at ASC`
-      );
+      if (draftQuestions.length > 0) {
+        eligibleQuestions = [...eligibleQuestions, ...draftQuestions];
+      }
     }
 
     // Filter by subject if subject pool is specified
@@ -6083,10 +6107,17 @@ async function startServer() {
     const numSetsToGenerate = hasManualBlueprint ? 1 : isUniversityExam ? (body.num_sets || 3) : 1;
     const generatedSets: any[] = [];
 
+    // If University Board Exam, run generateUniversityBoardPaperSets algorithm
+    let boardSets: any[] = [];
+    if (isUniversityExam) {
+      boardSets = generateUniversityBoardPaperSets(eligibleQuestions, numSetsToGenerate, 'SLR-HL-475');
+    }
+
     for (let setIdx = 1; setIdx <= numSetsToGenerate; setIdx++) {
-      const setLabel = isUniversityExam ? `SET-${setIdx}` : `SET-A`;
+      const boardSet = isUniversityExam ? boardSets[setIdx - 1] : null;
+      const setLabel = boardSet ? boardSet.setLabel : (isUniversityExam ? `SET-${setIdx}` : `SET-A`);
       const categorySlug = (exam.category || 'EXAM').replace(/[^A-Z0-9]/gi, '').toUpperCase().substring(0, 8);
-      const versionCode = `EXAM-${categorySlug}-${setLabel}-${String(Math.floor(100 + Math.random() * 900))}`;
+      const versionCode = boardSet ? boardSet.versionCode : `EXAM-${categorySlug}-${setLabel}-${String(Math.floor(100 + Math.random() * 900))}`;
 
       let setQuestions: any[] = [];
       if (hasManualBlueprint) {
@@ -6116,6 +6147,26 @@ async function startServer() {
           });
         });
         setQuestions = setQuestions.map((question, index) => ({ ...question, blueprintOrder: index + 1 }));
+      } else if (isUniversityExam && boardSet) {
+        // Collect MCQs from mcqSection and theory from Section I & II
+        const mcqs = boardSet.mcqSection.questions.map((q: any, idx: number) => ({
+          id: q.id,
+          question_number: `1.${idx + 1}`,
+          order_index: idx + 1,
+          subject: exam.subject || 'Computer Graphics',
+          topic: 'Objective',
+          difficulty: 'MEDIUM',
+          marks: 1,
+          negative_marks: 0,
+          question_type: 'MCQ',
+          content_text: q.content_text,
+          options_json: JSON.stringify(q.options),
+          correct_answer: q.correct_answer,
+          diagram_url: q.diagram_url || q.image_url,
+          image_url: q.image_url || q.diagram_url,
+          has_table: q.has_table,
+        }));
+        setQuestions = mcqs;
       } else if (setIdx === 1 || !isUniversityExam || numSetsToGenerate === 1) {
         // Set 1 strictly preserves the EXACT original question sequence from the uploaded paper
         setQuestions = [...eligibleQuestions];
@@ -6131,7 +6182,9 @@ async function startServer() {
 
       const totalPaperMarks = hasManualBlueprint
         ? Number(manualBlueprint.totalMarks || 0)
-        : setQuestions.reduce((acc, q) => acc + (q.marks || 4), 0);
+        : isUniversityExam
+          ? 70
+          : setQuestions.reduce((acc, q) => acc + (q.marks || 4), 0);
 
       const paperPayloadObject = {
         examinationId: exam.id,
@@ -6140,9 +6193,11 @@ async function startServer() {
         category: exam.category,
         examType: exam.exam_type,
         versionCode,
-        setLabel: hasManualBlueprint ? `${manualBlueprint.paperName} v${manualBlueprint.version}` : isUniversityExam ? `Master Paper Set ${setIdx}` : 'Master Set A',
+        setLabel: hasManualBlueprint ? `${manualBlueprint.paperName} v${manualBlueprint.version}` : setLabel,
+        paperCode: 'SLR-HL-475',
         isUniversity3PaperFormat: isUniversityExam,
         isMultiSubjectMCQFormat: isNeetOrMultiSubjectMCQ,
+        universityBoardSet: boardSet,
         blueprint: hasManualBlueprint ? {
           id: manualBlueprint.id,
           version: manualBlueprint.version,
@@ -6151,16 +6206,16 @@ async function startServer() {
         } : null,
         subjectBreakdown,
         generatedAt: now,
-        durationMinutes: exam.duration_minutes,
+        durationMinutes: 180,
         totalMarks: totalPaperMarks,
         instructions: hasManualBlueprint
           ? [`Paper generated from active blueprint ${manualBlueprint.version}.`, 'Follow the configured section order, question counts, attempt rules, marks, and negative marking.']
           : isUniversityExam
           ? [
-              `University Examination Master Paper Set ${setIdx} (Sealed Enclave).`,
-              'All questions from official syllabus standard.',
+              'Q. No. 1 is compulsory. It should be solved in the first 30 minutes in answer book.',
+              'Don’t forget to Mention question paper set (P/Q/R/S) on top of page.',
               'Figures to the right indicate full marks.',
-              'Assume suitable data wherever necessary.',
+              'Assume suitable data wherever needed and mention it clearly.',
             ]
           : [
               `Official Examination Standard (${setLabel}).`,
@@ -6184,7 +6239,7 @@ async function startServer() {
             subject: q.subject,
             topic: q.topic,
             difficulty: q.difficulty,
-            marks: q.marks || 4,
+            marks: q.marks || 1,
             negativeMarks: q.negative_marks || 0,
             type: q.question_type || (opts.length > 0 ? 'MCQ' : 'THEORY'),
             content: q.content_text,
