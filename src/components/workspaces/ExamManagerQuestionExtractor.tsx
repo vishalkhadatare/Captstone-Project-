@@ -226,14 +226,7 @@ export const ExamManagerQuestionExtractor: React.FC<ExamManagerQuestionExtractor
   const [assignModalOpen, setAssignModalOpen] = useState(false);
   const [assignMode, setAssignMode] = useState<'SELECTED' | 'BY_COUNT'>('SELECTED');
   const [assignCountInput, setAssignCountInput] = useState<number>(5);
-<<<<<<< HEAD
-  const [assignTargetRole, setAssignTargetRole] = useState<'TRANSLATOR' | 'DIRECT_IMPORT'>('TRANSLATOR');
-=======
-  const [assignTargetRole, setAssignTargetRole] = useState<'SME' | 'TRANSLATOR' | 'BOTH' | 'DIRECT'>(
-    smes.length > 0 ? 'SME' : 'DIRECT'
-  );
-  const [assignTargetSmeId, setAssignTargetSmeId] = useState<string>(smes[0]?.id || '');
->>>>>>> origin/main
+  const [assignTargetRole, setAssignTargetRole] = useState<'TRANSLATOR' | 'DIRECT_IMPORT'>('DIRECT_IMPORT');
   const [assignTargetTranslatorId, setAssignTargetTranslatorId] = useState<string>(translators[0]?.id || '');
   const [assignTargetLanguage, setAssignTargetLanguage] = useState<string>('Hindi');
   const [assignNotes, setAssignNotes] = useState('');
@@ -1220,13 +1213,8 @@ export const ExamManagerQuestionExtractor: React.FC<ExamManagerQuestionExtractor
     }
 
     // Role validation
-<<<<<<< HEAD
     const needTranslator = assignTargetRole === 'TRANSLATOR';
-=======
-    const isDirect = assignTargetRole === 'DIRECT';
-    const needSme = !isDirect && (assignTargetRole === 'SME' || assignTargetRole === 'BOTH');
-    const needTranslator = !isDirect && (assignTargetRole === 'TRANSLATOR' || assignTargetRole === 'BOTH');
->>>>>>> origin/main
+    const isDirect = assignTargetRole === 'DIRECT_IMPORT';
 
     if (needTranslator && !assignTargetTranslatorId) {
       setStatusMessage({ type: 'error', text: 'Please select a Linguistic Translator from your organization.' });
