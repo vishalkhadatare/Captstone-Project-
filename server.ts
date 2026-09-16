@@ -4073,7 +4073,7 @@ async function startServer() {
 
   // Extract Questions from Question Paper PDF / OCR / Text Transcript
   app.post('/api/question-papers/extract', authenticateToken, requireRole(['EXAM_MANAGER', 'ORG_OWNER']), async (req: Request, res: Response) => {
-    const { paper_text, file_name, file_data, subject, category, job_id } = req.body;
+    const { paper_text, file_name, file_data, subject, category, job_id, exam_id } = req.body;
     const effectiveJobId = job_id || `job-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`;
 
     extractionProgressMap.set(effectiveJobId, {
@@ -4233,13 +4233,14 @@ async function startServer() {
       executeRun(
         db,
         `INSERT INTO question_papers (
-          id, org_id, original_filename, subject, examination_category, processing_status,
+          id, org_id, exam_id, original_filename, subject, examination_category, processing_status,
           page_count, question_count, auto_extracted_count, needs_review_count, manually_corrected_count,
           pages_dir, cloudinary_url, cloudinary_public_id, uploaded_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         [
           sourcePaperId,
           req.user!.org_id,
+          exam_id || null,
           file_name || 'raw_text_entry',
           subject || 'Academic Examination',
           category || 'Competitive Exam',
@@ -4434,6 +4435,31 @@ async function startServer() {
       });
     } catch (err: any) {
       return res.status(500).json({ error: err.message || 'Failed to generate 3 standard papers.' });
+    }
+  });
+
+  // Get all uploaded question papers with Cloudinary metadata
+  app.get('/api/question-papers', authenticateToken, requireRole(['EXAM_MANAGER', 'ORG_OWNER']), async (req: Request, res: Response) => {
+    try {
+      const db = await getDb();
+      const { exam_id } = req.query;
+      let papers: any[] = [];
+      if (exam_id) {
+        papers = executeQuery(
+          db,
+          `SELECT * FROM question_papers WHERE org_id = ? AND (exam_id = ? OR exam_id IS NULL) ORDER BY uploaded_at DESC`,
+          [req.user!.org_id, exam_id]
+        );
+      } else {
+        papers = executeQuery(
+          db,
+          `SELECT * FROM question_papers WHERE org_id = ? ORDER BY uploaded_at DESC`,
+          [req.user!.org_id]
+        );
+      }
+      return res.json({ success: true, papers });
+    } catch (err: any) {
+      return res.status(500).json({ error: err.message });
     }
   });
 
@@ -6041,15 +6067,24 @@ async function startServer() {
       eligibleQuestions = executeQuery(
         db,
         `SELECT * FROM questions
-         WHERE (question_paper_id = ? OR question_paper_id IN (SELECT id FROM question_papers WHERE subject = ? OR examination_category = ?))
+         WHERE (question_paper_id = ? OR question_paper_id IN (SELECT id FROM question_papers WHERE exam_id = ? OR subject = ? OR examination_category = ?))
            AND status NOT IN ('QUARANTINED', 'COMPROMISED')
          ORDER BY source_page ASC, question_number ASC, created_at ASC`,
-        [exam.id, exam.subject || '', exam.category || '']
+        [exam.id, exam.id, exam.subject || '', exam.category || '']
       );
+
+      // If still empty, check all questions in the organization
+      if (eligibleQuestions.length === 0) {
+        eligibleQuestions = executeQuery(
+          db,
+          `SELECT * FROM questions WHERE org_id = ? AND status NOT IN ('QUARANTINED', 'COMPROMISED') ORDER BY source_page ASC, question_number ASC, created_at ASC`,
+          [orgId]
+        );
+      }
     }
 
-    // If empty or if University exam, combine with 3 draft question papers
-    if (isUniversityExam || eligibleQuestions.length === 0) {
+    // Only if question bank is strictly empty, load sample draft questions as fallback
+    if (eligibleQuestions.length === 0) {
       const draftFiles = ['paper1_questions_real.json', 'paper2_questions_real.json', 'paper3_questions_real.json'];
       const draftQuestions: any[] = [];
       draftFiles.forEach((file, fIdx) => {
@@ -6067,8 +6102,8 @@ async function startServer() {
                   source_file: file,
                   source_page: qData.page_number || 1,
                   question_number: qData.question_number || qId,
-                  subject: 'Computer Science & Engineering',
-                  topic: 'Computer Graphics',
+                  subject: exam.subject || 'Core Curriculum',
+                  topic: 'General Topics',
                   difficulty: 'MEDIUM',
                   marks: (qData.options && qData.options.length > 0) ? 1 : 4,
                   negative_marks: 0,
@@ -6089,7 +6124,7 @@ async function startServer() {
       });
 
       if (draftQuestions.length > 0) {
-        eligibleQuestions = [...eligibleQuestions, ...draftQuestions];
+        eligibleQuestions = draftQuestions;
       }
     }
 
@@ -6134,13 +6169,15 @@ async function startServer() {
     }
 
     const now = new Date().toISOString();
-    const numSetsToGenerate = hasManualBlueprint ? 1 : isUniversityExam ? (body.num_sets || 3) : 1;
+    const numSetsToGenerate = hasManualBlueprint ? 1 : isUniversityExam ? (body.num_sets || 4) : 1;
     const generatedSets: any[] = [];
+
+    const dynamicPaperCode = exam.code || exam.paper_code || `${(exam.name || 'EXAM').replace(/[^A-Z0-9]/gi, '').substring(0, 4).toUpperCase() || 'UNIV'}-${Math.floor(100 + Math.random() * 900)}`;
 
     // If University Board Exam, run generateUniversityBoardPaperSets algorithm
     let boardSets: any[] = [];
     if (isUniversityExam) {
-      boardSets = generateUniversityBoardPaperSets(eligibleQuestions, numSetsToGenerate, 'SLR-HL-475');
+      boardSets = generateUniversityBoardPaperSets(eligibleQuestions, numSetsToGenerate, dynamicPaperCode);
     }
 
     for (let setIdx = 1; setIdx <= numSetsToGenerate; setIdx++) {
@@ -6179,11 +6216,11 @@ async function startServer() {
         setQuestions = setQuestions.map((question, index) => ({ ...question, blueprintOrder: index + 1 }));
       } else if (isUniversityExam && boardSet) {
         // Collect MCQs from mcqSection and theory from Section I & II
-        const mcqs = boardSet.mcqSection.questions.map((q: any, idx: number) => ({
+        const mcqs = (boardSet.mcqSection?.questions || []).map((q: any, idx: number) => ({
           id: q.id,
           question_number: `1.${idx + 1}`,
           order_index: idx + 1,
-          subject: exam.subject || 'Computer Graphics',
+          subject: exam.subject || 'Core',
           topic: 'Objective',
           difficulty: 'MEDIUM',
           marks: 1,
@@ -6213,7 +6250,7 @@ async function startServer() {
       const totalPaperMarks = hasManualBlueprint
         ? Number(manualBlueprint.totalMarks || 0)
         : isUniversityExam
-          ? 70
+          ? (exam.total_marks || 70)
           : setQuestions.reduce((acc, q) => acc + (q.marks || 4), 0);
 
       const paperPayloadObject = {
@@ -6224,10 +6261,13 @@ async function startServer() {
         examType: exam.exam_type,
         versionCode,
         setLabel: hasManualBlueprint ? `${manualBlueprint.paperName} v${manualBlueprint.version}` : setLabel,
-        paperCode: 'SLR-HL-475',
+        paperCode: dynamicPaperCode,
+        universityName: exam.university_name || 'Autonomous State Examination Board',
         isUniversity3PaperFormat: isUniversityExam,
         isMultiSubjectMCQFormat: isNeetOrMultiSubjectMCQ,
         universityBoardSet: boardSet,
+        blueprintPattern: exam.blueprint_pattern || 'Standard CBCS',
+        markingScheme: exam.marking_scheme || 'Standard Marks',
         blueprint: hasManualBlueprint ? {
           id: manualBlueprint.id,
           version: manualBlueprint.version,
@@ -6236,7 +6276,7 @@ async function startServer() {
         } : null,
         subjectBreakdown,
         generatedAt: now,
-        durationMinutes: 180,
+        durationMinutes: exam.duration_minutes || 180,
         totalMarks: totalPaperMarks,
         instructions: hasManualBlueprint
           ? [`Paper generated from active blueprint ${manualBlueprint.version}.`, 'Follow the configured section order, question counts, attempt rules, marks, and negative marking.']

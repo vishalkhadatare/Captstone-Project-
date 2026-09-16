@@ -176,6 +176,8 @@ export interface AicteUniversity {
 export interface Examination {
   id: string;
   org_id: string;
+  code?: string;
+  paper_code?: string;
   university_name?: string;
   blueprint_pattern?: string;
   name: string;

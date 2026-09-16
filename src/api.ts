@@ -422,8 +422,12 @@ export const api = {
     request<{ success: boolean; message: { content: string }; text: string }>('/api/ai/ollama-chat', { method: 'POST', body: JSON.stringify(payload) }),
   getOllamaModels: () =>
     request<{ connected: boolean; models: Array<{ name: string; model: string; size?: number }> }>('/api/ai/ollama-models'),
-  extractQuestionsFromPaper: (payload: { paper_text?: string; file_name?: string; file_data?: string; subject?: string; category?: string; job_id?: string }) =>
+  extractQuestionsFromPaper: (payload: { paper_text?: string; file_name?: string; file_data?: string; subject?: string; category?: string; job_id?: string; exam_id?: string }) =>
     request<PaperExtractionResponse>('/api/question-papers/extract', { method: 'POST', body: JSON.stringify(payload) }),
+  getUploadedQuestionPapers: (examId?: string) => {
+    const qs = examId ? `?exam_id=${encodeURIComponent(examId)}` : '';
+    return request<{ success: boolean; papers: any[] }>(`/api/question-papers${qs}`);
+  },
   extractThreeStandardPapers: () =>
     request<{ message: string; extractedQuestions: any[]; papers: any[]; totalExtracted: number }>('/api/question-papers/extract-three-standard-papers', { method: 'POST' }),
   getExtractionProgress: (jobId: string) =>

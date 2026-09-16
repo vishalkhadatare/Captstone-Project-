@@ -759,6 +759,7 @@ export const ExamManagerQuestionExtractor: React.FC<ExamManagerQuestionExtractor
               job_id: file.jobId,
               subject: paperSubject || 'Academic Examination',
               category: paperCategory || 'Competitive Exam',
+              exam_id: activeExamId || currentSelectedExam?.id || undefined,
             });
 
             if (res.sourcePaperId || res.paperId) {
