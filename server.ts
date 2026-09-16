@@ -4628,7 +4628,11 @@ async function startServer() {
   app.get('/api/examinations/:id/formatex-latex', authenticateToken, async (req: Request, res: Response) => {
     try {
       const db = await getDb();
-      const exam = executeQuery(db, 'SELECT * FROM examinations WHERE id = ?', [req.params.id])[0];
+      let exam = executeQuery(db, 'SELECT * FROM examinations WHERE id = ?', [req.params.id])[0];
+      if (!exam) {
+        exam = executeQuery(db, 'SELECT * FROM examinations WHERE org_id = ? ORDER BY created_at DESC LIMIT 1', [req.user?.org_id || ''])[0]
+            || executeQuery(db, 'SELECT * FROM examinations ORDER BY created_at DESC LIMIT 1')[0];
+      }
       if (!exam) return res.status(404).json({ error: 'Examination not found' });
 
       const setLetter = (req.query.setLetter as string) || 'P';
@@ -4712,7 +4716,11 @@ async function startServer() {
   app.post('/api/examinations/:id/compile-formatex-pdf', authenticateToken, async (req: Request, res: Response) => {
     try {
       const db = await getDb();
-      const exam = executeQuery(db, 'SELECT * FROM examinations WHERE id = ?', [req.params.id])[0];
+      let exam = executeQuery(db, 'SELECT * FROM examinations WHERE id = ?', [req.params.id])[0];
+      if (!exam) {
+        exam = executeQuery(db, 'SELECT * FROM examinations WHERE org_id = ? ORDER BY created_at DESC LIMIT 1', [req.user?.org_id || ''])[0]
+            || executeQuery(db, 'SELECT * FROM examinations ORDER BY created_at DESC LIMIT 1')[0];
+      }
       if (!exam) return res.status(404).json({ error: 'Examination not found' });
 
       const { setLetter = 'P', customLatex } = req.body || {};

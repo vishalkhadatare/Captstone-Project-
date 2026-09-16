@@ -161,7 +161,8 @@ export const UniversityFormatGenerator: React.FC<UniversityFormatGeneratorProps>
       const list = res.examinations || [];
       setExams(list);
       if (list.length > 0) {
-        const initialId = selectedExamId || list[0].id;
+        const validSelected = list.find(e => e.id === selectedExamId);
+        const initialId = validSelected ? validSelected.id : list[0].id;
         setSelectedExamId(initialId);
       }
     } catch (e: any) {
@@ -361,12 +362,16 @@ export const UniversityFormatGenerator: React.FC<UniversityFormatGeneratorProps>
   };
 
   const handleCompileFormatexPdf = async (setLetterOverride?: string) => {
-    if (!selectedExamId) return;
+    const examToUse = selectedExamId && exams.some(e => e.id === selectedExamId) ? selectedExamId : exams[0]?.id;
+    if (!examToUse) {
+      setActionMessage({ type: 'error', text: 'No active examination found. Please select an examination first.' });
+      return;
+    }
     setCompilingFormatex(true);
     setActionMessage(null);
     try {
       const letter = setLetterOverride || ['P', 'Q', 'R', 'S'][activeSetIndex] || 'P';
-      const res = await api.compileFormatexPdf(selectedExamId, { setLetter: letter });
+      const res = await api.compileFormatexPdf(examToUse, { setLetter: letter });
       if (res.success && res.pdfUrl) {
         setLatestFormatexPdfUrl(res.pdfUrl);
         setActionMessage({
