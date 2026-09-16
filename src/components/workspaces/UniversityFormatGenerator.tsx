@@ -28,7 +28,12 @@ import {
   Clock,
   Award,
   Hash,
-  Info
+  Info,
+  CheckSquare,
+  Square,
+  Zap,
+  Combine,
+  Flame
 } from 'lucide-react';
 import { api } from '../../api';
 import { User, Examination } from '../../types';
@@ -82,8 +87,9 @@ export const UniversityFormatGenerator: React.FC<UniversityFormatGeneratorProps>
   const [showPdfModal, setShowPdfModal] = useState(false);
   const [actionMessage, setActionMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
 
-  // Uploaded Source Drafts (Cloudinary)
+  // Uploaded Source Drafts (Cloudinary) & Selection
   const [uploadedPapers, setUploadedPapers] = useState<UploadedDraftPaper[]>([]);
+  const [selectedPaperIds, setSelectedPaperIds] = useState<string[]>([]);
   const [loadingPapers, setLoadingPapers] = useState(false);
 
   // Real Generated Paper Data
@@ -137,6 +143,8 @@ export const UniversityFormatGenerator: React.FC<UniversityFormatGeneratorProps>
       const res = await api.getUploadedQuestionPapers(examId);
       if (res.success && Array.isArray(res.papers)) {
         setUploadedPapers(res.papers);
+        // Automatically pre-select all papers if none selected
+        setSelectedPaperIds(prev => (prev.length === 0 ? res.papers.map(p => p.id) : prev));
       }
     } catch (e: any) {
       console.warn('Could not load uploaded question papers:', e);
@@ -163,13 +171,29 @@ export const UniversityFormatGenerator: React.FC<UniversityFormatGeneratorProps>
     }
   };
 
-  const triggerUniversityGenerator = async (examId: string) => {
+  const toggleSelectPaper = (paperId: string) => {
+    setSelectedPaperIds(prev =>
+      prev.includes(paperId) ? prev.filter(id => id !== paperId) : [...prev, paperId]
+    );
+  };
+
+  const selectAllPapers = () => {
+    setSelectedPaperIds(uploadedPapers.map(p => p.id));
+  };
+
+  const clearSelectedPapers = () => {
+    setSelectedPaperIds([]);
+  };
+
+  const triggerUniversityGenerator = async (examId: string, paperIds?: string[]) => {
     setGenerating(true);
     setActionMessage(null);
     try {
+      const activeIds = paperIds !== undefined ? paperIds : selectedPaperIds;
       const res = await api.generatePaper(examId, {
         exam_mode: 'UNIVERSITY_3_SETS',
         num_sets: 4,
+        selected_paper_ids: activeIds.length > 0 ? activeIds : undefined,
       });
 
       if (res) {
@@ -185,9 +209,17 @@ export const UniversityFormatGenerator: React.FC<UniversityFormatGeneratorProps>
           runMasterBlueprintValidation(currentRes.questions || [], currentRes.exam || exams.find(e => e.id === examId)!);
         }
       }
+
+      const countMsg =
+        activeIds.length > 1
+          ? `Successfully generated 4 Paper Sets (Set P, Q, R, S) by combining and permuting questions from ${activeIds.length} uploaded draft papers using Ollama AI!`
+          : activeIds.length === 1
+          ? `Successfully generated 4 Paper Sets from the selected uploaded draft using Ollama AI!`
+          : `Successfully generated 4 Paper Sets using Ollama AI!`;
+
       setActionMessage({
         type: 'success',
-        text: 'Real Examination Paper generated using Ollama model! 4 Paper Sets (Set P, Set Q, Set R, Set S) compiled from uploaded drafts.',
+        text: countMsg,
       });
       onRefresh();
     } catch (e: any) {
@@ -271,7 +303,7 @@ export const UniversityFormatGenerator: React.FC<UniversityFormatGeneratorProps>
               </span>
             </div>
             <p className="text-xs text-slate-400 mt-0.5">
-              Multi-Draft Permutation & Combination &bull; Cloudinary Stored Papers &bull; 4 Distinct Sets (P, Q, R, S)
+              Multi-Draft Combination & Permutation &bull; Stored in Cloudinary &bull; 4 Distinct Sets (P, Q, R, S)
             </p>
           </div>
         </div>
@@ -299,7 +331,7 @@ export const UniversityFormatGenerator: React.FC<UniversityFormatGeneratorProps>
             className="px-5 py-2.5 bg-rose-600 hover:bg-rose-500 text-white rounded-xl font-bold text-xs shadow-lg shadow-rose-600/20 flex items-center gap-2 cursor-pointer transition-all disabled:opacity-50"
           >
             <RefreshCw className={`w-4 h-4 ${generating ? 'animate-spin' : ''}`} />
-            <span>{generating ? 'Generating Real Paper via Ollama...' : 'Generate Real Paper Sets'}</span>
+            <span>{generating ? 'Compiling Sets via Ollama...' : 'Generate Real Paper Sets'}</span>
           </button>
         </div>
       </div>
@@ -321,124 +353,198 @@ export const UniversityFormatGenerator: React.FC<UniversityFormatGeneratorProps>
         </div>
       )}
 
-      {/* Uploaded Source Drafts (Cloudinary Stored) & Permutation & Combination Banner */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        {/* Uploaded Source Drafts in Cloudinary */}
-        <div className="bg-slate-900 border border-slate-800 p-5 rounded-2xl shadow-xl space-y-4 lg:col-span-2">
-          <div className="flex items-center justify-between border-b border-slate-800 pb-3">
-            <div className="flex items-center gap-2">
-              <Cloud className="w-4 h-4 text-sky-400" />
-              <span className="text-xs font-extrabold text-white uppercase tracking-wide">
-                Uploaded Source Draft Papers (Cloudinary Vault)
-              </span>
+      {/* RECENTLY UPLOADED PAPERS (FROM EXAM WORKFLOW & CLOUDINARY) WITH MULTI-SELECT & COMBINATION */}
+      <div className="bg-slate-900 border border-slate-800 p-5 rounded-2xl shadow-xl space-y-4">
+        <div className="flex flex-wrap items-center justify-between border-b border-slate-800 pb-3 gap-3">
+          <div className="flex items-center gap-2.5">
+            <div className="p-1.5 rounded-lg bg-sky-500/20 text-sky-400 border border-sky-500/30">
+              <Cloud className="w-4 h-4" />
             </div>
-            <div className="flex items-center gap-2">
-              <span className="text-[11px] font-mono text-sky-400 font-bold bg-sky-500/10 px-2.5 py-0.5 rounded border border-sky-500/20 flex items-center gap-1.5">
-                <Cloud className="w-3 h-3" />
-                {uploadedPapers.length} Draft Papers Stored
-              </span>
-              <button
-                type="button"
-                onClick={() => loadUploadedPapers(selectedExamId)}
-                title="Refresh uploaded drafts"
-                className="p-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white border border-slate-700 cursor-pointer transition-all"
-              >
-                <RefreshCw className={`w-3.5 h-3.5 ${loadingPapers ? 'animate-spin' : ''}`} />
-              </button>
+            <div>
+              <div className="flex items-center gap-2">
+                <h3 className="text-sm font-extrabold text-white uppercase tracking-wide">
+                  Recently Uploaded Source Draft Papers (Cloudinary Vault)
+                </h3>
+                <span className="text-[10px] font-mono text-sky-400 font-bold bg-sky-500/10 px-2 py-0.5 rounded border border-sky-500/20">
+                  {uploadedPapers.length} Stored in Cloudinary
+                </span>
+              </div>
+              <p className="text-[11px] text-slate-400">
+                Select multiple draft papers below to generate a new blended paper combining questions from all selected drafts.
+              </p>
             </div>
           </div>
 
-          {loadingPapers ? (
-            <div className="p-6 text-center text-slate-400 text-xs flex items-center justify-center gap-2">
-              <RefreshCw className="w-4 h-4 animate-spin text-rose-500" />
-              <span>Fetching Cloudinary stored drafts...</span>
-            </div>
-          ) : uploadedPapers.length === 0 ? (
-            <div className="p-6 rounded-xl bg-slate-800/60 border border-slate-700/60 text-center space-y-2">
-              <UploadCloud className="w-8 h-8 text-slate-500 mx-auto" />
-              <div className="text-xs font-bold text-slate-300">No question papers uploaded yet for this examination</div>
-              <p className="text-[11px] text-slate-400">
-                Go to <span className="font-bold text-rose-400">Exam Workflow</span> to upload and extract master question paper PDFs directly into Cloudinary.
-              </p>
-            </div>
-          ) : (
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-              {uploadedPapers.map((paper, pIdx) => (
+          <div className="flex items-center gap-2">
+            {uploadedPapers.length > 0 && (
+              <>
+                <button
+                  type="button"
+                  onClick={selectAllPapers}
+                  className="px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 text-[11px] font-semibold border border-slate-700 flex items-center gap-1 cursor-pointer transition-all"
+                >
+                  <CheckSquare className="w-3.5 h-3.5 text-emerald-400" />
+                  <span>Select All</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={clearSelectedPapers}
+                  className="px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 text-[11px] font-semibold border border-slate-700 flex items-center gap-1 cursor-pointer transition-all"
+                >
+                  <Square className="w-3.5 h-3.5 text-slate-400" />
+                  <span>Clear</span>
+                </button>
+              </>
+            )}
+            <button
+              type="button"
+              onClick={() => loadUploadedPapers(selectedExamId)}
+              title="Refresh uploaded drafts"
+              className="p-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white border border-slate-700 cursor-pointer transition-all flex items-center gap-1.5 text-xs font-bold"
+            >
+              <RefreshCw className={`w-3.5 h-3.5 ${loadingPapers ? 'animate-spin' : ''}`} />
+              <span>Sync</span>
+            </button>
+          </div>
+        </div>
+
+        {/* Papers Grid */}
+        {loadingPapers ? (
+          <div className="p-8 text-center text-slate-400 text-xs flex items-center justify-center gap-2">
+            <RefreshCw className="w-4 h-4 animate-spin text-rose-500" />
+            <span>Fetching recently uploaded papers from Cloudinary vault...</span>
+          </div>
+        ) : uploadedPapers.length === 0 ? (
+          <div className="p-8 rounded-xl bg-slate-800/50 border border-dashed border-slate-700 text-center space-y-2.5">
+            <UploadCloud className="w-9 h-9 text-slate-500 mx-auto" />
+            <div className="text-xs font-bold text-slate-200">No draft question papers uploaded yet</div>
+            <p className="text-[11px] text-slate-400 max-w-md mx-auto">
+              Go to <strong className="text-rose-400">Exam Workflow</strong> tab to upload your master question paper PDFs. They will be stored in Cloudinary and show up here instantly.
+            </p>
+          </div>
+        ) : (
+          <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3.5">
+            {uploadedPapers.map((paper, pIdx) => {
+              const isSelected = selectedPaperIds.includes(paper.id);
+              return (
                 <div
                   key={paper.id}
-                  className="bg-slate-800/80 border border-slate-700/80 p-3.5 rounded-xl space-y-2 hover:border-sky-500/40 transition-colors"
+                  onClick={() => toggleSelectPaper(paper.id)}
+                  className={`relative p-4 rounded-xl border transition-all cursor-pointer select-none space-y-3 ${
+                    isSelected
+                      ? 'bg-rose-950/20 border-rose-500/60 shadow-lg shadow-rose-950/30 ring-1 ring-rose-500/50'
+                      : 'bg-slate-800/80 border-slate-700/80 hover:border-slate-600'
+                  }`}
                 >
-                  <div className="flex items-start justify-between gap-2">
-                    <div className="flex items-center gap-2 overflow-hidden">
-                      <FileText className="w-4 h-4 text-sky-400 shrink-0" />
-                      <span className="font-bold text-xs text-white truncate" title={paper.original_filename}>
-                        Draft {pIdx + 1}: {paper.original_filename}
-                      </span>
+                  {/* Header row: Checkbox, Name, Badge */}
+                  <div className="flex items-start justify-between gap-2.5">
+                    <div className="flex items-start gap-2.5 overflow-hidden">
+                      <div className="pt-0.5 shrink-0">
+                        {isSelected ? (
+                          <div className="w-4 h-4 rounded bg-rose-600 flex items-center justify-center text-white">
+                            <Check className="w-3 h-3 stroke-[3]" />
+                          </div>
+                        ) : (
+                          <div className="w-4 h-4 rounded border border-slate-600 bg-slate-800" />
+                        )}
+                      </div>
+                      <div className="overflow-hidden">
+                        <div className="flex items-center gap-1.5">
+                          <span className="text-[10px] font-black font-mono text-rose-400 uppercase">
+                            Draft #{pIdx + 1}
+                          </span>
+                        </div>
+                        <h4 className="font-bold text-xs text-white truncate" title={paper.original_filename}>
+                          {paper.original_filename}
+                        </h4>
+                      </div>
                     </div>
-                    <span className="px-2 py-0.5 rounded text-[9px] font-black bg-emerald-500/10 text-emerald-400 border border-emerald-500/30 uppercase shrink-0">
+
+                    <span className="px-2 py-0.5 rounded text-[9px] font-black bg-sky-500/10 text-sky-400 border border-sky-500/30 uppercase shrink-0">
                       Cloudinary
                     </span>
                   </div>
 
-                  <div className="flex flex-wrap items-center justify-between text-[11px] text-slate-400 font-mono gap-1 pt-1 border-t border-slate-700/60">
-                    <span>Questions: <strong className="text-white">{paper.question_count}</strong></span>
-                    <span>Pages: <strong className="text-white">{paper.page_count}</strong></span>
-                    <span>{new Date(paper.uploaded_at).toLocaleDateString()}</span>
+                  {/* Metadata Stats */}
+                  <div className="grid grid-cols-2 gap-2 text-[11px] text-slate-300 font-mono bg-slate-900/60 p-2 rounded-lg border border-slate-800">
+                    <div>Questions: <strong className="text-white">{paper.question_count}</strong></div>
+                    <div>Pages: <strong className="text-white">{paper.page_count}</strong></div>
+                    <div className="col-span-2 text-[10px] text-slate-400 truncate">
+                      Subject: <strong className="text-slate-200">{paper.subject || 'General'}</strong>
+                    </div>
                   </div>
 
-                  {paper.cloudinary_url && (
-                    <a
-                      href={paper.cloudinary_url}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="inline-flex items-center gap-1.5 text-[11px] text-sky-400 hover:text-sky-300 font-bold underline pt-0.5"
-                    >
-                      <ExternalLink className="w-3 h-3" />
-                      <span>View PDF on Cloudinary</span>
-                    </a>
-                  )}
+                  {/* Footer with Cloudinary Link & Timestamp */}
+                  <div className="flex items-center justify-between text-[10px] text-slate-400 pt-1 border-t border-slate-700/60">
+                    <span>{new Date(paper.uploaded_at).toLocaleDateString()}</span>
+                    {paper.cloudinary_url && (
+                      <a
+                        href={paper.cloudinary_url}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        onClick={(e) => e.stopPropagation()}
+                        className="inline-flex items-center gap-1 text-sky-400 hover:text-sky-300 font-bold underline"
+                      >
+                        <ExternalLink className="w-3 h-3" />
+                        <span>View PDF</span>
+                      </a>
+                    )}
+                  </div>
                 </div>
-              ))}
-            </div>
-          )}
-        </div>
-
-        {/* Permutation & Combination Strategy Card */}
-        <div className="bg-slate-900 border border-slate-800 p-5 rounded-2xl shadow-xl space-y-3.5 flex flex-col justify-between">
-          <div className="space-y-2">
-            <div className="flex items-center gap-2 text-rose-400 font-bold text-xs uppercase tracking-wide">
-              <Shuffle className="w-4 h-4" />
-              <span>Permutation & Combination Engine</span>
-            </div>
-            <p className="text-xs text-slate-300 leading-relaxed">
-              Combines questions from all uploaded drafts into <strong>4 distinct sets (Set P, Q, R, S)</strong>.
-            </p>
+              );
+            })}
           </div>
+        )}
 
-          <div className="space-y-2 bg-slate-800/80 p-3.5 rounded-xl border border-slate-700/80 text-[11px] text-slate-300 space-y-1.5">
-            <div className="flex items-center justify-between">
-              <span>Question Permutation:</span>
-              <span className="font-bold text-emerald-400">Cryptographic Shuffle</span>
+        {/* COMBINATION GENERATOR ACTION BAR */}
+        {uploadedPapers.length > 0 && (
+          <div className="p-4 rounded-xl bg-gradient-to-r from-rose-950/40 via-slate-800 to-indigo-950/40 border border-rose-500/30 flex flex-wrap items-center justify-between gap-4">
+            <div className="flex items-center gap-3">
+              <div className="p-2.5 rounded-xl bg-rose-500/20 text-rose-400 border border-rose-500/30">
+                <Combine className="w-5 h-5" />
+              </div>
+              <div>
+                <div className="text-xs font-black text-white uppercase tracking-wider flex items-center gap-2">
+                  <span>Permutation & Combination Multi-Draft Blending</span>
+                  <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-rose-500/20 text-rose-300 border border-rose-500/40">
+                    {selectedPaperIds.length} of {uploadedPapers.length} Drafts Selected
+                  </span>
+                </div>
+                <p className="text-[11px] text-slate-300 mt-0.5">
+                  {selectedPaperIds.length >= 2
+                    ? `Questions from ${selectedPaperIds.length} selected drafts will be blended and permuted across Set P, Set Q, Set R, Set S.`
+                    : selectedPaperIds.length === 1
+                    ? 'Questions from 1 selected draft will be formatted into 4 distinct shuffled sets.'
+                    : 'Please select at least 1 or 2 uploaded draft papers to generate the blended examination paper.'}
+                </p>
+              </div>
             </div>
-            <div className="flex items-center justify-between">
-              <span>MCQ Option Shuffling:</span>
-              <span className="font-bold text-emerald-400">Dynamic (a,b,c,d)</span>
-            </div>
-            <div className="flex items-center justify-between">
-              <span>AI Engine:</span>
-              <span className="font-bold text-rose-400">Ollama qwen2.5vl:7b</span>
-            </div>
-            <div className="flex items-center justify-between">
-              <span>Anti-Duplication:</span>
-              <span className="font-bold text-sky-400">SHA-256 Verified</span>
-            </div>
-          </div>
 
-          <div className="text-[10px] text-slate-400 font-mono flex items-center gap-1">
-            <Info className="w-3 h-3 text-slate-500 shrink-0" />
-            <span>Each set has unique option order & question sequences to eliminate cheating.</span>
+            <button
+              type="button"
+              onClick={() => selectedExamId && triggerUniversityGenerator(selectedExamId, selectedPaperIds)}
+              disabled={generating || selectedPaperIds.length === 0 || !selectedExamId}
+              className={`px-5 py-3 rounded-xl font-black text-xs shadow-xl flex items-center gap-2 cursor-pointer transition-all ${
+                selectedPaperIds.length >= 2
+                  ? 'bg-rose-600 hover:bg-rose-500 text-white shadow-rose-600/30 animate-pulse'
+                  : selectedPaperIds.length === 1
+                  ? 'bg-rose-600 hover:bg-rose-500 text-white shadow-rose-600/20'
+                  : 'bg-slate-800 text-slate-500 border border-slate-700 cursor-not-allowed'
+              }`}
+            >
+              <Zap className={`w-4 h-4 ${generating ? 'animate-spin' : ''}`} />
+              <span>
+                {generating
+                  ? 'Blending & Compiling via Ollama...'
+                  : selectedPaperIds.length >= 2
+                  ? `Generate Paper from Combination of ${selectedPaperIds.length} Papers`
+                  : selectedPaperIds.length === 1
+                  ? 'Generate Paper from 1 Selected Draft'
+                  : 'Select Papers to Generate Combination'}
+              </span>
+            </button>
           </div>
-        </div>
+        )}
       </div>
 
       {/* 9-Step Pipeline Stepper */}
@@ -732,7 +838,7 @@ export const UniversityFormatGenerator: React.FC<UniversityFormatGeneratorProps>
                   })
                 ) : (
                   <div className="text-xs text-slate-500 italic">
-                    Click "Generate Real Paper Sets" above to populate real MCQs from your uploaded draft papers.
+                    Click "Generate Paper from Combination" above to populate real MCQs from your selected uploaded draft papers.
                   </div>
                 )}
               </div>
@@ -794,7 +900,7 @@ export const UniversityFormatGenerator: React.FC<UniversityFormatGeneratorProps>
                 </div>
               ) : (
                 <div className="text-xs text-slate-500 italic">
-                  Click "Generate Real Paper Sets" above to populate real theory questions.
+                  Click "Generate Paper from Combination" above to populate real theory questions.
                 </div>
               )}
             </div>
@@ -855,7 +961,7 @@ export const UniversityFormatGenerator: React.FC<UniversityFormatGeneratorProps>
                 </div>
               ) : (
                 <div className="text-xs text-slate-500 italic">
-                  Click "Generate Real Paper Sets" above to populate real theory questions.
+                  Click "Generate Paper from Combination" above to populate real theory questions.
                 </div>
               )}
             </div>

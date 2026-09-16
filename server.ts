@@ -6066,33 +6066,50 @@ async function startServer() {
       ))
     );
 
-    // 1. Query real questions: prioritize questions directly linked to this exam, source paper, or organization
+    // 1. Query real questions: prioritize explicitly selected draft papers, or questions linked to this exam/org
     let eligibleQuestions: any[] = [];
 
-    if (hasManualBlueprint) {
-      eligibleQuestions = executeQuery(
-        db,
-        `SELECT * FROM questions WHERE org_id = ? AND status = 'ELIGIBLE_FOR_PAPER' ORDER BY subject ASC, difficulty ASC`,
-        [orgId]
-      );
-    } else {
-      // First prioritize questions explicitly linked to this exam, source paper, or uploaded question papers
-      eligibleQuestions = executeQuery(
+    if (Array.isArray(body.selected_paper_ids) && body.selected_paper_ids.length > 0) {
+      const placeholders = body.selected_paper_ids.map(() => '?').join(',');
+      const selectedQs = executeQuery(
         db,
         `SELECT * FROM questions
-         WHERE (question_paper_id = ? OR question_paper_id IN (SELECT id FROM question_papers WHERE exam_id = ? OR subject = ? OR examination_category = ?))
+         WHERE question_paper_id IN (${placeholders})
            AND status NOT IN ('QUARANTINED', 'COMPROMISED')
          ORDER BY source_page ASC, question_number ASC, created_at ASC`,
-        [exam.id, exam.id, exam.subject || '', exam.category || '']
+        body.selected_paper_ids
       );
+      if (selectedQs.length > 0) {
+        eligibleQuestions = selectedQs;
+      }
+    }
 
-      // If still empty, check all questions in the organization
-      if (eligibleQuestions.length === 0) {
+    if (eligibleQuestions.length === 0) {
+      if (hasManualBlueprint) {
         eligibleQuestions = executeQuery(
           db,
-          `SELECT * FROM questions WHERE org_id = ? AND status NOT IN ('QUARANTINED', 'COMPROMISED') ORDER BY source_page ASC, question_number ASC, created_at ASC`,
+          `SELECT * FROM questions WHERE org_id = ? AND status = 'ELIGIBLE_FOR_PAPER' ORDER BY subject ASC, difficulty ASC`,
           [orgId]
         );
+      } else {
+        // First prioritize questions explicitly linked to this exam, source paper, or uploaded question papers
+        eligibleQuestions = executeQuery(
+          db,
+          `SELECT * FROM questions
+           WHERE (question_paper_id = ? OR question_paper_id IN (SELECT id FROM question_papers WHERE exam_id = ? OR subject = ? OR examination_category = ?))
+             AND status NOT IN ('QUARANTINED', 'COMPROMISED')
+           ORDER BY source_page ASC, question_number ASC, created_at ASC`,
+          [exam.id, exam.id, exam.subject || '', exam.category || '']
+        );
+
+        // If still empty, check all questions in the organization
+        if (eligibleQuestions.length === 0) {
+          eligibleQuestions = executeQuery(
+            db,
+            `SELECT * FROM questions WHERE org_id = ? AND status NOT IN ('QUARANTINED', 'COMPROMISED') ORDER BY source_page ASC, question_number ASC, created_at ASC`,
+            [orgId]
+          );
+        }
       }
     }
 

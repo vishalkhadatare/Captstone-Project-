@@ -493,7 +493,7 @@ export const api = {
   aiTranslate: (payload: { content: string; options?: string[] | null; targetLanguage: string; subject?: string }) => request<{ result: { translatedContent: string; translatedOptions: string[] | null; targetLanguage: string; linguisticNotes: string; aiConfidence: number } }>('/api/translations/ai-translate', { method: 'POST', body: JSON.stringify(payload) }),
 
   // Paper Generation & Encryption
-  generatePaper: (examId: string, payload?: { exam_mode?: string; subject_pool?: string[]; num_sets?: number }) =>
+  generatePaper: (examId: string, payload?: { exam_mode?: string; subject_pool?: string[]; num_sets?: number; selected_paper_ids?: string[] }) =>
     request<{
       message: string;
       versionCode: string;
