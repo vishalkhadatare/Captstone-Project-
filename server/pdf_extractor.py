@@ -268,7 +268,7 @@ def extract_page_text_items_with_ocr(
                     by0 = float(w[1]) * scale_y
                     bx1 = float(w[2]) * scale_x
                     by1 = float(w[3]) * scale_y
-                    col = 0 if bx0 < mid_x else 1
+                    col = 0 if not is_two_col or bx0 < mid_x else 1
                     items.append(TextItem(bx0, by0, bx1, by1, t, 1.0, col))
                 items.sort(key=lambda it: (it.col, it.y0, it.x0))
                 return items
@@ -828,65 +828,61 @@ def extract_university_or_general_paper(
             if any(k in t.lower() for k in ["instruction", "assume suitable", "figures to the right", "draw neat diagram", "answer book", "duration:", "max. marks", "mention question paper", "page no", "seat no", "examination:"]):
                 continue
 
-            # Match question number: 1) / 1. / (1) / Q.1(1) / standalone "1" near left margin (x0 < 450)
-            m = re.match(r"^(?:Q\.?1\s*[\(\.\:\-]?)?\s*(\d{1,2})[\)\.\:\-]\s*(.*)", t, re.IGNORECASE)
+            # Match question number: 1) / 1. / (1) / Q.1(1) / standalone "1" near left margin
+            m = re.match(r"^(?:Q\.?1\s*[\(\.\:\-]?)?\s*(\d{1,2})[\)\.\:\-]?\s*(.*)", t, re.IGNORECASE)
             if not m:
                 m = re.match(r"^\((\d{1,2})\)\s*(.*)", t)
-            if not m and re.match(r"^(\d{1,2})$", t) and it["x0"] < 420:
-                # Standalone number near left margin
+            if not m and re.match(r"^(\d{1,2})$", t) and it["x0"] < pw * 0.35:
                 num_val = int(t)
                 if 1 <= num_val <= 30:
                     m = re.match(r"^(\d{1,2})()$", t)
 
             if m and it["x0"] < pw * 0.42:
                 q_val = int(m.group(1))
-                if 1 <= q_val <= 30 and (not mcq_anchors or q_val >= mcq_anchors[-1]["q_num"]):
-                    # Deduplicate anchors with same q_val
-                    if mcq_anchors and mcq_anchors[-1]["q_num"] == q_val:
-                        continue
-                    mcq_anchors.append({
-                        "q_num": q_val,
-                        "item": it,
-                        "y0": it["y0"],
-                        "y1": it["y1"],
-                        "body": m.group(2).strip() if len(m.groups()) >= 2 else t,
-                    })
+                if 1 <= q_val <= 30:
+                    if not mcq_anchors or q_val > mcq_anchors[-1]["q_num"]:
+                        mcq_anchors.append({
+                            "q_num": q_val,
+                            "item": it,
+                            "y0": it["y0"],
+                            "y1": it["y1"],
+                            "body": m.group(2).strip() if len(m.groups()) >= 2 else t,
+                        })
 
         if mcq_anchors:
             mcq_anchors.sort(key=lambda a: a["y0"])
 
+            prev_bottom = min(a["y0"] for a in mcq_anchors) - 10
             for i, a in enumerate(mcq_anchors):
                 q_n = a["q_num"]
-                y_start = max(10, int(round(a["y0"] - 20)))
+                next_top = mcq_anchors[i + 1]["item"]["y0"] if i + 1 < len(mcq_anchors) else ph - 80
+                
+                # Check for footer / section / next main question bounds
+                for it in items:
+                    if ("Page" in it["text"] or "SECTION" in it["text"] or re.match(r"^Q\.?\s*[2-9]", it["text"])) and it["y0"] > a["y1"]:
+                        next_top = min(next_top, it["y0"])
 
-                if i + 1 < len(mcq_anchors):
-                    next_top = mcq_anchors[i + 1]["y0"]
-                    y_end = max(y_start + 80, int(round(next_top - 15)))
-                else:
-                    # Last MCQ on page
-                    footer_items = [it["y0"] for it in items if it["y0"] > a["y1"] and ("Page" in it["text"] or "SECTION" in it["text"] or "Q.2" in it["text"])]
-                    next_top = min(footer_items) if footer_items else ph - 80
-                    y_end = min(ph - 50, max(y_start + 90, int(round(next_top - 15))))
+                # Strict items belonging to this MCQ only
+                q_items = [it for it in items if a["item"]["y0"] - 4 <= it["y0"] < next_top - 6]
+                content_bottom = max(it["y1"] for it in q_items) if q_items else a["item"]["y1"]
+                content_x1 = max(it["x1"] for it in q_items) if q_items else pw - 100
 
-                crop_x0 = 40
-                crop_x1 = pw - 40
+                # Sharp, tight ratio bounding box
+                y_start = max(int(round(prev_bottom + 4)), int(round(a["item"]["y0"] - 8)))
+                y_end = max(y_start + 40, min(int(round(next_top - 6)), int(round(content_bottom + 12))))
+                crop_x0 = max(20, int(round(a["item"]["x0"] - 25)))
+                crop_x1 = min(pw - 30, int(round(content_x1 + 30)))
+
+                prev_bottom = content_bottom
+
                 crop_box = (crop_x0, y_start, crop_x1, y_end)
-
                 crop_img = pd["img"].crop(crop_box)
                 crop_filename = f"q_{q_n}_{doc_id[:8]}.png"
                 doc_crop_path = os.path.join(doc_crops_dir, crop_filename)
-                public_crop_path = os.path.join(PUBLIC_QUESTIONS_DIR, f"q_{q_n}.png")
 
                 crop_img.save(doc_crop_path)
-                try:
-                    shutil.copyfile(doc_crop_path, public_crop_path)
-                except Exception:
-                    crop_img.save(public_crop_path)
-
                 crop_url = f"/papers/{doc_id}/crops/{crop_filename}"
 
-                # Text items belonging to this MCQ
-                q_items = [it for it in items if a["y0"] - 10 <= it["y0"] < next_top - 10]
                 full_text = " ".join([it["text"] for it in q_items])
 
                 # Parse MCQ options (a, b, c, d)
@@ -939,7 +935,7 @@ def extract_university_or_general_paper(
     # =========================================================================
     sub_bullet_alias_map = {
         "a": "a", "@": "a", "(a": "a", "a)": "a", "a.": "a",
-        "b": "b", "6": "b", "(q": "b", "q": "b", "(b": "b", "b)": "b", "b.": "b",
+        "b": "b", "(q": "b", "q": "b", "(b": "b", "b)": "b", "b.": "b",
         "c": "c", "(c": "c", "c)": "c", "c.": "c",
         "d": "d", "(p": "d", "p": "d", "(d": "d", "d)": "d", "d.": "d",
         "e": "e", "(e": "e", "e)": "e", "e.": "e",
@@ -978,16 +974,17 @@ def extract_university_or_general_paper(
                 if "Page" in it["text"] and mq["y1"] < it["y0"] < next_mq_y0:
                     next_mq_y0 = min(next_mq_y0, it["y0"])
 
-            band_items = [it for it in items if mq["y1"] <= it["y0"] < next_mq_y0]
+            # Items strictly below main question header
+            band_items = [it for it in items if mq["y1"] + 2 <= it["y0"] < next_mq_y0]
 
             sub_qs = []
             for it in band_items:
                 t = it["text"].strip()
-                if it["x0"] > 460:
-                    continue  # Sub-bullets are aligned near left margin (x0 < 450)
+                if it["x0"] > pw * 0.35:
+                    continue
 
                 # Check bullet matches
-                m_sub = re.match(r"^([a-e@\(\)qp6\.]+)\s*(.*)", t, re.IGNORECASE)
+                m_sub = re.match(r"^((?:\([a-e@qp]\)|[a-e@qp]\)|[a-e@qp]\.))\s*(.*)$", t, re.IGNORECASE)
                 if m_sub:
                     raw_sym = m_sub.group(1).lower().rstrip(").")
                     clean_lbl = sub_bullet_alias_map.get(raw_sym)
@@ -1001,48 +998,100 @@ def extract_university_or_general_paper(
                             "text": t,
                         })
 
-            # Sort sub-questions strictly in reading order (top to bottom)
             sub_qs.sort(key=lambda s: s["y0"])
 
-            # Deduplicate labels and enforce sequential letters
-            clean_sub_qs = []
+            # Gap recovery for missed sub-question bullets
+            detected = {s["sub_label"] for s in sub_qs}
+            if "b" in detected and "a" not in detected:
+                b_sq = next(s for s in sub_qs if s["sub_label"] == "b")
+                candidates = [
+                    it for it in band_items
+                    if mq["y1"] + 5 <= it["y0"] < b_sq["y0"] - 10
+                    and it["x0"] < pw * 0.35
+                    and not re.match(r"^(?:Q\.?\s*\d|Answer the|SECTION)", it["text"], re.IGNORECASE)
+                ]
+                if candidates:
+                    cand = min(candidates, key=lambda it: it["y0"])
+                    sub_qs.append({
+                        "main_q": mq["q_id"],
+                        "sub_label": "a",
+                        "item": cand,
+                        "y0": cand["y0"],
+                        "y1": cand["y1"],
+                        "text": cand["text"],
+                    })
+
+            if "c" in detected and "b" not in detected:
+                c_sq = next(s for s in sub_qs if s["sub_label"] == "c")
+                a_sq = next((s for s in sub_qs if s["sub_label"] == "a"), None)
+                y_min = a_sq["y1"] + 5 if a_sq else mq["y1"] + 5
+                candidates = [
+                    it for it in band_items
+                    if y_min <= it["y0"] < c_sq["y0"] - 10
+                    and it["x0"] < pw * 0.35
+                    and not re.match(r"^(?:Q\.?\s*\d|Answer the|SECTION)", it["text"], re.IGNORECASE)
+                ]
+                if candidates:
+                    cand = min(candidates, key=lambda it: it["y0"])
+                    sub_qs.append({
+                        "main_q": mq["q_id"],
+                        "sub_label": "b",
+                        "item": cand,
+                        "y0": cand["y0"],
+                        "y1": cand["y1"],
+                        "text": cand["text"],
+                    })
+
+            if "d" in detected and "c" not in detected:
+                d_sq = next(s for s in sub_qs if s["sub_label"] == "d")
+                b_sq = next((s for s in sub_qs if s["sub_label"] == "b"), None)
+                y_min = b_sq["y1"] + 5 if b_sq else mq["y1"] + 5
+                candidates = [
+                    it for it in band_items
+                    if y_min <= it["y0"] < d_sq["y0"] - 10
+                    and it["x0"] < pw * 0.35
+                    and not re.match(r"^(?:Q\.?\s*\d|Answer the|SECTION)", it["text"], re.IGNORECASE)
+                ]
+                if candidates:
+                    cand = min(candidates, key=lambda it: it["y0"])
+                    sub_qs.append({
+                        "main_q": mq["q_id"],
+                        "sub_label": "c",
+                        "item": cand,
+                        "y0": cand["y0"],
+                        "y1": cand["y1"],
+                        "text": cand["text"],
+                    })
+
+            sub_qs.sort(key=lambda s: s["y0"])
             expected_letters = ["a", "b", "c", "d", "e"]
             for s_i, sq in enumerate(sub_qs):
                 if s_i < len(expected_letters):
                     sq["sub_label"] = expected_letters[s_i]
-                clean_sub_qs.append(sq)
 
-            for i, sq in enumerate(clean_sub_qs):
-                sq_y0 = sq["y0"]
-                sq_label = sq["sub_label"]
+            prev_bottom = mq["y1"]
+            for i, sq in enumerate(sub_qs):
+                next_top = sub_qs[i + 1]["y0"] if i + 1 < len(sub_qs) else next_mq_y0
+                q_items = [it for it in band_items if sq["y0"] - 4 <= it["y0"] < next_top - 6]
+                content_bottom = max(it["y1"] for it in q_items) if q_items else sq["y1"]
+                content_x1 = max(it["x1"] for it in q_items) if q_items else pw - 100
 
-                y_start = max(10, int(round(sq_y0 - 20)))
+                # Tight, sharp boundary with zero bleed into adjacent questions
+                y_start = max(int(round(prev_bottom + 4)), int(round(sq["y0"] - 8)))
+                y_end = max(y_start + 40, min(int(round(next_top - 6)), int(round(content_bottom + 12))))
+                crop_x0 = max(20, int(round(sq["item"]["x0"] - 25)))
+                crop_x1 = min(pw - 30, int(round(content_x1 + 30)))
 
-                if i + 1 < len(clean_sub_qs):
-                    next_sub_y0 = clean_sub_qs[i + 1]["y0"]
-                    y_end = max(y_start + 90, int(round(next_sub_y0 - 20)))
-                else:
-                    # Last sub-question in this main question block: spans to next main question or bottom
-                    y_end = min(ph - 50, max(y_start + 120, int(round(next_mq_y0 - 25))))
+                prev_bottom = content_bottom
 
-                crop_x0 = 40
-                crop_x1 = pw - 40
                 crop_box = (crop_x0, y_start, crop_x1, y_end)
-
                 crop_img = pd["img"].crop(crop_box)
                 q_id_clean = f"{sq['main_q'].replace('.', '')}_{sq['sub_label']}"
                 crop_filename = f"q_{q_id_clean}_{doc_id[:8]}.png"
                 doc_crop_path = os.path.join(doc_crops_dir, crop_filename)
-                public_crop_path = os.path.join(PUBLIC_QUESTIONS_DIR, f"q_{q_id_clean}.png")
-
                 crop_img.save(doc_crop_path)
-                try:
-                    shutil.copyfile(doc_crop_path, public_crop_path)
-                except Exception:
-                    crop_img.save(public_crop_path)
 
                 crop_url = f"/papers/{doc_id}/crops/{crop_filename}"
-                q_items = [it for it in band_items if sq_y0 - 10 <= it["y0"] < (clean_sub_qs[i+1]["y0"] - 10 if i+1 < len(clean_sub_qs) else next_mq_y0 - 10)]
                 full_text = f"[{sq['main_q']} ({sq['sub_label']})] " + " ".join([it["text"] for it in q_items])
 
                 q_num_display = f"{sq['main_q'].replace('Q.', '')}({sq['sub_label']})"

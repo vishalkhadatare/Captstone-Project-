@@ -83,7 +83,7 @@ export const Header: React.FC<HeaderProps> = ({
   const roleLabelMap: Record<string, string> = {
     ORG_OWNER: 'Organization Owner / Registrar',
     EXAM_MANAGER: 'Examination Manager',
-    SME: 'Subject Matter Expert',
+    TRANSLATOR: 'Linguistic Translator',
     CENTRE_OPERATOR: 'Examination Centre Operator',
     AUDITOR: 'Independent Security Auditor',
   };
@@ -159,7 +159,6 @@ export const Header: React.FC<HeaderProps> = ({
                   ) : (
                     notifications.map(n => {
                       const isQuestionReviewNotif =
-                        n.title.toLowerCase().includes('sme') ||
                         n.title.toLowerCase().includes('question') ||
                         n.title.toLowerCase().includes('assigned') ||
                         n.message.toLowerCase().includes('verification queue') ||

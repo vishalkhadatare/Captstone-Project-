@@ -47,9 +47,7 @@ export type NavSubTab =
   | 'multi_paper_generator'
   | 'paper_versions'
   | 'examination_centres'
-  // SME
-  | 'assigned_questions'
-  | 'question_verification'
+  // Translator
   | 'translation_tasks'
   | 'verification_history'
   // Centre Operator
@@ -147,17 +145,6 @@ export const Sidebar: React.FC<SidebarProps> = ({
           },
         ];
 
-      case 'SME':
-        return [
-          {
-            title: 'Question Review',
-            items: [{ id: 'assigned_questions', label: 'Assigned Questions', icon: FileCheck }],
-          },
-          {
-            title: 'History',
-            items: [{ id: 'verification_history', label: 'Verification History', icon: History }],
-          },
-        ];
 
       case 'TRANSLATOR':
         return [

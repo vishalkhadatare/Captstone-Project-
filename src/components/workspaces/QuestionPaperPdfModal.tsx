@@ -39,13 +39,16 @@ export const QuestionPaperPdfModal: React.FC<QuestionPaperPdfModalProps> = ({
   const [showAnswerKey, setShowAnswerKey] = useState(false);
   const [selectedVersionId, setSelectedVersionId] = useState<string>(initialVersionId || '');
   const printRef = useRef<HTMLDivElement>(null);
+  const fetchSequenceRef = useRef(0);
 
   const fetchPaper = async (versionId?: string) => {
+    const fetchSequence = ++fetchSequenceRef.current;
     setLoading(true);
     setError(null);
     try {
       if (versionId) {
         const res = await api.getPaperVersionDetails(exam.id, versionId);
+        if (fetchSequence !== fetchSequenceRef.current) return;
         if (res.success) {
           setPaperData({
             version: res.version,
@@ -58,6 +61,7 @@ export const QuestionPaperPdfModal: React.FC<QuestionPaperPdfModalProps> = ({
         }
       } else {
         const res = await api.getCurrentPaper(exam.id);
+        if (fetchSequence !== fetchSequenceRef.current) return;
         if (res.success) {
           setPaperData({
             version: res.version,
@@ -71,10 +75,11 @@ export const QuestionPaperPdfModal: React.FC<QuestionPaperPdfModalProps> = ({
         }
       }
     } catch (err: any) {
+      if (fetchSequence !== fetchSequenceRef.current) return;
       console.error('Failed to load paper for PDF modal', err);
       setError(err.message || 'Failed to load question paper.');
     } finally {
-      setLoading(false);
+      if (fetchSequence === fetchSequenceRef.current) setLoading(false);
     }
   };
 

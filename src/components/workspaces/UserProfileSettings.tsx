@@ -52,7 +52,7 @@ export const UserProfileSettings: React.FC<UserProfileSettingsProps> = ({
   const roleLabelMap: Record<string, string> = {
     ORG_OWNER: 'Organization Owner / Registrar',
     EXAM_MANAGER: 'Examination Manager',
-    SME: 'Subject Matter Expert',
+    TRANSLATOR: 'Linguistic Translator',
     CENTRE_OPERATOR: 'Examination Centre Operator',
     AUDITOR: 'Independent Security Auditor',
   };

@@ -28,6 +28,7 @@ import {
   recropQuestionWithPython,
   extractQuestionsFromPaperWithAI,
   extractQuestionsFromPaperWithOllama,
+  filterQuestionCandidatesWithOllama,
   checkOllamaHealth,
   runNaviDcOcr,
   callGroqChat,
@@ -105,7 +106,7 @@ interface AuthenticatedUser {
   id: string;
   email: string;
   username: string;
-  role: 'ORG_OWNER' | 'EXAM_MANAGER' | 'SME' | 'TRANSLATOR' | 'CENTRE_OPERATOR' | 'AUDITOR';
+  role: 'ORG_OWNER' | 'EXAM_MANAGER' | 'TRANSLATOR' | 'CENTRE_OPERATOR' | 'AUDITOR';
   org_id: string;
   full_name: string;
   centre_id?: string;
@@ -206,6 +207,14 @@ async function startServer() {
             error: 'AUTHORITY_REVOKED',
             requiresReauth: true,
             message: 'This account no longer exists. Please re-authenticate.',
+          });
+        }
+
+        if ((account.role as string) === 'SME') {
+          return res.status(403).json({
+            error: 'ROLE_DECOMMISSIONED',
+            requiresReauth: true,
+            message: 'Access revoked: The Subject Matter Expert (SME) role has been decommissioned from ZeroLeak.',
           });
         }
 
@@ -857,8 +866,12 @@ async function startServer() {
         return res.status(400).json({ error: 'Missing mandatory registration fields.' });
       }
 
-      if (!['SME', 'TRANSLATOR', 'CENTRE_OPERATOR'].includes(role)) {
-        return res.status(400).json({ error: 'Invalid personnel role specified. Must be SME, TRANSLATOR, or CENTRE_OPERATOR.' });
+      if (role === 'SME') {
+        return res.status(400).json({ error: 'The SME role has been deprecated and decommissioned. Cannot register with SME role.' });
+      }
+
+      if (!['TRANSLATOR', 'CENTRE_OPERATOR'].includes(role)) {
+        return res.status(400).json({ error: 'Invalid personnel role specified. Must be TRANSLATOR or CENTRE_OPERATOR.' });
       }
 
       const db = await getDb();
@@ -937,7 +950,7 @@ async function startServer() {
           full_name,
           normalizedEmail,
           contact_number || 'N/A',
-          designation || (role === 'SME' ? (specialization ? `SME - ${specialization}` : 'Subject Matter Expert') : role === 'TRANSLATOR' ? (languages ? `Translator - ${languages}` : 'Linguistic Translator') : 'Centre Superintendent'),
+          designation || (role === 'TRANSLATOR' ? (languages ? `Translator - ${languages}` : 'Linguistic Translator') : 'Centre Superintendent'),
           role,
           nowIso,
         ]
@@ -1076,9 +1089,9 @@ async function startServer() {
       // If user is not found, check if it's one of the built-in demo accounts and ensure academic demo is seeded
       if (users.length === 0) {
         const isDemo = [
-          'owner@nbte.edu.in', 'manager@nbte.edu.in', 'sme@nbte.edu.in',
+          'owner@nbte.edu.in', 'manager@nbte.edu.in',
           'translator@nbte.edu.in', 'operator@centre101.edu.in', 'auditor@gov-audit.gov.in',
-          'owner_nbte', 'exam_manager', 'sme_cs', 'translator_lang', 'centre_op_101', 'auditor_central',
+          'owner_nbte', 'exam_manager', 'translator_lang', 'centre_op_101', 'auditor_central',
           'zeroleak.demo@dev.local', 'owner', 'owner@test.com', 'admin', 'admin@test.com'
         ].includes(normalizedIdentifier);
 
@@ -1189,6 +1202,18 @@ async function startServer() {
       // Check Role
       if (!user.role) {
         return res.status(403).json({ error: 'Your account does not have an assigned ZeroLeak role. Contact your organization administrator.' });
+      }
+
+      if ((user.role as string) === 'SME') {
+        await logSecurityEvent({
+          event_type: 'DECOMMISSIONED_ROLE_LOGIN_ATTEMPT',
+          severity: 'HIGH',
+          user_id: user.id,
+          org_id: user.org_id,
+          ip_address: req.ip,
+          details: { attemptedIdentifier: identifier, role: user.role },
+        });
+        return res.status(403).json({ error: 'Access denied: The Subject Matter Expert (SME) role has been decommissioned from ZeroLeak.' });
       }
 
       // Check Organization Verification (Auto-provision if missing; exempt non-production)
@@ -3717,13 +3742,8 @@ async function startServer() {
       let query = 'SELECT * FROM questions WHERE org_id = ?';
       const params: any[] = [req.user!.org_id];
 
-      // Role Constraint: SME & Translator only see questions assigned to them in their org
-      if (req.user!.role === 'SME') {
-        query = `SELECT DISTINCT q.* FROM questions q
-                 JOIN question_assignments qa ON q.id = qa.question_id
-                 WHERE q.org_id = ? AND qa.assigned_sme_user_id = ? AND qa.assignment_type = 'SME_REVIEW'`;
-        params.push(req.user!.id);
-      } else if (req.user!.role === 'TRANSLATOR') {
+      // Role Constraint: Translator only sees questions assigned for translation in their org
+      if (req.user!.role === 'TRANSLATOR') {
         query = `SELECT DISTINCT q.* FROM questions q
                  JOIN question_assignments qa ON q.id = qa.question_id
                  WHERE q.org_id = ? AND qa.assigned_sme_user_id = ? AND qa.assignment_type = 'LINGUISTIC_TRANSLATION'`;
@@ -3733,9 +3753,9 @@ async function startServer() {
       query += ' ORDER BY created_at DESC';
       const rawQuestions = executeQuery(db, query, params);
 
-      // Secure Blind Evaluation & Translation: Do not expose answer key to SME verifiers or Translators
+      // Secure Blind Translation: Do not expose answer key to Translators
       const questions = rawQuestions.map(q => {
-        if (req.user!.role === 'SME' || req.user!.role === 'TRANSLATOR') {
+        if (req.user!.role === 'TRANSLATOR') {
           const { correct_answer, ...sanitized } = q;
           return {
             ...sanitized,
@@ -3944,7 +3964,7 @@ async function startServer() {
     try {
       const { messages, model, temperature } = req.body;
       const baseUrl = (process.env.OLLAMA_BASE_URL || 'http://localhost:11434').replace(/\/$/, '');
-      const defaultModel = model || process.env.OLLAMA_MODEL || 'llama3.2:latest';
+      const defaultModel = model || process.env.OLLAMA_MODEL || 'qwen2.5vl:7b';
       const apiKey = process.env.OLLAMA_API_KEY || '';
 
       const headers: Record<string, string> = {
@@ -3980,7 +4000,7 @@ async function startServer() {
     } catch (err: any) {
       console.error('Ollama chat error:', err);
       return res.status(500).json({
-        error: err?.message || `Ollama is not reachable at ${process.env.OLLAMA_BASE_URL || 'http://localhost:11434'}. Start with "ollama run llama3.2".`,
+        error: err?.message || `Ollama is not reachable at ${process.env.OLLAMA_BASE_URL || 'http://localhost:11434'}. Start Ollama and try again.`,
       });
     }
   });
@@ -4134,6 +4154,14 @@ async function startServer() {
           aiEngineUsed: false,
           engine: 'PyMuPDF + Python Engine (Local & Free)',
         };
+      }
+
+      if (extraction?.extractedQuestions?.length && process.env.OLLAMA_MODEL) {
+        const beforeOllamaCount = extraction.extractedQuestions.length;
+        extraction.extractedQuestions = await filterQuestionCandidatesWithOllama(extraction.extractedQuestions);
+        extraction.questions = extraction.extractedQuestions;
+        extraction.totalExtracted = extraction.extractedQuestions.length;
+        extraction.extractionSummary = `${extraction.extractionSummary || ''} Ollama classified ${extraction.extractedQuestions.length} of ${beforeOllamaCount} candidates as real questions.`.trim();
       }
 
       const sourcePaperId = `PAPER-${uuidv4().substring(0, 8).toUpperCase()}`;
@@ -4375,7 +4403,7 @@ async function startServer() {
   // =========================================================================
 
   // 1. Get Preserved 300 DPI Pages for Paper
-  app.get('/api/papers/:paperId/pages', authenticateToken, requireRole(['EXAM_MANAGER', 'ORG_OWNER', 'SME', 'ADMIN']), async (req: Request, res: Response) => {
+  app.get('/api/papers/:paperId/pages', authenticateToken, requireRole(['EXAM_MANAGER', 'ORG_OWNER']), async (req: Request, res: Response) => {
     try {
       const { paperId } = req.params;
       const db = await getDb();
@@ -4394,7 +4422,7 @@ async function startServer() {
   });
 
   // 2. Get Questions for Review in Boundary Editor
-  app.get('/api/papers/:paperId/questions-review', authenticateToken, requireRole(['EXAM_MANAGER', 'ORG_OWNER', 'SME', 'ADMIN']), async (req: Request, res: Response) => {
+  app.get('/api/papers/:paperId/questions-review', authenticateToken, requireRole(['EXAM_MANAGER', 'ORG_OWNER']), async (req: Request, res: Response) => {
     try {
       const { paperId } = req.params;
       const db = await getDb();
@@ -4447,11 +4475,15 @@ async function startServer() {
   });
 
   // 3. Save Question Boundary / Manual Re-Crop
-  app.post('/api/questions/crop-boundary', authenticateToken, requireRole(['EXAM_MANAGER', 'ORG_OWNER', 'SME', 'ADMIN']), async (req: Request, res: Response) => {
+  app.post('/api/questions/crop-boundary', authenticateToken, requireRole(['EXAM_MANAGER', 'ORG_OWNER']), async (req: Request, res: Response) => {
     try {
       const { questionId, pageNumber, x1, y1, x2, y2 } = req.body;
       if (!questionId) {
         return res.status(400).json({ error: 'questionId is required.' });
+      }
+      const requestedCoords = [x1, y1, x2, y2].map(Number);
+      if (requestedCoords.some(value => !Number.isFinite(value)) || requestedCoords[0] >= requestedCoords[2] || requestedCoords[1] >= requestedCoords[3]) {
+        return res.status(400).json({ error: 'Valid crop coordinates are required.' });
       }
 
       const db = await getDb();
@@ -4491,15 +4523,13 @@ async function startServer() {
       const docCropsDir = path.join(process.cwd(), 'public', 'papers', question.question_paper_id || 'manual', 'crops');
       fs.mkdirSync(docCropsDir, { recursive: true });
       const outputCropPath = path.join(docCropsDir, cropFilename);
-      const publicCropPath = path.join(process.cwd(), 'public', 'questions', `q_${question.question_number}.png`);
-
       const ok = await recropQuestionWithPython({
         file_path: pageDiskPath,
         page_num: effectivePage,
-        x1: Math.max(0, Math.round(x1)),
-        y1: Math.max(0, Math.round(y1)),
-        x2: Math.round(x2),
-        y2: Math.round(y2),
+        x1: Math.max(0, Math.round(requestedCoords[0])),
+        y1: Math.max(0, Math.round(requestedCoords[1])),
+        x2: Math.round(requestedCoords[2]),
+        y2: Math.round(requestedCoords[3]),
         output_path: outputCropPath,
       });
 
@@ -4507,16 +4537,12 @@ async function startServer() {
         return res.status(500).json({ error: 'Failed to recrop question boundary image.' });
       }
 
-      try {
-        fs.copyFileSync(outputCropPath, publicCropPath);
-      } catch {}
-
       const cropUrl = `/papers/${question.question_paper_id || 'manual'}/crops/${cropFilename}`;
       const cropCoords = {
-        x1: Math.max(0, Math.round(x1)),
-        y1: Math.max(0, Math.round(y1)),
-        x2: Math.round(x2),
-        y2: Math.round(y2),
+        x1: Math.max(0, Math.round(requestedCoords[0])),
+        y1: Math.max(0, Math.round(requestedCoords[1])),
+        x2: Math.round(requestedCoords[2]),
+        y2: Math.round(requestedCoords[3]),
         pageNumber: effectivePage,
         unit: 'px',
       };
@@ -4560,7 +4586,7 @@ async function startServer() {
   });
 
   // 4. Split Question Boundary into Two Questions
-  app.post('/api/questions/split', authenticateToken, requireRole(['EXAM_MANAGER', 'ORG_OWNER', 'SME', 'ADMIN']), async (req: Request, res: Response) => {
+  app.post('/api/questions/split', authenticateToken, requireRole(['EXAM_MANAGER', 'ORG_OWNER']), async (req: Request, res: Response) => {
     try {
       const { questionId, splitY } = req.body;
       if (!questionId || typeof splitY !== 'number') {
@@ -4704,7 +4730,7 @@ async function startServer() {
   });
 
   // 5. Merge Question Boundary with Next Section
-  app.post('/api/questions/merge-next', authenticateToken, requireRole(['EXAM_MANAGER', 'ORG_OWNER', 'SME', 'ADMIN']), async (req: Request, res: Response) => {
+  app.post('/api/questions/merge-next', authenticateToken, requireRole(['EXAM_MANAGER', 'ORG_OWNER']), async (req: Request, res: Response) => {
     try {
       const { questionId, expandPixels = 200 } = req.body;
       const db = await getDb();
@@ -4775,7 +4801,7 @@ async function startServer() {
   });
 
   // 6. Bulk Finalize / Certify Question Boundaries
-  app.post('/api/questions/bulk-finalize', authenticateToken, requireRole(['EXAM_MANAGER', 'ORG_OWNER', 'SME', 'ADMIN']), async (req: Request, res: Response) => {
+  app.post('/api/questions/bulk-finalize', authenticateToken, requireRole(['EXAM_MANAGER', 'ORG_OWNER']), async (req: Request, res: Response) => {
     try {
       const { paperId, questionIds } = req.body;
       const db = await getDb();
@@ -4820,7 +4846,7 @@ async function startServer() {
   });
 
   // 7. Update Question Content & Review Details
-  app.post('/api/questions/update-review', authenticateToken, requireRole(['EXAM_MANAGER', 'ORG_OWNER', 'SME', 'ADMIN']), async (req: Request, res: Response) => {
+  app.post('/api/questions/update-review', authenticateToken, requireRole(['EXAM_MANAGER', 'ORG_OWNER']), async (req: Request, res: Response) => {
     try {
       const { questionId, content_text, options, correct_answer, marks, extraction_status, options_status } = req.body;
       if (!questionId) return res.status(400).json({ error: 'questionId is required.' });
@@ -4854,12 +4880,15 @@ async function startServer() {
   app.post('/api/questions/bulk-create', authenticateToken, requireRole(['EXAM_MANAGER', 'ORG_OWNER']), async (req: Request, res: Response) => {
     try {
       const { questions, auto_assign_sme_id, auto_assign_translator_id, target_language, assignment_notes, initial_status } = req.body;
+      if (auto_assign_sme_id) {
+        return res.status(400).json({ error: 'The SME role has been decommissioned. Questions cannot be assigned to an SME.' });
+      }
       if (!Array.isArray(questions) || questions.length === 0) {
         return res.status(400).json({ error: 'No questions provided for import.' });
       }
 
       const db = await getDb();
-      const assigneeIds = [auto_assign_sme_id, auto_assign_translator_id].filter(Boolean) as string[];
+      const assigneeIds = [auto_assign_translator_id].filter(Boolean) as string[];
       if (assigneeIds.length > 0) {
         const assignees = executeQuery(
           db,
@@ -4867,9 +4896,6 @@ async function startServer() {
           [req.user!.org_id, ...assigneeIds]
         );
         const assigneeMap = new Map(assignees.map(user => [user.id, user.role]));
-        if (auto_assign_sme_id && assigneeMap.get(auto_assign_sme_id) !== 'SME') {
-          return res.status(403).json({ error: 'The selected SME must belong to your organization.' });
-        }
         if (auto_assign_translator_id && assigneeMap.get(auto_assign_translator_id) !== 'TRANSLATOR') {
           return res.status(403).json({ error: 'The selected Linguistic Translator must belong to your organization.' });
         }
@@ -4879,7 +4905,7 @@ async function startServer() {
 
       for (const q of questions) {
         const questionId = `Q-${uuidv4().substring(0, 8).toUpperCase()}`;
-        const initialStatus = initial_status || (auto_assign_sme_id ? 'UNDER_VERIFICATION' : 'VERIFIED');
+        const initialStatus = initial_status || 'VERIFIED';
 
         executeRun(
           db,
@@ -4913,16 +4939,6 @@ async function startServer() {
 
         createdIds.push(questionId);
 
-        // Auto-assign to SME if specified
-        if (auto_assign_sme_id) {
-          executeRun(
-            db,
-            `INSERT INTO question_assignments (id, org_id, question_id, assigned_sme_user_id, assigned_by_user_id, assignment_type, target_language, status, notes, assigned_at)
-             VALUES (?, ?, ?, ?, ?, 'SME_REVIEW', NULL, 'ASSIGNED', ?, ?)`,
-            [uuidv4(), req.user!.org_id, questionId, auto_assign_sme_id, req.user!.id, assignment_notes || 'Extracted paper question review', now]
-          );
-        }
-
         // Auto-assign to Linguistic Translator if specified
         if (auto_assign_translator_id) {
           executeRun(
@@ -4935,17 +4951,6 @@ async function startServer() {
       }
 
       // Notifications
-      if (auto_assign_sme_id) {
-        await createNotification({
-          user_id: auto_assign_sme_id,
-          role: 'SME',
-          org_id: req.user!.org_id,
-          title: 'New Question Batch Assigned for SME Review',
-          message: `${createdIds.length} newly extracted questions have been assigned to your verification queue.`,
-          category: 'EXAMINATION',
-        });
-      }
-
       if (auto_assign_translator_id) {
         await createNotification({
           user_id: auto_assign_translator_id,
@@ -4961,7 +4966,7 @@ async function startServer() {
         event_type: 'QUESTIONS_BULK_IMPORTED',
         user_id: req.user!.id,
         org_id: req.user!.org_id,
-        details: { count: createdIds.length, auto_assign_sme_id, auto_assign_translator_id },
+        details: { count: createdIds.length, auto_assign_translator_id },
       });
 
       return res.json({
@@ -4975,10 +4980,13 @@ async function startServer() {
     }
   });
 
-  // Bulk Assign Questions to SME or Linguistic Translator
+  // Bulk Assign Questions to Linguistic Translator
   app.post('/api/questions/bulk-assign', authenticateToken, requireRole(['EXAM_MANAGER', 'ORG_OWNER']), async (req: Request, res: Response) => {
     try {
       const { question_ids, assignment_type, assignee_user_id, target_language, notes } = req.body;
+      if (assignment_type === 'SME_REVIEW') {
+        return res.status(400).json({ error: 'The SME role has been decommissioned. Assignments for SME review are no longer permitted.' });
+      }
       if (!Array.isArray(question_ids) || question_ids.length === 0 || !assignee_user_id || !assignment_type) {
         return res.status(400).json({ error: 'question_ids array, assignee_user_id, and assignment_type are required.' });
       }
@@ -4989,9 +4997,9 @@ async function startServer() {
       if (!targetUser) {
         return res.status(404).json({ error: 'Target assignee not found in your organization.' });
       }
-      const expectedRole = assignment_type === 'SME_REVIEW' ? 'SME' : assignment_type === 'LINGUISTIC_TRANSLATION' ? 'TRANSLATOR' : null;
+      const expectedRole = assignment_type === 'LINGUISTIC_TRANSLATION' ? 'TRANSLATOR' : null;
       if (!expectedRole || targetUser.role !== expectedRole) {
-        return res.status(400).json({ error: 'Assignment type does not match the selected user role.' });
+        return res.status(400).json({ error: 'Assignment type does not match the selected user role. Only Linguistic Translator assignments are permitted.' });
       }
       const ownedQuestions = executeQuery(
         db,
@@ -5013,10 +5021,6 @@ async function startServer() {
            VALUES (?, ?, ?, ?, ?, ?, ?, 'ASSIGNED', ?, ?)`,
           [assignmentId, req.user!.org_id, qId, assignee_user_id, req.user!.id, assignment_type, target_language || null, notes || null, now]
         );
-
-        if (assignment_type === 'SME_REVIEW') {
-          executeRun(db, 'UPDATE questions SET status = "UNDER_VERIFICATION", updated_at = ? WHERE id = ? AND org_id = ?', [now, qId, req.user!.org_id]);
-        }
         assignedCount++;
       }
 
@@ -5025,7 +5029,7 @@ async function startServer() {
         user_id: assignee_user_id,
         role: targetUser.role,
         org_id: req.user!.org_id,
-        title: assignment_type === 'SME_REVIEW' ? 'New Questions Assigned for SME Verification' : `New Translation Task (${target_language || 'Multilingual'})`,
+        title: `New Translation Task (${target_language || 'Multilingual'})`,
         message: `${assignedCount} questions have been assigned to you by ${req.user!.full_name}.`,
         category: 'EXAMINATION',
       });
@@ -5105,7 +5109,7 @@ async function startServer() {
     try {
       const db = await getDb();
       let query = `SELECT qa.*, q.subject, q.topic, q.difficulty, q.marks, 
-                          ${req.user!.role === 'SME' ? "''" : "q.correct_answer"} as correct_answer, 
+                          q.correct_answer, 
                           q.content_text, q.options_json, q.status as question_status,
                           u.full_name as assignee_name, u.email as assignee_email, u.role as assignee_role,
                           assigner.full_name as assigned_by_name
@@ -5116,8 +5120,8 @@ async function startServer() {
                    WHERE qa.org_id = ?`;
       const params: any[] = [req.user!.org_id];
 
-      // Scope to assignee for SME and Translator
-      if (req.user!.role === 'SME' || req.user!.role === 'TRANSLATOR') {
+      // Scope to assignee for Translator
+      if (req.user!.role === 'TRANSLATOR') {
         query += ' AND qa.assigned_sme_user_id = ?';
         params.push(req.user!.id);
       }
@@ -5133,13 +5137,7 @@ async function startServer() {
       }
 
       query += ' ORDER BY qa.assigned_at DESC';
-      const rawAssignments = executeQuery(db, query, params);
-      const assignments = rawAssignments.map(a => {
-        if (req.user!.role === 'SME') {
-          return { ...a, correct_answer: undefined };
-        }
-        return a;
-      });
+      const assignments = executeQuery(db, query, params);
 
       return res.json({ assignments });
     } catch (e: any) {
@@ -5196,42 +5194,13 @@ async function startServer() {
     }
   });
 
-  // Assign Single Question to SME
+  // Assign Single Question to SME (Decommissioned)
   app.post('/api/questions/:id/assign', authenticateToken, requireRole(['EXAM_MANAGER', 'ORG_OWNER']), async (req: Request, res: Response) => {
-    try {
-      const { sme_user_id } = req.body;
-      if (!sme_user_id) return res.status(400).json({ error: 'SME user ID is required.' });
-
-      const db = await getDb();
-      const assignmentId = uuidv4();
-      const now = new Date().toISOString();
-
-      executeRun(
-        db,
-        `INSERT INTO question_assignments (id, org_id, question_id, assigned_sme_user_id, assigned_by_user_id, assignment_type, status, assigned_at)
-         VALUES (?, ?, ?, ?, ?, 'SME_REVIEW', 'ASSIGNED', ?)`,
-        [assignmentId, req.user!.org_id, req.params.id, sme_user_id, req.user!.id, now]
-      );
-
-      executeRun(db, 'UPDATE questions SET status = "UNDER_VERIFICATION", updated_at = ? WHERE id = ? AND org_id = ?', [now, req.params.id, req.user!.org_id]);
-
-      await createNotification({
-        user_id: sme_user_id,
-        role: 'SME',
-        org_id: req.user!.org_id,
-        title: 'New Question Assigned for Verification',
-        message: `You have been assigned Question ID ${req.params.id} for syllabus and correctness verification.`,
-        category: 'EXAMINATION',
-      });
-
-      return res.json({ message: 'Question assigned to SME verifier.', assignmentId });
-    } catch (e: any) {
-      return res.status(500).json({ error: e.message });
-    }
+    return res.status(400).json({ error: 'The SME role has been decommissioned. Direct question verification is performed by Examination Manager.' });
   });
 
-  // SME Question Verification (DRAFT / UNDER_VERIFICATION -> VERIFIED -> ELIGIBLE_FOR_PAPER / REJECTED)
-  app.post('/api/questions/:id/verify', authenticateToken, requireRole(['SME', 'EXAM_MANAGER', 'ORG_OWNER']), async (req: Request, res: Response) => {
+  // Question Verification (DRAFT / UNDER_VERIFICATION -> VERIFIED -> ELIGIBLE_FOR_PAPER / REJECTED)
+  app.post('/api/questions/:id/verify', authenticateToken, requireRole(['EXAM_MANAGER', 'ORG_OWNER']), async (req: Request, res: Response) => {
     try {
       const rawDecision = (req.body.decision || req.body.status || 'VERIFIED').toString().toUpperCase();
       const isRejected = rawDecision === 'REJECTED';
@@ -5243,7 +5212,7 @@ async function startServer() {
         return res.status(400).json({ error: 'A specific rejection reason or feedback (minimum 5 characters) is required when rejecting a question.' });
       }
 
-      const finalFeedback = feedbackText || (isRejected ? 'Rejected by SME during verification review.' : 'Academic SME approved & verified.');
+      const finalFeedback = feedbackText || (isRejected ? 'Rejected during verification review.' : 'Examination Manager approved & verified.');
       const syllabusAccurate = req.body.syllabus_accurate !== false && req.body.syllabus_accurate !== 0 ? 1 : 0;
       const answerVerified = req.body.answer_verified !== false && req.body.answer_verified !== 0 ? 1 : 0;
 
@@ -5290,22 +5259,22 @@ async function startServer() {
         executeRun(
           db,
           `INSERT INTO question_assignments (id, org_id, question_id, assigned_sme_user_id, assigned_by_user_id, assignment_type, status, notes, assigned_at, completed_at)
-           VALUES (?, ?, ?, ?, ?, 'SME_REVIEW', ?, ?, ?, ?)`,
+           VALUES (?, ?, ?, ?, ?, 'VERIFICATION', ?, ?, ?, ?)`,
           [uuidv4(), req.user!.org_id, req.params.id, req.user!.id, req.user!.id, isRejected ? 'REJECTED' : 'COMPLETED', feedbackText, now, now]
         );
       }
 
-      // Notify Exam Manager
+      // Notify Exam Manager / Org Owner
       await createNotification({
-        role: 'EXAM_MANAGER',
+        role: 'ORG_OWNER',
         org_id: req.user!.org_id,
-        title: isRejected ? 'Question Rejected by SME' : 'Question Verified by SME',
+        title: isRejected ? 'Question Rejected' : 'Question Verified',
         message: `Question ${req.params.id} has been ${isRejected ? 'REJECTED' : 'APPROVED & VERIFIED'} by ${req.user!.full_name}.`,
         category: 'EXAMINATION',
       });
 
       await logAuditEvent({
-        event_type: 'QUESTION_VERIFIED_BY_SME',
+        event_type: 'QUESTION_VERIFIED',
         user_id: req.user!.id,
         org_id: req.user!.org_id,
         details: { question_id: req.params.id, decision: actualDecision, newStatus },
@@ -5461,7 +5430,7 @@ async function startServer() {
 
       const rawQuestions = executeQuery(db, query, params);
       const questions = rawQuestions.map(q => {
-        if (req.user!.role === 'TRANSLATOR' || req.user!.role === 'SME') {
+        if (req.user!.role === 'TRANSLATOR') {
           const { correct_answer, ...sanitized } = q;
           return { ...sanitized, correct_answer: undefined };
         }
@@ -8599,7 +8568,6 @@ async function startServer() {
         { id: 'usr-owner-easy', email: 'owner@test.com', username: 'owner', full_name: 'Director (Organization Owner)', role: 'ORG_OWNER', password: 'owner123' },
         { id: 'usr-owner-01', email: 'owner@nbte.edu.in', username: 'owner_nbte', full_name: 'Dr. Alok Verma (Registrar & Org Owner)', role: 'ORG_OWNER' },
         { id: 'usr-manager-01', email: 'manager@nbte.edu.in', username: 'exam_manager', full_name: 'Prof. Rajesh Sharma (Controller of Examinations)', role: 'EXAM_MANAGER' },
-        { id: 'usr-sme-01', email: 'sme@nbte.edu.in', username: 'sme_cs', full_name: 'Dr. Sunita Sen (Subject Matter Expert)', role: 'SME' },
         { id: 'usr-translator-01', email: 'translator@nbte.edu.in', username: 'translator_lang', full_name: 'Prof. Meera Deshmukh (Chief Linguistic Translator)', role: 'TRANSLATOR' },
         { id: 'usr-operator-01', email: 'operator@centre101.edu.in', username: 'centre_op_101', full_name: 'Manoj Kumar (Centre Superintendent)', role: 'CENTRE_OPERATOR', centre_id: 'CTR-101' },
         { id: 'usr-auditor-01', email: 'auditor@gov-audit.gov.in', username: 'auditor_central', full_name: 'CBI Chief Vigilance & Security Auditor', role: 'AUDITOR' },
@@ -8632,6 +8600,9 @@ async function startServer() {
           );
         }
       }
+
+      // Decommission SME: Mark any existing SME accounts inactive & revoked
+      executeRun(db, "UPDATE users SET status = 'INACTIVE', authorization_status = 'REVOKED' WHERE role = 'SME'");
 
       // 3. Seed Sample Questions across Multiple Subjects
       const questionsData = [
@@ -8981,18 +8952,11 @@ async function startServer() {
             [q.id, q.subject, q.topic, q.difficulty, q.marks, q.negative_marks, q.correct_answer, q.question_type, q.content_text, q.options ? JSON.stringify(q.options) : null, q.status, isoNow, isoNow]
           );
 
-          // Assign to SME and verify
-          executeRun(
-            db,
-            `INSERT INTO question_assignments (id, question_id, assigned_sme_user_id, status, assigned_at)
-             VALUES (?, ?, 'usr-sme-01', 'ASSIGNED', ?)`,
-            [uuidv4(), q.id, isoNow]
-          );
-
+          // Verify by Examination Manager
           executeRun(
             db,
             `INSERT INTO question_verifications (id, question_id, verifier_user_id, status, feedback, syllabus_accurate, answer_verified, verified_at)
-             VALUES (?, ?, 'usr-sme-01', 'VERIFIED', 'Verified for national examination eligibility', 1, 1, ?)`,
+             VALUES (?, ?, 'usr-manager-01', 'VERIFIED', 'Verified for national examination eligibility by Examination Manager', 1, 1, ?)`,
             [uuidv4(), q.id, isoNow]
           );
         }

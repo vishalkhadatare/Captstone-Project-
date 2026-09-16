@@ -4,6 +4,7 @@ import {
   Upload,
   Sparkles,
   CheckCircle2,
+  CheckCircle,
   AlertTriangle,
   Users,
   Search,
@@ -44,7 +45,6 @@ import { runPuterOcr, runPuterVisionChat, runPuterAutoExtract, parsePuterOcrText
 import { runOcrSpace, parseOcrSpaceQuestion } from '../../utils/ocrSpace';
 
 interface ExamManagerQuestionExtractorProps {
-  smes: User[];
   translators: User[];
   org: Organization | null;
   currentUser: User | null;
@@ -184,7 +184,6 @@ Negative Marks: 0
 Topic: Finite Field Cryptography`;
 
 export const ExamManagerQuestionExtractor: React.FC<ExamManagerQuestionExtractorProps> = ({
-  smes,
   translators,
   org,
   currentUser,
@@ -228,10 +227,7 @@ export const ExamManagerQuestionExtractor: React.FC<ExamManagerQuestionExtractor
   const [assignModalOpen, setAssignModalOpen] = useState(false);
   const [assignMode, setAssignMode] = useState<'SELECTED' | 'BY_COUNT'>('SELECTED');
   const [assignCountInput, setAssignCountInput] = useState<number>(5);
-  const [assignTargetRole, setAssignTargetRole] = useState<'SME' | 'TRANSLATOR' | 'BOTH' | 'DIRECT'>(
-    smes.length > 0 ? 'SME' : 'DIRECT'
-  );
-  const [assignTargetSmeId, setAssignTargetSmeId] = useState<string>(smes[0]?.id || '');
+  const [assignTargetRole, setAssignTargetRole] = useState<'TRANSLATOR' | 'DIRECT_IMPORT'>('DIRECT_IMPORT');
   const [assignTargetTranslatorId, setAssignTargetTranslatorId] = useState<string>(translators[0]?.id || '');
   const [assignTargetLanguage, setAssignTargetLanguage] = useState<string>('Hindi');
   const [assignNotes, setAssignNotes] = useState('');
@@ -425,13 +421,10 @@ export const ExamManagerQuestionExtractor: React.FC<ExamManagerQuestionExtractor
 
   // Sync default assignee selection if users load later
   React.useEffect(() => {
-    if (smes.length > 0 && !assignTargetSmeId) {
-      setAssignTargetSmeId(smes[0].id);
-    }
     if (translators.length > 0 && !assignTargetTranslatorId) {
       setAssignTargetTranslatorId(translators[0].id);
     }
-  }, [smes, translators]);
+  }, [translators]);
 
   // Handle File Change
   const readUploadedFile = (file: File, indexOffset: number): Promise<UploadedQuestionFile> =>
@@ -1221,14 +1214,9 @@ export const ExamManagerQuestionExtractor: React.FC<ExamManagerQuestionExtractor
     }
 
     // Role validation
-    const isDirect = assignTargetRole === 'DIRECT';
-    const needSme = !isDirect && (assignTargetRole === 'SME' || assignTargetRole === 'BOTH');
-    const needTranslator = !isDirect && (assignTargetRole === 'TRANSLATOR' || assignTargetRole === 'BOTH');
+    const needTranslator = assignTargetRole === 'TRANSLATOR';
+    const isDirect = assignTargetRole === 'DIRECT_IMPORT';
 
-    if (needSme && !assignTargetSmeId) {
-      setStatusMessage({ type: 'error', text: 'Please select an SME from your organization.' });
-      return;
-    }
     if (needTranslator && !assignTargetTranslatorId) {
       setStatusMessage({ type: 'error', text: 'Please select a Linguistic Translator from your organization.' });
       return;
@@ -1237,14 +1225,12 @@ export const ExamManagerQuestionExtractor: React.FC<ExamManagerQuestionExtractor
     setAssigningLoading(true);
     setStatusMessage(null);
 
-    const targetSme = smes.find(s => s.id === assignTargetSmeId);
     const targetTranslator = translators.find(t => t.id === assignTargetTranslatorId);
 
     try {
       // Call bulk-create to persist questions into question bank and create assignments
       const res = await api.bulkCreateQuestions({
         questions: targetQuestionList,
-        auto_assign_sme_id: needSme ? assignTargetSmeId : undefined,
         auto_assign_translator_id: needTranslator ? assignTargetTranslatorId : undefined,
         target_language: needTranslator ? assignTargetLanguage : undefined,
         assignment_notes: assignNotes || (isDirect ? 'Directly verified & approved by Exam Manager' : undefined),
@@ -1255,8 +1241,6 @@ export const ExamManagerQuestionExtractor: React.FC<ExamManagerQuestionExtractor
       const updatedAssignments = { ...localAssignments };
       targetQuestionList.forEach(q => {
         updatedAssignments[q.tempId] = {
-          smeId: needSme ? assignTargetSmeId : updatedAssignments[q.tempId]?.smeId,
-          smeName: isDirect ? 'Verified & Ready' : (needSme ? targetSme?.full_name || 'Assigned SME' : updatedAssignments[q.tempId]?.smeName),
           translatorId: needTranslator ? assignTargetTranslatorId : updatedAssignments[q.tempId]?.translatorId,
           translatorName: needTranslator ? targetTranslator?.full_name || 'Assigned Translator' : updatedAssignments[q.tempId]?.translatorName,
           targetLanguage: needTranslator ? assignTargetLanguage : updatedAssignments[q.tempId]?.targetLanguage,
@@ -1265,14 +1249,10 @@ export const ExamManagerQuestionExtractor: React.FC<ExamManagerQuestionExtractor
       setLocalAssignments(updatedAssignments);
 
       let assignmentDesc = '';
-      if (isDirect) {
-        assignmentDesc = 'directly verified and made eligible for Paper Generation';
-      } else if (needSme && needTranslator) {
-        assignmentDesc = `assigned to SME ${targetSme?.full_name} and Translator ${targetTranslator?.full_name} (${assignTargetLanguage})`;
-      } else if (needSme) {
-        assignmentDesc = `assigned to SME ${targetSme?.full_name}`;
-      } else {
+      if (needTranslator) {
         assignmentDesc = `assigned to Translator ${targetTranslator?.full_name} for ${assignTargetLanguage} translation`;
+      } else {
+        assignmentDesc = `imported directly into the verified question repository`;
       }
 
       setStatusMessage({
@@ -1290,16 +1270,15 @@ export const ExamManagerQuestionExtractor: React.FC<ExamManagerQuestionExtractor
   };
 
   // Direct assign for single active question
-  const handleAssignActiveQuestionDirectly = (smeId?: string, translatorId?: string, lang?: string) => {
+  const handleAssignActiveQuestionDirectly = (translatorId?: string, lang?: string) => {
     if (!activeQuestion) return;
     setSelectedExtractedIds(new Set([activeQuestion.tempId]));
-    if (smeId) {
-      setAssignTargetRole('SME');
-      setAssignTargetSmeId(smeId);
-    } else if (translatorId) {
+    if (translatorId) {
       setAssignTargetRole('TRANSLATOR');
       setAssignTargetTranslatorId(translatorId);
       if (lang) setAssignTargetLanguage(lang);
+    } else {
+      setAssignTargetRole('DIRECT_IMPORT');
     }
     setAssignMode('SELECTED');
     setAssignModalOpen(true);
@@ -1936,7 +1915,7 @@ export const ExamManagerQuestionExtractor: React.FC<ExamManagerQuestionExtractor
                   </span>
                 </div>
                 <p className="text-xs text-emerald-200 mt-0.5">
-                  {selectedExtractedIds.size} of {extractedQuestions.length} selected for assignment. Select questions on the sidebar to review and assign to SME or Translator.
+                  {selectedExtractedIds.size} of {extractedQuestions.length} selected for assignment. Select questions on the sidebar to review and assign to Translator or import directly.
                 </p>
               </div>
             </div>
@@ -2506,7 +2485,7 @@ export const ExamManagerQuestionExtractor: React.FC<ExamManagerQuestionExtractor
                         </div>
                       ) : (
                         <span className="text-slate-500 font-medium mt-0.5 block">
-                          Unassigned (Waiting for SME / Translator assignment)
+                          Unassigned (Available for translation or direct import)
                         </span>
                       )}
                     </div>
@@ -2514,16 +2493,16 @@ export const ExamManagerQuestionExtractor: React.FC<ExamManagerQuestionExtractor
                     <div className="flex items-center gap-2">
                       <button
                         type="button"
-                        onClick={() => handleAssignActiveQuestionDirectly(smes[0]?.id)}
-                        className="px-3 py-1.5 bg-blue-900 hover:bg-blue-800 text-white rounded-lg font-bold text-[11px] flex items-center gap-1"
+                        onClick={() => handleAssignActiveQuestionDirectly()}
+                        className="px-3 py-1.5 bg-emerald-800 hover:bg-emerald-700 text-white rounded-lg font-bold text-[11px] flex items-center gap-1"
                       >
-                        <UserCheck className="w-3 h-3 text-blue-300" />
-                        <span>Assign SME</span>
+                        <CheckCircle className="w-3 h-3 text-emerald-300" />
+                        <span>Direct Import</span>
                       </button>
 
                       <button
                         type="button"
-                        onClick={() => handleAssignActiveQuestionDirectly(undefined, translators[0]?.id, 'Hindi')}
+                        onClick={() => handleAssignActiveQuestionDirectly(translators[0]?.id, 'Hindi')}
                         className="px-3 py-1.5 bg-purple-900 hover:bg-purple-800 text-white rounded-lg font-bold text-[11px] flex items-center gap-1"
                       >
                         <Languages className="w-3 h-3 text-purple-300" />
@@ -2810,7 +2789,7 @@ export const ExamManagerQuestionExtractor: React.FC<ExamManagerQuestionExtractor
       )}
 
       {/* ========================================================================= */}
-      {/* SECTION 3: QUESTION ASSIGNMENT MODAL (Select SME / Translator & Number/Specific Qs) */}
+      {/* SECTION 3: QUESTION ASSIGNMENT MODAL (Select Translator & Number/Specific Qs) */}
       {/* ========================================================================= */}
       {assignModalOpen && (
         <div className="fixed inset-0 z-50 bg-slate-950/70 backdrop-blur-xs flex items-center justify-center p-4">
@@ -2930,40 +2909,14 @@ export const ExamManagerQuestionExtractor: React.FC<ExamManagerQuestionExtractor
               )}
             </div>
 
-            {/* STEP 2: CHOOSE TARGET ROLE (SME, TRANSLATOR, BOTH) */}
+            {/* STEP 2: CHOOSE TARGET ROLE (TRANSLATOR or DIRECT IMPORT) */}
             <div className="space-y-3 text-xs border-t border-slate-800 pt-3">
               <label className="block text-slate-300 font-bold">
-                2. Select Assignee Role & Member ({org?.name || 'Your Organization'})
+                2. Select Destination / Task ({org?.name || 'Your Organization'})
               </label>
 
               {/* Role Toggle Tabs */}
-              <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
-                <button
-                  type="button"
-                  onClick={() => setAssignTargetRole('DIRECT')}
-                  className={`py-2 px-2.5 rounded-lg font-bold text-xs flex items-center justify-center gap-1.5 transition-colors cursor-pointer ${
-                    assignTargetRole === 'DIRECT'
-                      ? 'bg-emerald-600 text-white shadow-xs'
-                      : 'bg-slate-800 text-slate-300 hover:bg-slate-700'
-                  }`}
-                >
-                  <CheckCircle2 className="w-3.5 h-3.5" />
-                  <span>Direct Approve</span>
-                </button>
-
-                <button
-                  type="button"
-                  onClick={() => setAssignTargetRole('SME')}
-                  className={`py-2 px-2.5 rounded-lg font-bold text-xs flex items-center justify-center gap-1.5 transition-colors cursor-pointer ${
-                    assignTargetRole === 'SME'
-                      ? 'bg-blue-600 text-white'
-                      : 'bg-slate-800 text-slate-300 hover:bg-slate-700'
-                  }`}
-                >
-                  <UserCheck className="w-3.5 h-3.5" />
-                  <span>SME Review</span>
-                </button>
-
+              <div className="grid grid-cols-2 gap-2">
                 <button
                   type="button"
                   onClick={() => setAssignTargetRole('TRANSLATOR')}
@@ -2974,67 +2927,24 @@ export const ExamManagerQuestionExtractor: React.FC<ExamManagerQuestionExtractor
                   }`}
                 >
                   <Languages className="w-3.5 h-3.5" />
-                  <span>Translator</span>
+                  <span>Assign Linguistic Translator</span>
                 </button>
 
                 <button
                   type="button"
-                  onClick={() => setAssignTargetRole('BOTH')}
-                  className={`py-2 px-2.5 rounded-lg font-bold text-xs flex items-center justify-center gap-1.5 transition-colors cursor-pointer ${
-                    assignTargetRole === 'BOTH'
-                      ? 'bg-emerald-700 text-white'
+                  onClick={() => setAssignTargetRole('DIRECT_IMPORT')}
+                  className={`py-2 px-3 rounded-lg font-bold text-xs flex items-center justify-center gap-1.5 transition-colors ${
+                    assignTargetRole === 'DIRECT_IMPORT'
+                      ? 'bg-emerald-600 text-white'
                       : 'bg-slate-800 text-slate-300 hover:bg-slate-700'
                   }`}
                 >
-                  <Users className="w-3.5 h-3.5" />
-                  <span>Both (SME+Trans)</span>
+                  <CheckCircle className="w-3.5 h-3.5" />
+                  <span>Direct Question Bank Import</span>
                 </button>
               </div>
-
-              {/* Direct Approval Info Banner */}
-              {assignTargetRole === 'DIRECT' && (
-                <div className="p-3 rounded-xl bg-emerald-950/40 border border-emerald-500/30 text-xs text-emerald-200 space-y-1">
-                  <div className="font-bold flex items-center gap-1.5 text-emerald-300">
-                    <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
-                    <span>Direct Repository Approval (No SME Required)</span>
-                  </div>
-                  <p className="text-[11px] text-emerald-200/90 leading-relaxed">
-                    Questions will be directly stored as <strong>VERIFIED</strong>. They will immediately become eligible in Question Pools, Blueprint configuration, and Paper Generation without requiring SME review.
-                  </p>
-                </div>
-              )}
-
-              {/* SME User Selection */}
-              {(assignTargetRole === 'SME' || assignTargetRole === 'BOTH') && (
-                <div>
-                  <label className="block text-slate-300 font-bold mb-1">
-                    Select Subject Matter Expert (SME) *
-                  </label>
-                  {smes.length === 0 ? (
-                    <p className="text-amber-400 bg-amber-950/40 p-2 rounded border border-amber-800 text-[11px]">
-                      No SME users found in your organization. Please authorize an SME user in the Organization module first.
-                    </p>
-                  ) : (
-                    <select
-                      value={assignTargetSmeId}
-                      onChange={e => setAssignTargetSmeId(e.target.value)}
-                      className="w-full px-3 py-2 rounded-lg bg-slate-800 border border-slate-700 text-white focus:border-emerald-500 focus:outline-hidden"
-                    >
-                      {smes.map(s => (
-                        <option key={s.id} value={s.id}>
-                          {s.full_name} ({s.email}) — Role: {s.role}
-                        </option>
-                      ))}
-                    </select>
-                  )}
-                  <span className="text-[10px] text-slate-400 mt-0.5 block">
-                    Questions will become visible strictly in this SME's verification queue.
-                  </span>
-                </div>
-              )}
-
               {/* Translator User & Language Selection */}
-              {(assignTargetRole === 'TRANSLATOR' || assignTargetRole === 'BOTH') && (
+              {assignTargetRole === 'TRANSLATOR' && (
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                   <div>
                     <label className="block text-slate-300 font-bold mb-1">

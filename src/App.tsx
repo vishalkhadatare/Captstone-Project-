@@ -7,7 +7,6 @@ import { OrgRegistrationPage } from './components/OrgRegistrationPage';
 import { PersonnelRegistrationPage } from './components/PersonnelRegistrationPage';
 import { OrgOwnerWorkspace } from './components/workspaces/OrgOwnerWorkspace';
 import { ExamManagerWorkspace } from './components/workspaces/ExamManagerWorkspace';
-import { SmeWorkspace } from './components/workspaces/SmeWorkspace';
 import { TranslatorWorkspace } from './components/workspaces/TranslatorWorkspace';
 import { CentreOperatorWorkspace } from './components/workspaces/CentreOperatorWorkspace';
 import { AuditorWorkspace } from './components/workspaces/AuditorWorkspace';
@@ -23,7 +22,7 @@ type PublicView = 'landing' | 'login' | 'register' | 'personnel_register' | 'can
 export function App() {
   const [currentUser, setCurrentUser] = useState<User | null>(getStoredUser());
   const [publicView, setPublicView] = useState<PublicView>('landing');
-  const [personnelRole, setPersonnelRole] = useState<'SME' | 'TRANSLATOR' | 'CENTRE_OPERATOR' | undefined>(undefined);
+  const [personnelRole, setPersonnelRole] = useState<'TRANSLATOR' | 'CENTRE_OPERATOR' | undefined>(undefined);
   const [activeSubTab, setActiveSubTab] = useState<NavSubTab>('dashboard');
   const [refreshTrigger, setRefreshTrigger] = useState(0);
   const [sessionLoading, setSessionLoading] = useState(true);
@@ -55,8 +54,6 @@ export function App() {
     multi_paper_generator: 'multi-paper-generator',
     paper_versions: 'paper-versions',
     examination_centres: 'examination-centres',
-    assigned_questions: 'assigned-questions',
-    question_verification: 'question-verification',
     translation_tasks: 'translation-tasks',
     verification_history: 'verification-history',
     released_examinations: 'released-examinations',
@@ -87,14 +84,12 @@ export function App() {
     const matchedTab = (Object.entries(tabToHashMap) as [NavSubTab, string][]).find(([, value]) => value === hash)?.[0];
     const requestedTab = matchedTab === 'proctor_dashboard' && (currentUser?.role === 'ORG_OWNER' || currentUser?.role === 'EXAM_MANAGER')
       ? 'dashboard'
-      : matchedTab === 'dashboard' && currentUser?.role === 'SME'
-      ? 'assigned_questions'
       : matchedTab;
     if (requestedTab) {
       setActiveSubTab(requestedTab);
       return;
     }
-    setActiveSubTab(currentUser?.role === 'SME' ? 'assigned_questions' : 'dashboard');
+    setActiveSubTab('dashboard');
   };
 
   useEffect(() => {
@@ -138,7 +133,7 @@ export function App() {
   const handleLoginSuccess = (user: User, token: string) => {
     setStoredAuth(token, user);
     setCurrentUser(user);
-    const initialTab: NavSubTab = user.role === 'SME' ? 'assigned_questions' : 'dashboard';
+    const initialTab: NavSubTab = 'dashboard';
     setActiveSubTab(initialTab);
     window.history.pushState({}, '', `${window.location.pathname}${window.location.search}#${tabToHashMap[initialTab]}`);
     setRefreshTrigger(prev => prev + 1);
@@ -343,13 +338,6 @@ export function App() {
                     setCandidateSimulatorExamId(examId);
                     setActiveCandidateSimulator(true);
                   }}
-                />
-              ) : currentUser.role === 'SME' ? (
-                <SmeWorkspace
-                  key={`sme-${refreshTrigger}`}
-                  currentUser={currentUser}
-                  activeSubTab={activeSubTab}
-                  onRefresh={handleRefreshData}
                 />
               ) : currentUser.role === 'TRANSLATOR' ? (
                 <TranslatorWorkspace

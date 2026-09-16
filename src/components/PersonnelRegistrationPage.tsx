@@ -39,10 +39,10 @@ interface PersonnelRegistrationPageProps {
   onLoginRedirect?: () => void;
   onNavigateLogin?: () => void;
   onBackToLanding: () => void;
-  preSelectedRole?: 'SME' | 'TRANSLATOR' | 'CENTRE_OPERATOR';
+  preSelectedRole?: 'TRANSLATOR' | 'CENTRE_OPERATOR';
 }
 
-type PersonnelRole = 'SME' | 'TRANSLATOR' | 'CENTRE_OPERATOR';
+type PersonnelRole = 'TRANSLATOR' | 'CENTRE_OPERATOR';
 
 interface RoleMeta {
   role: PersonnelRole;
@@ -57,17 +57,6 @@ interface RoleMeta {
 }
 
 const ROLES: RoleMeta[] = [
-  {
-    role: 'SME',
-    title: 'Subject Matter Expert (SME)',
-    badge: 'Question Vetting & Audit',
-    icon: <FileCheck2 className="w-5 h-5 text-blue-700" />,
-    tagline: 'Syllabus compliance, correctness validation, answer key review & eligibility sign-off.',
-    description: 'Accredited academic experts who independently review question pools, verify answer keys, calculate difficulty indexes, and sign cryptographic eligibility certificates.',
-    accentBorder: 'border-blue-300 hover:border-blue-500',
-    accentBg: 'bg-blue-50/60',
-    badgeColor: 'bg-blue-100 text-blue-900 border-blue-200',
-  },
   {
     role: 'TRANSLATOR',
     title: 'Linguistic Translator',
@@ -99,7 +88,7 @@ export const PersonnelRegistrationPage: React.FC<PersonnelRegistrationPageProps>
   onLoginRedirect,
   onNavigateLogin,
   onBackToLanding,
-  preSelectedRole = 'SME',
+  preSelectedRole = 'TRANSLATOR',
 }) => {
   const [selectedRole, setSelectedRole] = useState<PersonnelRole>(preSelectedRole);
   const [organizations, setOrganizations] = useState<{ id: string; name: string; type: string; reg_number: string }[]>([]);
@@ -114,12 +103,6 @@ export const PersonnelRegistrationPage: React.FC<PersonnelRegistrationPageProps>
   const [confirmPassword, setConfirmPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [designation, setDesignation] = useState('');
-
-  // SME Specific Fields
-  const [subjectDomain, setSubjectDomain] = useState('Engineering & Technology');
-  const [specialization, setSpecialization] = useState('');
-  const [academicDegree, setAcademicDegree] = useState('Ph.D. / Doctorate');
-  const [experienceYears, setExperienceYears] = useState('5+ Years');
 
   // Translator Specific Fields
   const [selectedLanguages, setSelectedLanguages] = useState<string[]>(['Hindi']);
@@ -215,11 +198,7 @@ export const PersonnelRegistrationPage: React.FC<PersonnelRegistrationPageProps>
         device_name: `${fullName}'s Institutional Workstation`,
       };
 
-      if (selectedRole === 'SME') {
-        payload.specialization = `${subjectDomain}: ${specialization || 'General'}`.trim();
-        payload.academic_degree = academicDegree;
-        payload.experience_years = experienceYears;
-      } else if (selectedRole === 'TRANSLATOR') {
+      if (selectedRole === 'TRANSLATOR') {
         payload.languages = selectedLanguages.join(', ');
         payload.translation_credential = translationCredential;
       } else if (selectedRole === 'CENTRE_OPERATOR') {
@@ -567,9 +546,7 @@ export const PersonnelRegistrationPage: React.FC<PersonnelRegistrationPageProps>
                       value={designation}
                       onChange={e => setDesignation(e.target.value)}
                       placeholder={
-                        selectedRole === 'SME'
-                          ? 'e.g. Senior Professor / Subject Lead'
-                          : selectedRole === 'TRANSLATOR'
+                        selectedRole === 'TRANSLATOR'
                           ? 'e.g. Senior Linguistic Officer'
                           : 'e.g. Centre Superintendent'
                       }
@@ -709,9 +686,7 @@ export const PersonnelRegistrationPage: React.FC<PersonnelRegistrationPageProps>
                       4
                     </div>
                     <h2 className="text-xs font-black text-slate-900 uppercase tracking-wider">
-                      {selectedRole === 'SME'
-                        ? 'SUBJECT MATTER EXPERT CREDENTIALS'
-                        : selectedRole === 'TRANSLATOR'
+                      {selectedRole === 'TRANSLATOR'
                         ? 'LINGUISTIC TRANSLATOR SPECIALIZATION'
                         : 'EXAMINATION CENTRE CONFIGURATION'}
                     </h2>
@@ -720,77 +695,6 @@ export const PersonnelRegistrationPage: React.FC<PersonnelRegistrationPageProps>
                     {currentRoleMeta.badge}
                   </span>
                 </div>
-
-                {/* SME Specific Controls */}
-                {selectedRole === 'SME' && (
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                    <div>
-                      <label className="block text-slate-700 font-bold mb-1.5">
-                        Subject Academic Domain *
-                      </label>
-                      <select
-                        value={subjectDomain}
-                        onChange={e => setSubjectDomain(e.target.value)}
-                        className="w-full px-3.5 py-2.5 rounded-xl input-luxury text-slate-900 font-semibold"
-                      >
-                        <option value="Engineering & Technology">Engineering & Technology</option>
-                        <option value="Pure & Natural Sciences">Pure & Natural Sciences (Physics, Chem, Math)</option>
-                        <option value="Medical & Allied Health">Medical & Allied Health Sciences</option>
-                        <option value="Law & Jurisprudence">Law & Judicial Examinations</option>
-                        <option value="Humanities & Social Sciences">Humanities & Social Sciences</option>
-                        <option value="Commerce, Finance & Banking">Commerce, Finance & Banking</option>
-                        <option value="Civil & Public Services">Civil & Public Services General Studies</option>
-                      </select>
-                    </div>
-
-                    <div>
-                      <label className="block text-slate-700 font-bold mb-1.5">
-                        Specific Vetting Subject Expertise *
-                      </label>
-                      <input
-                        type="text"
-                        value={specialization}
-                        onChange={e => setSpecialization(e.target.value)}
-                        placeholder="e.g. Advanced Calculus, Quantum Mechanics, Criminal Law"
-                        required
-                        className="w-full px-3.5 py-2.5 rounded-xl input-luxury text-slate-900 font-medium"
-                      />
-                    </div>
-
-                    <div>
-                      <label className="block text-slate-700 font-bold mb-1.5">
-                        Highest Academic Qualification *
-                      </label>
-                      <select
-                        value={academicDegree}
-                        onChange={e => setAcademicDegree(e.target.value)}
-                        className="w-full px-3.5 py-2.5 rounded-xl input-luxury text-slate-900 font-semibold"
-                      >
-                        <option value="Ph.D. / Doctorate">Ph.D. / Doctorate Degree</option>
-                        <option value="Master of Technology / M.E.">M.Tech / M.E. / M.S.</option>
-                        <option value="Post Graduate / Master's">Post Graduate / Master of Science / Arts</option>
-                        <option value="M.D. / M.S. / Medical PG">M.D. / M.S. / Medical Specialist</option>
-                        <option value="LL.M. / Judicial Fellow">LL.M. / Judicial Fellow</option>
-                      </select>
-                    </div>
-
-                    <div>
-                      <label className="block text-slate-700 font-bold mb-1.5">
-                        Question Paper Vetting Experience *
-                      </label>
-                      <select
-                        value={experienceYears}
-                        onChange={e => setExperienceYears(e.target.value)}
-                        className="w-full px-3.5 py-2.5 rounded-xl input-luxury text-slate-900 font-semibold"
-                      >
-                        <option value="3-5 Years">3 - 5 Years Examination Experience</option>
-                        <option value="5-10 Years">5 - 10 Years Examination Experience</option>
-                        <option value="10+ Years">10+ Years Senior Examiner Experience</option>
-                        <option value="15+ Years">15+ Years Chief Moderator / Paper Setter</option>
-                      </select>
-                    </div>
-                  </div>
-                )}
 
                 {/* Translator Specific Controls */}
                 {selectedRole === 'TRANSLATOR' && (

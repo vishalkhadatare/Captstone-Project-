@@ -437,7 +437,7 @@ export const OrganizationModule: React.FC<OrgModuleProps> = ({ currentUser, onRe
                   Authorized Operational Roles (RBAC Delegation)
                 </h2>
                 <p className="text-xs text-slate-500 dark:text-slate-400">
-                  Authorize Examination Managers, Subject Matter Experts (SMEs), Centre Operators, and Independent Auditors.
+                  Authorize Examination Managers, Linguistic Translators, Centre Operators, and Independent Auditors.
                 </p>
               </div>
             </div>
