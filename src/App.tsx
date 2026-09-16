@@ -86,14 +86,12 @@ export function App() {
     const matchedTab = (Object.entries(tabToHashMap) as [NavSubTab, string][]).find(([, value]) => value === hash)?.[0];
     const requestedTab = matchedTab === 'proctor_dashboard' && (currentUser?.role === 'ORG_OWNER' || currentUser?.role === 'EXAM_MANAGER')
       ? 'dashboard'
-      : matchedTab === 'dashboard' && currentUser?.role === 'SME'
-      ? 'assigned_questions'
       : matchedTab;
     if (requestedTab) {
       setActiveSubTab(requestedTab);
       return;
     }
-    setActiveSubTab(currentUser?.role === 'SME' ? 'assigned_questions' : 'dashboard');
+    setActiveSubTab('dashboard');
   };
 
   useEffect(() => {
@@ -137,7 +135,7 @@ export function App() {
   const handleLoginSuccess = (user: User, token: string) => {
     setStoredAuth(token, user);
     setCurrentUser(user);
-    const initialTab: NavSubTab = user.role === 'SME' ? 'assigned_questions' : 'dashboard';
+    const initialTab: NavSubTab = 'dashboard';
     setActiveSubTab(initialTab);
     window.history.pushState({}, '', `${window.location.pathname}${window.location.search}#${tabToHashMap[initialTab]}`);
     setRefreshTrigger(prev => prev + 1);

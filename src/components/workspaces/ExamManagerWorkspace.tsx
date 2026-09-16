@@ -306,7 +306,6 @@ export const ExamManagerWorkspace: React.FC<ExamManagerWorkspaceProps> = ({
   const [isFileDragOver, setIsFileDragOver] = useState(false);
 
   // Extraction Assignment Form State
-  const [extractAssignSmeId, setExtractAssignSmeId] = useState('');
   const [extractAssignTranslatorId, setExtractAssignTranslatorId] = useState('');
   const [extractAssignTargetLanguage, setExtractAssignTargetLanguage] = useState('Hindi');
   const [extractAssignNotes, setExtractAssignNotes] = useState('');
@@ -314,7 +313,7 @@ export const ExamManagerWorkspace: React.FC<ExamManagerWorkspaceProps> = ({
   // Question Pool Bulk Assignment Modal State
   const [poolSelectedIds, setPoolSelectedIds] = useState<Set<string>>(new Set());
   const [poolBulkModalOpen, setPoolBulkModalOpen] = useState(false);
-  const [poolAssignType, setPoolAssignType] = useState<'SME_REVIEW' | 'LINGUISTIC_TRANSLATION'>('SME_REVIEW');
+  const [poolAssignType, setPoolAssignType] = useState<'LINGUISTIC_TRANSLATION'>('LINGUISTIC_TRANSLATION');
   const [poolAssignUserId, setPoolAssignUserId] = useState('');
   const [poolAssignTargetLanguage, setPoolAssignTargetLanguage] = useState('Hindi');
   const [poolAssignNotes, setPoolAssignNotes] = useState('');
@@ -399,7 +398,6 @@ export const ExamManagerWorkspace: React.FC<ExamManagerWorkspaceProps> = ({
       }
       setQuestions(qRes.questions || []);
       const members = membersRes.members || [];
-      setSmes(members.filter(m => m.role === 'SME'));
       setTranslators(members.filter(m => m.role === 'TRANSLATOR'));
       setAssignments(assignRes.assignments || []);
       setAllCentresList(centresRes.centres || []);
@@ -572,17 +570,17 @@ export const ExamManagerWorkspace: React.FC<ExamManagerWorkspaceProps> = ({
     try {
       const res = await api.bulkCreateQuestions({
         questions: selected,
-        auto_assign_sme_id: extractAssignSmeId || undefined,
         auto_assign_translator_id: extractAssignTranslatorId || undefined,
         target_language: extractAssignTranslatorId ? extractAssignTargetLanguage : undefined,
         assignment_notes: extractAssignNotes || undefined,
+        initial_status: 'VERIFIED',
       });
 
       setStatusMessage({
         type: 'success',
         text: `Successfully imported ${res.createdCount} questions into the secure question bank${
-          extractAssignSmeId ? ' and assigned to SME' : ''
-        }${extractAssignTranslatorId ? ` and assigned for ${extractAssignTargetLanguage} translation` : ''}.`,
+          extractAssignTranslatorId ? ` and assigned for ${extractAssignTargetLanguage} translation` : ''
+        }.`,
       });
 
       // Clear extracted list on success
@@ -703,11 +701,7 @@ export const ExamManagerWorkspace: React.FC<ExamManagerWorkspaceProps> = ({
         options: examType === 'MCQ' ? qOptions : null,
       });
 
-      if (assignedSmeId) {
-        await api.assignQuestion(res.questionId, assignedSmeId);
-      }
-
-      setStatusMessage({ type: 'success', text: 'Question added to secure repository and assigned to SME.' });
+      setStatusMessage({ type: 'success', text: 'Question added to secure repository successfully.' });
       setQContent('');
       loadData();
     } catch (err: any) {
@@ -1499,7 +1493,7 @@ export const ExamManagerWorkspace: React.FC<ExamManagerWorkspaceProps> = ({
               </select>
               <p className="text-[10px] text-slate-500 mt-1">
                 {examType === 'MCQ' && '⚡ MCQ Engine: Generates OMR answer sheets, option shuffling, and randomized question sets A/B/C/D.'}
-                {examType === 'THEORY' && '📝 Theory Engine: Sectional Blueprint architecture (Short, Medium, Long), marks distribution, and SME rubric guide.'}
+                {examType === 'THEORY' && '📝 Theory Engine: Sectional Blueprint architecture (Short, Medium, Long), marks distribution, and scoring rubric guide.'}
                 {examType === 'MIXED' && '🔀 Mixed Engine: Dual-tier assembly with separate objective OMR and subjective answer booklets.'}
                 {examType === 'PRACTICAL_CODING' && '💻 Practical Engine: Problem statements, I/O constraints, and automated sandbox test suites.'}
               </p>
@@ -1658,11 +1652,6 @@ export const ExamManagerWorkspace: React.FC<ExamManagerWorkspaceProps> = ({
             {/* Team Capacity Indicator Chips */}
             <div className="flex items-center gap-3 text-xs">
               <div className="flex items-center gap-2 px-3 py-1.5 rounded-xl bg-slate-50 border border-slate-200/80 text-slate-700">
-                <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
-                <span className="font-semibold text-slate-600">SMEs:</span>
-                <span className="font-bold text-slate-900 font-mono">{smes.length} Active</span>
-              </div>
-              <div className="flex items-center gap-2 px-3 py-1.5 rounded-xl bg-slate-50 border border-slate-200/80 text-slate-700">
                 <span className="w-2 h-2 rounded-full bg-purple-500 animate-pulse"></span>
                 <span className="font-semibold text-slate-600">Translators:</span>
                 <span className="font-bold text-slate-900 font-mono">{translators.length} Active</span>
@@ -1673,7 +1662,6 @@ export const ExamManagerWorkspace: React.FC<ExamManagerWorkspaceProps> = ({
           {/* TAB 1: HIGH-RES PDF QUESTION EXTRACTION STUDIO */}
           {questionWorkflowTab === 'extraction' && (
             <ExamManagerQuestionExtractor
-              smes={smes}
               translators={translators}
               org={org}
               currentUser={currentUser}
@@ -1835,23 +1823,6 @@ export const ExamManagerWorkspace: React.FC<ExamManagerWorkspaceProps> = ({
                           />
                         </div>
                       </div>
-
-                      {/* SME Verifier Assignment */}
-                      <div className="pt-2 border-t border-slate-200/80">
-                        <label className="block text-slate-700 font-bold mb-1">Assign to SME Verifier</label>
-                        <select
-                          value={assignedSmeId}
-                          onChange={e => setAssignedSmeId(e.target.value)}
-                          className="w-full px-3 py-2 rounded-lg bg-white border border-slate-300 text-slate-900 focus:border-emerald-800 focus:outline-hidden text-xs"
-                        >
-                          <option value="">-- No Assignment (Direct Pool Draft) --</option>
-                          {smes.map(s => (
-                            <option key={s.id} value={s.id}>
-                              {s.full_name} ({s.email})
-                            </option>
-                          ))}
-                        </select>
-                      </div>
                     </div>
                   </div>
 
@@ -2010,9 +1981,9 @@ export const ExamManagerWorkspace: React.FC<ExamManagerWorkspaceProps> = ({
                     <UserCheck className="w-5 h-5" />
                   </div>
                   <div>
-                    <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400 block">SME Reviews</span>
+                    <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400 block">Pending Tasks</span>
                     <span className="text-xl font-black text-blue-900 font-mono">
-                      {assignments.filter(a => a.assignment_type === 'SME_REVIEW').length}
+                      {assignments.filter(a => a.status === 'PENDING').length}
                     </span>
                   </div>
                 </div>
@@ -2054,7 +2025,7 @@ export const ExamManagerWorkspace: React.FC<ExamManagerWorkspaceProps> = ({
                       </span>
                     </h3>
                     <p className="text-xs text-slate-500 mt-0.5">
-                      Cryptographic tracking across all assigned Subject Matter Experts and Linguistic Translators.
+                      Cryptographic tracking across all assigned Linguistic Translators and verified assets.
                     </p>
                   </div>
 
@@ -2087,14 +2058,14 @@ export const ExamManagerWorkspace: React.FC<ExamManagerWorkspaceProps> = ({
                   </button>
                   <button
                     type="button"
-                    onClick={() => setMatrixFilter('SME_REVIEW')}
+                    onClick={() => setMatrixFilter('PENDING')}
                     className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${
-                      matrixFilter === 'SME_REVIEW'
+                      matrixFilter === 'PENDING'
                         ? 'bg-blue-600 text-white shadow-xs'
                         : 'bg-blue-50 text-blue-700 hover:bg-blue-100 border border-blue-200/50'
                     }`}
                   >
-                    SME Reviews ({assignments.filter(a => a.assignment_type === 'SME_REVIEW').length})
+                    Pending ({assignments.filter(a => a.status === 'PENDING').length})
                   </button>
                   <button
                     type="button"
@@ -2123,7 +2094,7 @@ export const ExamManagerWorkspace: React.FC<ExamManagerWorkspaceProps> = ({
                 {/* Verification Matrix Table */}
                 {(() => {
                   const filteredAssignments = assignments.filter(a => {
-                    if (matrixFilter === 'SME_REVIEW' && a.assignment_type !== 'SME_REVIEW') return false;
+                    if (matrixFilter === 'PENDING' && a.status !== 'PENDING') return false;
                     if (matrixFilter === 'TRANSLATION' && a.assignment_type !== 'LINGUISTIC_TRANSLATION') return false;
                     if (matrixFilter === 'COMPLETED' && a.status !== 'COMPLETED') return false;
                     if (matrixSearch.trim()) {
@@ -2252,7 +2223,7 @@ export const ExamManagerWorkspace: React.FC<ExamManagerWorkspaceProps> = ({
               <div>
                 <h3 className="text-base font-bold text-slate-900">Secure Question Pool Repository</h3>
                 <p className="text-xs text-slate-500 mt-0.5">
-                  Cryptographically secured question repository. Multi-select questions to assign in bulk to SMEs or Translators.
+                  Cryptographically secured question repository. Multi-select questions to assign in bulk to Linguistic Translators.
                 </p>
               </div>
 
@@ -2300,33 +2271,18 @@ export const ExamManagerWorkspace: React.FC<ExamManagerWorkspaceProps> = ({
                   </button>
                 </div>
 
-                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                  <div>
-                    <label className="block text-slate-300 font-bold mb-1">Assignment Task Type</label>
-                    <select
-                      value={poolAssignType}
-                      onChange={e => {
-                        setPoolAssignType(e.target.value as any);
-                        setPoolAssignUserId('');
-                      }}
-                      className="w-full px-3 py-2 rounded-lg bg-slate-800 border border-slate-700 text-white"
-                    >
-                      <option value="SME_REVIEW">SME Expert Review</option>
-                      <option value="LINGUISTIC_TRANSLATION">Linguistic Translation</option>
-                    </select>
-                  </div>
-
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                   <div>
                     <label className="block text-slate-300 font-bold mb-1">
-                      {poolAssignType === 'SME_REVIEW' ? 'Target SME Expert' : 'Target Linguistic Translator'}
+                      Target Linguistic Translator
                     </label>
                     <select
                       value={poolAssignUserId}
                       onChange={e => setPoolAssignUserId(e.target.value)}
                       className="w-full px-3 py-2 rounded-lg bg-slate-800 border border-slate-700 text-white"
                     >
-                      <option value="">-- Select Member --</option>
-                      {(poolAssignType === 'SME_REVIEW' ? smes : translators).map(u => (
+                      <option value="">-- Select Linguistic Translator --</option>
+                      {translators.map(u => (
                         <option key={u.id} value={u.id}>
                           {u.full_name} ({u.email})
                         </option>
@@ -2334,22 +2290,20 @@ export const ExamManagerWorkspace: React.FC<ExamManagerWorkspaceProps> = ({
                     </select>
                   </div>
 
-                  {poolAssignType === 'LINGUISTIC_TRANSLATION' && (
-                    <div>
-                      <label className="block text-slate-300 font-bold mb-1">Target Language</label>
-                      <select
-                        value={poolAssignTargetLanguage}
-                        onChange={e => setPoolAssignTargetLanguage(e.target.value)}
-                        className="w-full px-3 py-2 rounded-lg bg-slate-800 border border-slate-700 text-white"
-                      >
-                        {SUPPORTED_TRANSLATION_LANGUAGES.map(l => (
-                          <option key={l.code} value={l.code}>
-                            {l.label}
-                          </option>
-                        ))}
-                      </select>
-                    </div>
-                  )}
+                  <div>
+                    <label className="block text-slate-300 font-bold mb-1">Target Language</label>
+                    <select
+                      value={poolAssignTargetLanguage}
+                      onChange={e => setPoolAssignTargetLanguage(e.target.value)}
+                      className="w-full px-3 py-2 rounded-lg bg-slate-800 border border-slate-700 text-white"
+                    >
+                      {SUPPORTED_TRANSLATION_LANGUAGES.map(l => (
+                        <option key={l.code} value={l.code}>
+                          {l.label}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
                 </div>
 
                 <div>
