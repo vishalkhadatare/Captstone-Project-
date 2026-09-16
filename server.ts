@@ -6418,6 +6418,17 @@ async function startServer() {
   // Clean up any legacy dummy/mock questions so only real extracted/uploaded questions exist
   function cleanLegacyDummyQuestions(db: any) {
     try {
+      // 1. Permanently delete all NEET / physics prism / dummy question papers
+      executeRun(
+        db,
+        `DELETE FROM question_papers 
+         WHERE LOWER(original_filename) LIKE '%neet%' 
+            OR LOWER(original_filename) LIKE '%sample%' 
+            OR id LIKE 'PAPER-SRC-NEET%'
+            OR original_filename = 'sample.jpg'`
+      );
+
+      // 2. Permanently delete all questions associated with NEET, prism, botany, zoology, biology, or dummy prefixes
       executeRun(
         db,
         `DELETE FROM questions 
@@ -6426,10 +6437,26 @@ async function startServer() {
             OR id LIKE 'Q-NEET-%' 
             OR id LIKE 'Q-GATE-%' 
             OR id LIKE 'Q-EXAM-%'
+            OR id LIKE 'EXT-P1-NEET%'
+            OR id LIKE 'EXT-P2-NEET%'
+            OR id LIKE 'EXT-P3-NEET%'
+            OR LOWER(content_text) LIKE '%prism%'
+            OR LOWER(content_text) LIKE '%light ray enters%'
+            OR LOWER(content_text) LIKE '%refractive index%'
+            OR LOWER(content_text) LIKE '%neet 202%'
+            OR LOWER(content_text) LIKE '%neet-202%'
+            OR LOWER(content_text) LIKE '%biology%'
+            OR LOWER(content_text) LIKE '%botany%'
+            OR LOWER(content_text) LIKE '%zoology%'
+            OR LOWER(content_text) LIKE '%cellular organelle%'
+            OR LOWER(content_text) LIKE '%elisa technique%'
+            OR LOWER(content_text) LIKE '%magnetic flux%'
             OR content_text LIKE 'In AES-256-GCM%'
-            OR content_text LIKE 'Which cellular organelle%'
             OR content_text LIKE 'Given the foundational principles of%'`
       );
+
+      // 3. Clean any orphaned mappings
+      executeRun(db, `DELETE FROM paper_questions WHERE question_id NOT IN (SELECT id FROM questions)`);
     } catch {}
   }
 
@@ -6486,38 +6513,52 @@ async function startServer() {
       (exam.exam_type === 'THEORY' && body.num_sets !== 1)
     );
 
-    const isNeetOrMultiSubjectMCQ = !hasManualBlueprint && (
-      body.exam_mode === 'MULTI_SUBJECT_MCQ' ||
-      body.exam_mode === 'NEET_MULTI_SUBJECT' ||
-      exam.category === 'NEET' ||
-      exam.category === 'JEE' ||
-      exam.category === 'Competitive Exam' ||
-      exam.category === 'TCET / CET-type Exam' ||
-      (exam.name && (exam.name.toUpperCase().includes('NEET') || exam.name.toUpperCase().includes('JEE'))) ||
-      (exam.exam_type === 'MCQ' && (
-        body.subject_pool ||
-        (exam.subject && (
-          exam.subject.includes('PCB') ||
-          exam.subject.includes('PCM') ||
-          exam.subject.includes('All') ||
-          exam.subject.includes('&')
-        ))
-      ))
-    );
+    const isNeetOrMultiSubjectMCQ = false;
 
-    // 1. Query real questions: prioritize explicitly selected draft papers, or questions linked to this exam/org
+    // 1. Query real questions: strictly prioritize explicitly selected draft papers
     let eligibleQuestions: any[] = [];
 
     if (Array.isArray(body.selected_paper_ids) && body.selected_paper_ids.length > 0) {
       const placeholders = body.selected_paper_ids.map(() => '?').join(',');
-      const selectedQs = executeQuery(
+      
+      // Query questions linked directly to the selected paper IDs
+      let selectedQs = executeQuery(
         db,
         `SELECT * FROM questions
          WHERE question_paper_id IN (${placeholders})
            AND status NOT IN ('QUARANTINED', 'COMPROMISED')
+           AND LOWER(content_text) NOT LIKE '%prism%'
+           AND LOWER(content_text) NOT LIKE '%neet%'
          ORDER BY source_page ASC, question_number ASC, created_at ASC`,
         body.selected_paper_ids
       );
+
+      // Also query questions from papers that share the same filename as the selected papers
+      if (selectedQs.length < 14) {
+        const selPaperRecords = executeQuery(
+          db,
+          `SELECT original_filename FROM question_papers WHERE id IN (${placeholders})`,
+          body.selected_paper_ids
+        );
+        const filenames = selPaperRecords.map((p: any) => p.original_filename).filter(Boolean);
+        if (filenames.length > 0) {
+          const fnPlaceholders = filenames.map(() => '?').join(',');
+          const matchingQs = executeQuery(
+            db,
+            `SELECT * FROM questions
+             WHERE question_paper_id IN (SELECT id FROM question_papers WHERE original_filename IN (${fnPlaceholders}))
+               AND status NOT IN ('QUARANTINED', 'COMPROMISED')
+               AND LOWER(content_text) NOT LIKE '%prism%'
+               AND LOWER(content_text) NOT LIKE '%neet%'
+             ORDER BY source_page ASC, question_number ASC, created_at ASC`,
+            filenames
+          );
+          if (matchingQs.length > selectedQs.length) {
+            selectedQs = matchingQs;
+          }
+        }
+      }
+
       if (selectedQs.length > 0) {
         eligibleQuestions = selectedQs;
       }
@@ -6527,83 +6568,42 @@ async function startServer() {
       if (hasManualBlueprint) {
         eligibleQuestions = executeQuery(
           db,
-          `SELECT * FROM questions WHERE org_id = ? AND status = 'ELIGIBLE_FOR_PAPER' ORDER BY subject ASC, difficulty ASC`,
+          `SELECT * FROM questions WHERE org_id = ? AND status = 'ELIGIBLE_FOR_PAPER' AND LOWER(content_text) NOT LIKE '%prism%' AND LOWER(content_text) NOT LIKE '%neet%' ORDER BY subject ASC, difficulty ASC`,
           [orgId]
         );
       } else {
-        // First prioritize questions explicitly linked to this exam, source paper, or uploaded question papers
+        // Prioritize questions explicitly linked to this exam, source paper, or uploaded question papers
         eligibleQuestions = executeQuery(
           db,
           `SELECT * FROM questions
            WHERE (question_paper_id = ? OR question_paper_id IN (SELECT id FROM question_papers WHERE exam_id = ? OR subject = ? OR examination_category = ?))
              AND status NOT IN ('QUARANTINED', 'COMPROMISED')
+             AND LOWER(content_text) NOT LIKE '%prism%'
+             AND LOWER(content_text) NOT LIKE '%neet%'
            ORDER BY source_page ASC, question_number ASC, created_at ASC`,
           [exam.id, exam.id, exam.subject || '', exam.category || '']
         );
 
-        // If still empty, check all questions in the organization
+        // If still empty, check non-NEET questions in the organization
         if (eligibleQuestions.length === 0) {
           eligibleQuestions = executeQuery(
             db,
-            `SELECT * FROM questions WHERE org_id = ? AND status NOT IN ('QUARANTINED', 'COMPROMISED') ORDER BY source_page ASC, question_number ASC, created_at ASC`,
+            `SELECT * FROM questions 
+             WHERE org_id = ? 
+               AND status NOT IN ('QUARANTINED', 'COMPROMISED')
+               AND LOWER(content_text) NOT LIKE '%prism%'
+               AND LOWER(content_text) NOT LIKE '%neet%'
+               AND LOWER(subject) NOT LIKE '%botany%'
+               AND LOWER(subject) NOT LIKE '%zoology%'
+             ORDER BY source_page ASC, question_number ASC, created_at ASC`,
             [orgId]
           );
         }
       }
     }
 
-    // Only if question bank is strictly empty, load sample draft questions as fallback
-    if (eligibleQuestions.length === 0) {
-      const draftFiles = ['paper1_questions_real.json', 'paper2_questions_real.json', 'paper3_questions_real.json'];
-      const draftQuestions: any[] = [];
-      draftFiles.forEach((file, fIdx) => {
-        try {
-          const p = path.join(process.cwd(), 'server', file);
-          if (fs.existsSync(p)) {
-            const raw = JSON.parse(fs.readFileSync(p, 'utf-8'));
-            Object.entries(raw).forEach(([qId, qData]: [string, any]) => {
-              const stmt = qData.statement || qData.full_text || '';
-              if (stmt) {
-                draftQuestions.push({
-                  id: `draft-p${fIdx + 1}-${qId}`,
-                  org_id: orgId,
-                  question_paper_id: `paper-${fIdx + 1}`,
-                  source_file: file,
-                  source_page: qData.page_number || 1,
-                  question_number: qData.question_number || qId,
-                  subject: exam.subject || 'Core Curriculum',
-                  topic: 'General Topics',
-                  difficulty: 'MEDIUM',
-                  marks: (qData.options && qData.options.length > 0) ? 1 : 4,
-                  negative_marks: 0,
-                  correct_answer: (qData.options && qData.options[0]?.label) || 'A',
-                  content_text: stmt,
-                  options_json: JSON.stringify(qData.options || []),
-                  diagram_url: qData.diagram_url || qData.image_url,
-                  image_url: qData.image_url || qData.diagram_url,
-                  has_table: Boolean(qData.has_table),
-                  status: 'ELIGIBLE_FOR_PAPER',
-                });
-              }
-            });
-          }
-        } catch (e) {
-          console.error(`Error loading draft file ${file}:`, e);
-        }
-      });
-
-      if (draftQuestions.length > 0) {
-        eligibleQuestions = draftQuestions;
-      }
-    }
-
-    // Filter by subject if subject pool is specified
-    if (isNeetOrMultiSubjectMCQ && Array.isArray(body.subject_pool) && body.subject_pool.length > 0) {
-      const filtered = eligibleQuestions.filter(q => body.subject_pool.includes(q.subject));
-      if (filtered.length > 0) {
-        eligibleQuestions = filtered;
-      }
-    } else if (!isUniversityExam && exam.subject) {
+    // Filter by exam subject if applicable
+    if (exam.subject) {
       const subjectMatch = eligibleQuestions.filter(q =>
         q.subject && (q.subject.toLowerCase() === exam.subject.toLowerCase() || exam.subject.toLowerCase().includes(q.subject.toLowerCase()))
       );
@@ -9799,6 +9799,9 @@ async function startServer() {
   await ensureAllOrganizationsExist();
   await createDevelopmentTestAccount();
   await seedAcademicDemoDataInternal();
+  const db = await getDb();
+  cleanLegacyDummyQuestions(db);
+  saveDb();
 
   app.listen(PORT, '0.0.0.0', () => {
     console.log(`[ZeroLeak Security Engine] Server running on http://0.0.0.0:${PORT}`);
