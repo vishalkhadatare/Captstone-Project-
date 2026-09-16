@@ -6113,6 +6113,26 @@ async function startServer() {
         return res.status(404).json({ error: 'No paper version could be generated' });
       }
 
+      // Try to decrypt the paper payload from encrypted_papers table
+      let decryptedPayload: any = null;
+      const encryptedData = executeQuery(db, 'SELECT * FROM encrypted_papers WHERE paper_version_id = ?', [version.id])[0];
+      if (encryptedData) {
+        try {
+          const decryptedString = decryptExamPaper({
+            cipherText: encryptedData.aes_cipher_text,
+            iv: encryptedData.iv_hex,
+            authTag: encryptedData.auth_tag_hex,
+            encryptedKeyRSA: encryptedData.encrypted_aes_key_rsa,
+            keyFingerprint: encryptedData.key_fingerprint,
+            checksumSHA256: encryptedData.checksum_sha256,
+            timestamp: encryptedData.encrypted_at,
+          });
+          decryptedPayload = JSON.parse(decryptedString);
+        } catch (decErr) {
+          console.warn('Could not decrypt paper payload in current-paper:', decErr);
+        }
+      }
+
       let questions = executeQuery(
         db,
         `SELECT pq.id as paper_question_id, pq.section_name, pq.order_index, pq.marks as question_marks,
@@ -6125,7 +6145,18 @@ async function startServer() {
         [version.id]
       );
 
-      // Fallback: if paper_questions table has 0 mappings, query real extracted questions directly
+      // Fallback 1: If decrypted payload contains set questions, use them
+      if (questions.length === 0 && decryptedPayload?.setQuestions && Array.isArray(decryptedPayload.setQuestions) && decryptedPayload.setQuestions.length > 0) {
+        questions = decryptedPayload.setQuestions.map((q: any, idx: number) => ({
+          paper_question_id: `PQ-${q.id || idx + 1}`,
+          section_name: q.section_name || (idx < 14 ? 'Section A: Q.1 MCQs' : 'Section Theory'),
+          order_index: idx + 1,
+          question_marks: q.marks || 4,
+          ...q,
+        }));
+      }
+
+      // Fallback 2: if paper_questions table has 0 mappings, query real extracted questions directly
       if (questions.length === 0) {
         const rawQs = executeQuery(
           db,
@@ -6166,6 +6197,8 @@ async function startServer() {
         questions: parsedQuestions,
         allVersions,
         exam,
+        universityBoardSet: decryptedPayload?.universityBoardSet || null,
+        paperPayload: decryptedPayload || null,
       });
     } catch (e: any) {
       return res.status(500).json({ error: e.message });
@@ -6444,7 +6477,7 @@ async function startServer() {
       } else if (isUniversityExam && boardSet) {
         // Collect MCQs from mcqSection and theory from Section I & II
         const mcqs = (boardSet.mcqSection?.questions || []).map((q: any, idx: number) => ({
-          id: q.id,
+          id: q.id || `mcq-s${setIdx}-${idx + 1}`,
           question_number: `1.${idx + 1}`,
           order_index: idx + 1,
           subject: exam.subject || 'Core',
@@ -6454,13 +6487,45 @@ async function startServer() {
           negative_marks: 0,
           question_type: 'MCQ',
           content_text: q.content_text,
-          options_json: JSON.stringify(q.options),
+          options_json: JSON.stringify(q.options || []),
           correct_answer: q.correct_answer,
           diagram_url: q.diagram_url || q.image_url,
           image_url: q.image_url || q.diagram_url,
           has_table: q.has_table,
         }));
-        setQuestions = mcqs;
+
+        const theoryQuestions: any[] = [];
+        let tOrder = mcqs.length + 1;
+        const addTheorySubs = (subs: any[], qNum: string, marksPerQ: number) => {
+          (subs || []).forEach((sub: any, sIdx: number) => {
+            theoryQuestions.push({
+              id: sub.id || `theory-s${setIdx}-${qNum}-${sIdx + 1}`,
+              question_number: `${qNum}.${sIdx + 1}`,
+              order_index: tOrder++,
+              subject: exam.subject || 'Core',
+              topic: 'Theory & Analysis',
+              difficulty: 'MEDIUM',
+              marks: sub.marks || marksPerQ,
+              negative_marks: 0,
+              question_type: 'THEORY',
+              content_text: sub.content_text,
+              options_json: JSON.stringify([]),
+              correct_answer: '',
+              diagram_url: sub.diagram_url || sub.image_url,
+              image_url: sub.image_url || sub.diagram_url,
+              has_table: sub.has_table,
+            });
+          });
+        };
+
+        addTheorySubs(boardSet.section1?.q2?.questions, '2', 4);
+        addTheorySubs(boardSet.section1?.q3?.questions, '3', 6);
+        addTheorySubs(boardSet.section1?.q4?.questions, '4', 3);
+        addTheorySubs(boardSet.section2?.q5?.questions, '5', 4);
+        addTheorySubs(boardSet.section2?.q6?.questions, '6', 6);
+        addTheorySubs(boardSet.section2?.q7?.questions, '7', 6);
+
+        setQuestions = [...mcqs, ...theoryQuestions];
       } else if (setIdx === 1 || !isUniversityExam || numSetsToGenerate === 1) {
         // Set 1 strictly preserves the EXACT original question sequence from the uploaded paper
         setQuestions = [...eligibleQuestions];
@@ -6909,11 +6974,39 @@ async function startServer() {
           [paperVersionId, exam.id, versionCode, isCurrent, req.user!.id, now]
         );
 
-        // Record Mappings
+        // Record Mappings & Ensure Questions Exist in Question Bank
         setQuestions.forEach((q, idx) => {
+          const qExists = executeQuery(db, 'SELECT id FROM questions WHERE id = ?', [q.id])[0];
+          if (!qExists) {
+            executeRun(
+              db,
+              `INSERT INTO questions (
+                id, org_id, question_paper_id, subject, topic, difficulty, marks, negative_marks,
+                correct_answer, content_text, options_json, diagram_url, image_url, question_type, status, created_at
+              ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'ELIGIBLE_FOR_PAPER', ?)`,
+              [
+                q.id,
+                exam.org_id || req.user!.org_id,
+                q.question_paper_id || (body.selected_paper_ids?.[0] || 'GENERATED_VAULT'),
+                q.subject || exam.subject || 'General',
+                q.topic || 'General',
+                q.difficulty || 'MEDIUM',
+                q.marks || (q.question_type === 'MCQ' ? 1 : 4),
+                q.negative_marks || 0,
+                q.correct_answer || '',
+                q.content_text || '',
+                typeof q.options_json === 'string' ? q.options_json : JSON.stringify(q.options || []),
+                q.diagram_url || null,
+                q.image_url || null,
+                q.question_type || (q.options?.length ? 'MCQ' : 'THEORY'),
+                now
+              ]
+            );
+          }
+
           const sectionName = isUniversityExam
-            ? (idx < 2 ? 'Section A: Short Compulsory' : idx < 4 ? 'Section B: Medium Analytical' : 'Section C: Long Subjective')
-            : `Section: ${q.subject}`;
+            ? (idx < 14 ? 'Section A: Q.1 MCQs' : idx < 23 ? 'Section I: Q.2-Q.4 Theory' : 'Section II: Q.5-Q.7 Theory')
+            : `Section: ${q.subject || 'General'}`;
 
           executeRun(
             db,

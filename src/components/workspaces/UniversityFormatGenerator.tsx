@@ -379,8 +379,31 @@ export const UniversityFormatGenerator: React.FC<UniversityFormatGeneratorProps>
 
   // Separate MCQs vs Theory from currentPaperData
   const allQs = currentPaperData?.questions || [];
-  const realMcqs = allQs.filter(q => q.question_type === 'MCQ' || (Array.isArray(q.options) && q.options.length >= 2));
-  const realTheory = allQs.filter(q => q.question_type !== 'MCQ' && (!q.options || q.options.length < 2));
+  const baseMcqs = allQs.filter(q => q.question_type === 'MCQ' || (Array.isArray(q.options) && q.options.length >= 2));
+  const baseTheory = allQs.filter(q => q.question_type !== 'MCQ' && (!q.options || q.options.length < 2));
+
+  // Deterministically permute MCQs & option choices for active Set P (0), Set Q (1), Set R (2), Set S (3)
+  const realMcqs = baseMcqs.map((q, idx) => {
+    let opts = Array.isArray(q.options) ? [...q.options] : [];
+    if (activeSetIndex > 0 && opts.length > 1) {
+      const shift = (activeSetIndex + idx) % opts.length;
+      opts = [...opts.slice(shift), ...opts.slice(0, shift)].map((opt, oIdx) => ({
+        id: typeof opt === 'object' ? opt.id : `opt-${oIdx}`,
+        label: String.fromCharCode(97 + oIdx),
+        text: typeof opt === 'object' ? opt.text : String(opt),
+      }));
+    }
+    return { ...q, options: opts };
+  });
+
+  // Deterministically permute Theory questions across sets
+  const realTheory = activeSetIndex === 0
+    ? baseTheory
+    : [...baseTheory].sort((a, b) => {
+        const hashA = (a.id + activeSetIndex).split('').reduce((acc: number, c: string) => acc + c.charCodeAt(0), 0);
+        const hashB = (b.id + activeSetIndex).split('').reduce((acc: number, c: string) => acc + c.charCodeAt(0), 0);
+        return (hashA % 13) - (hashB % 13);
+      });
 
   // Partition Theory into Section I (Q.2, Q.3, Q.4) and Section II (Q.5, Q.6, Q.7)
   const theorySec1 = realTheory.slice(0, Math.ceil(realTheory.length / 2));
