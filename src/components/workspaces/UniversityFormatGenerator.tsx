@@ -116,6 +116,7 @@ export const UniversityFormatGenerator: React.FC<UniversityFormatGeneratorProps>
 
   const [cloudinaryHealth, setCloudinaryHealth] = useState<{ connected: boolean; cloud_name?: string; assets_count?: number } | null>(null);
   const [formatexHealth, setFormatexHealth] = useState<{ connected: boolean; engine?: string } | null>(null);
+  const [latexOnlineHealth, setLatexOnlineHealth] = useState<{ connected: boolean; service?: string; engine?: string } | null>(null);
   const [compilingFormatex, setCompilingFormatex] = useState(false);
   const [latestFormatexPdfUrl, setLatestFormatexPdfUrl] = useState<string | null>(null);
   const [showLatexModal, setShowLatexModal] = useState(false);
@@ -127,6 +128,7 @@ export const UniversityFormatGenerator: React.FC<UniversityFormatGeneratorProps>
     loadUploadedPapers();
     checkCloudinary();
     checkFormatex();
+    checkLatexOnline();
   }, [currentUser]);
 
   useEffect(() => {
@@ -149,6 +151,15 @@ export const UniversityFormatGenerator: React.FC<UniversityFormatGeneratorProps>
     try {
       const res = await api.getFormatexHealth();
       setFormatexHealth(res);
+    } catch {
+      // ignore
+    }
+  };
+
+  const checkLatexOnline = async () => {
+    try {
+      const res = await api.getLatexOnlineHealth();
+      setLatexOnlineHealth(res);
     } catch {
       // ignore
     }
@@ -509,13 +520,13 @@ export const UniversityFormatGenerator: React.FC<UniversityFormatGeneratorProps>
               <span className="px-2.5 py-0.5 rounded-full text-[10px] font-black bg-rose-500 text-white uppercase tracking-wide">
                 OLLAMA AI ENGINE
               </span>
-              <span className="px-2.5 py-0.5 rounded-full text-[10px] font-black bg-amber-500/20 text-amber-300 border border-amber-500/30 uppercase tracking-wide flex items-center gap-1">
-                <Zap className="w-3 h-3 text-amber-400" />
-                <span>FORMATEX LATEX</span>
+              <span className="px-2.5 py-0.5 rounded-full text-[10px] font-black bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 uppercase tracking-wide flex items-center gap-1">
+                <Zap className="w-3 h-3 text-emerald-400" />
+                <span>{latexOnlineHealth?.connected ? '⚡ LATEX.ONLINE (FREE) ACTIVE' : '⚡ LATEX ENGINE'}</span>
               </span>
             </div>
             <p className="text-xs text-slate-400 mt-0.5">
-              Multi-Draft Combination & Permutation &bull; Stored in Cloudinary &bull; FormaTeX Publication Engine
+              Multi-Draft Combination & Permutation &bull; Stored in Cloudinary &bull; LaTeX.Online & FormaTeX Compiler
             </p>
           </div>
         </div>
@@ -1014,16 +1025,16 @@ export const UniversityFormatGenerator: React.FC<UniversityFormatGeneratorProps>
                 </div>
 
                 <div className="flex flex-wrap items-center gap-2">
-                  {/* FormaTeX PDF Compilation */}
+                  {/* LaTeX PDF Compilation */}
                   <button
                     type="button"
                     onClick={() => handleCompileFormatexPdf(setLetter)}
                     disabled={compilingFormatex}
-                    title="Compile and download publication-ready official PDF using FormaTeX Cloud LaTeX Engine"
+                    title="Compile and download publication-ready official PDF using LaTeX.Online / FormaTeX Engine"
                     className="px-3 py-1.5 rounded-lg text-xs font-bold bg-amber-500 hover:bg-amber-400 text-slate-950 flex items-center gap-1.5 cursor-pointer transition-all shadow-md shadow-amber-500/20 disabled:opacity-50"
                   >
                     <Zap className={`w-3.5 h-3.5 ${compilingFormatex ? 'animate-spin' : ''}`} />
-                    <span>{compilingFormatex ? `Compiling Set ${setLetter}...` : `⚡ FormaTeX PDF (Set ${setLetter})`}</span>
+                    <span>{compilingFormatex ? `Compiling Set ${setLetter}...` : `⚡ Compile Official PDF (Set ${setLetter})`}</span>
                   </button>
 
                   {/* View LaTeX Source Code */}

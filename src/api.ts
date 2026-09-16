@@ -447,8 +447,9 @@ export const api = {
   getCloudinaryHealth: () => request<{ connected: boolean; cloud_name?: string; assets_count?: number; error?: string }>('/api/question-papers/cloudinary-health'),
   getOllamaHealth: () => request<{ connected: boolean; model: string; error?: string }>('/api/question-papers/ollama-health'),
   getFormatexHealth: () => request<{ connected: boolean; engine?: string; error?: string }>('/api/formatex/health'),
-  compileFormatexPdf: (examId: string, payload?: { setLetter?: string; customLatex?: string }) =>
-    request<{ success: boolean; pdfUrl: string; latex: string; sizeBytes: number; checksumSha256: string; error?: string }>(`/api/examinations/${examId}/compile-formatex-pdf`, {
+  getLatexOnlineHealth: () => request<{ connected: boolean; service?: string; engine?: string; error?: string }>('/api/latex-online/health'),
+  compileFormatexPdf: (examId: string, payload?: { setLetter?: string; customLatex?: string; preferEngine?: 'latexonline' | 'formatex' | 'auto' }) =>
+    request<{ success: boolean; pdfUrl: string; latex: string; sizeBytes: number; checksumSha256: string; compilerService?: string; error?: string }>(`/api/examinations/${examId}/compile-formatex-pdf`, {
       method: 'POST',
       body: JSON.stringify(payload || {}),
     }),

@@ -133,8 +133,8 @@ export const QuestionPaperPdfModal: React.FC<QuestionPaperPdfModalProps> = ({
                 <span className="px-2 py-0.5 rounded-full text-[10px] font-black bg-rose-500 text-white">
                   PDF READY
                 </span>
-                <span className="px-2 py-0.5 rounded text-[10px] font-black bg-amber-500/20 text-amber-300 border border-amber-500/30">
-                  ⚡ FORMATEX
+                <span className="px-2 py-0.5 rounded text-[10px] font-black bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">
+                  ⚡ LATEX PDF
                 </span>
               </div>
               <p className="text-[11px] text-slate-400 font-mono truncate max-w-md">
@@ -162,16 +162,16 @@ export const QuestionPaperPdfModal: React.FC<QuestionPaperPdfModalProps> = ({
               </select>
             )}
 
-            {/* FormaTeX PDF Download Button */}
+            {/* LaTeX PDF Download Button */}
             <button
               type="button"
               onClick={handleDownloadFormatex}
               disabled={compilingFormatex}
               className="px-3.5 py-1.5 bg-amber-500 hover:bg-amber-400 text-slate-950 rounded-lg font-extrabold text-xs shadow-md shadow-amber-500/20 flex items-center gap-1.5 cursor-pointer transition-all disabled:opacity-50"
-              title="Compile and Download High-Fidelity FormaTeX PDF"
+              title="Compile and Download High-Fidelity LaTeX PDF (Free Online Engine)"
             >
               <Zap className={`w-3.5 h-3.5 ${compilingFormatex ? 'animate-spin' : ''}`} />
-              <span>{compilingFormatex ? 'Compiling PDF...' : '⚡ FormaTeX PDF'}</span>
+              <span>{compilingFormatex ? 'Compiling PDF...' : '⚡ Download Official PDF'}</span>
             </button>
 
             {/* Answer Key Toggle */}

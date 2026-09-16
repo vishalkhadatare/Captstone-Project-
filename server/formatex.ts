@@ -4,6 +4,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { uploadDocumentToCloudinary } from './cloudinary.ts';
 
+const LATEX_ONLINE_BASE_URL = process.env.LATEX_ONLINE_BASE_URL || 'https://latexonline.cc';
 const FORMATEX_BASE_URL = process.env.FORMATEX_BASE_URL || 'https://api.formatex.io/api/v1';
 const FORMATEX_API_KEY = process.env.FORMATEX_API_KEY || 'fex_b908adc11e4806a1c4877fb32105c1bb19e533378b3f0b4fd866148f701b061c';
 
@@ -12,6 +13,7 @@ export interface FormatexCompileOptions {
   engine?: 'pdflatex' | 'xelatex' | 'lualatex' | 'latexmk';
   smart?: boolean;
   timeoutMs?: number;
+  preferEngine?: 'latexonline' | 'formatex' | 'auto';
 }
 
 export interface FormatexCompileResult {
@@ -23,6 +25,157 @@ export interface FormatexCompileResult {
   durationMs?: number;
   jobId?: string;
   compilationsRemaining?: number;
+  compilerService?: 'LaTeX.Online (Free)' | 'FormaTeX Cloud';
+}
+
+/**
+ * Minimal in-memory POSIX ustar tarball generator for single file compilation
+ */
+function createUstarArchive(filename: string, content: string | Buffer): Buffer {
+  const fileBuf = Buffer.isBuffer(content) ? content : Buffer.from(content, 'utf-8');
+  const header = Buffer.alloc(512);
+
+  header.write(filename, 0, 100, 'ascii');
+  header.write('0000644\0', 100, 8, 'ascii');
+  header.write('0000000\0', 108, 8, 'ascii');
+  header.write('0000000\0', 116, 8, 'ascii');
+  const sizeOctal = fileBuf.length.toString(8).padStart(11, '0') + '\0';
+  header.write(sizeOctal, 124, 12, 'ascii');
+  const mtimeOctal = Math.floor(Date.now() / 1000).toString(8).padStart(11, '0') + '\0';
+  header.write(mtimeOctal, 136, 12, 'ascii');
+  header.write('0', 156, 1, 'ascii');
+  header.write('ustar\0', 257, 6, 'ascii');
+  header.write('00', 263, 2, 'ascii');
+
+  header.fill(0x20, 148, 156);
+  let checksum = 0;
+  for (let i = 0; i < 512; i++) checksum += header[i];
+  const checksumOctal = checksum.toString(8).padStart(6, '0') + '\0 ';
+  header.write(checksumOctal, 148, 8, 'ascii');
+
+  const remainder = fileBuf.length % 512;
+  const paddingLength = remainder === 0 ? 0 : 512 - remainder;
+  const padding = Buffer.alloc(paddingLength);
+  const eof = Buffer.alloc(1024);
+
+  return Buffer.concat([header, fileBuf, padding, eof]);
+}
+
+/**
+ * Check connectivity and status of Free LaTeX.Online Cloud Compiler (latexonline.cc)
+ */
+export async function getLatexOnlineHealth(): Promise<{ connected: boolean; service: string; engine?: string; error?: string }> {
+  try {
+    const testDoc = '\\documentclass{article}\\begin{document}ZeroLeak Health Check\\end{document}';
+    const testUrl = `${LATEX_ONLINE_BASE_URL}/compile?text=${encodeURIComponent(testDoc)}&command=pdflatex`;
+    const res = await fetch(testUrl, {
+      method: 'GET',
+      signal: AbortSignal.timeout(8000),
+    });
+
+    if (res.ok) {
+      return { connected: true, service: 'LaTeX.Online (Free)', engine: 'pdflatex' };
+    }
+    const errText = await res.text();
+    return { connected: false, service: 'LaTeX.Online (Free)', error: `LaTeX.Online returned status ${res.status}: ${errText.slice(0, 150)}` };
+  } catch (err: any) {
+    return { connected: false, service: 'LaTeX.Online (Free)', error: err?.message || 'Failed to connect to LaTeX.Online' };
+  }
+}
+
+/**
+ * Compile LaTeX into PDF using Free LaTeX.Online cloud compiler (https://latexonline.cc)
+ * Uses multipart tar POST to avoid URL length constraints, with GET as fallback.
+ */
+export async function compileWithLatexOnline(options: {
+  latex: string;
+  command?: 'pdflatex' | 'xelatex' | 'lualatex';
+  timeoutMs?: number;
+}): Promise<FormatexCompileResult> {
+  const { latex, command = 'pdflatex', timeoutMs = 35000 } = options;
+  if (!latex || !latex.trim()) {
+    return { success: false, error: 'No LaTeX source provided for compilation.' };
+  }
+
+  const startTime = Date.now();
+
+  // 1. Try POST /data?target=main.tex with multipart tarball (No URL size limits)
+  try {
+    const tarBuffer = createUstarArchive('main.tex', latex);
+    const formData = new FormData();
+    const blob = new Blob([tarBuffer], { type: 'application/x-tar' });
+    formData.append('file', blob, 'archive.tar');
+
+    const postUrl = `${LATEX_ONLINE_BASE_URL}/data?target=main.tex&command=${command}`;
+    const res = await fetch(postUrl, {
+      method: 'POST',
+      body: formData,
+      signal: AbortSignal.timeout(timeoutMs),
+    });
+
+    const durationMs = Date.now() - startTime;
+    if (res.ok) {
+      const arrayBuf = await res.arrayBuffer();
+      const pdfBuffer = Buffer.from(arrayBuf);
+      return {
+        success: true,
+        pdfBuffer,
+        engine: command,
+        compilerService: 'LaTeX.Online (Free)',
+        durationMs,
+      };
+    }
+
+    const errorBody = await res.text();
+    if (res.status === 400 && errorBody.includes('error:')) {
+      return {
+        success: false,
+        error: `LaTeX.Online compilation syntax error: ${errorBody.slice(0, 300)}`,
+        durationMs,
+        compilerService: 'LaTeX.Online (Free)',
+      };
+    }
+  } catch (postErr: any) {
+    console.warn('[compileWithLatexOnline] POST /data failed, trying GET fallback:', postErr.message);
+  }
+
+  // 2. Fallback to GET /compile?text=... for short documents
+  try {
+    const compileUrl = `${LATEX_ONLINE_BASE_URL}/compile?text=${encodeURIComponent(latex)}&command=${command}`;
+    const res = await fetch(compileUrl, {
+      method: 'GET',
+      signal: AbortSignal.timeout(timeoutMs),
+    });
+
+    const durationMs = Date.now() - startTime;
+    if (res.ok) {
+      const arrayBuf = await res.arrayBuffer();
+      const pdfBuffer = Buffer.from(arrayBuf);
+      return {
+        success: true,
+        pdfBuffer,
+        engine: command,
+        compilerService: 'LaTeX.Online (Free)',
+        durationMs,
+      };
+    }
+
+    const errorBody = await res.text();
+    return {
+      success: false,
+      error: `LaTeX.Online compilation failed (${res.status}): ${errorBody.slice(0, 300)}`,
+      durationMs,
+      compilerService: 'LaTeX.Online (Free)',
+    };
+  } catch (err: any) {
+    const durationMs = Date.now() - startTime;
+    return {
+      success: false,
+      error: err?.message || 'LaTeX.Online compilation request failed',
+      compilerService: 'LaTeX.Online (Free)',
+      durationMs,
+    };
+  }
 }
 
 /**
@@ -401,7 +554,40 @@ export async function compileLatexWithFormatex(options: FormatexCompileOptions):
 }
 
 /**
- * High-level helper: Generate complete LaTeX for exam, compile with FormaTeX, and upload to Cloudinary & local cache
+ * Universal Dual-Engine Compiler:
+ * 1. Primary: Free LaTeX.Online cloud compiler (https://latexonline.cc) - Fast, unlimited, no API key needed
+ * 2. Secondary Fallback: FormaTeX Cloud REST API (https://api.formatex.io)
+ */
+export async function compileLatexUniversal(options: FormatexCompileOptions): Promise<FormatexCompileResult> {
+  const { preferEngine = 'auto' } = options;
+
+  if (preferEngine === 'formatex') {
+    return await compileLatexWithFormatex(options);
+  }
+
+  // Try Primary Free Engine: LaTeX.Online
+  try {
+    const onlineEngine = (options.engine === 'xelatex' || options.engine === 'lualatex') ? options.engine : 'pdflatex';
+    const res = await compileWithLatexOnline({
+      latex: options.latex,
+      command: onlineEngine,
+      timeoutMs: options.timeoutMs || 30000,
+    });
+
+    if (res.success && res.pdfBuffer && res.pdfBuffer.length > 0) {
+      return res;
+    }
+    console.warn(`[LatexCompiler] LaTeX.Online attempt failed: ${res.error}. Falling back to FormaTeX...`);
+  } catch (err: any) {
+    console.warn(`[LatexCompiler] LaTeX.Online exception: ${err.message}. Falling back to FormaTeX...`);
+  }
+
+  // Fallback to FormaTeX
+  return await compileLatexWithFormatex(options);
+}
+
+/**
+ * High-level helper: Generate complete LaTeX for exam, compile with Universal LaTeX engine (LaTeX.Online primary, FormaTeX fallback), and upload to Cloudinary & local cache
  */
 export async function generateAndUploadFormatexPdf(params: {
   exam: any;
@@ -410,6 +596,7 @@ export async function generateAndUploadFormatexPdf(params: {
   theorySec1?: any[];
   theorySec2?: any[];
   customLatex?: string;
+  preferEngine?: 'latexonline' | 'formatex' | 'auto';
 }): Promise<{
   success: boolean;
   pdfUrl?: string;
@@ -417,28 +604,30 @@ export async function generateAndUploadFormatexPdf(params: {
   latex: string;
   sizeBytes?: number;
   checksumSha256?: string;
+  compilerService?: string;
   error?: string;
 }> {
-  const { exam, setLetter, customLatex } = params;
+  const { exam, setLetter, customLatex, preferEngine = 'auto' } = params;
   const latex = customLatex && customLatex.trim() ? customLatex : generateUniversityLatexDocument(params);
 
-  const compilation = await compileLatexWithFormatex({
+  const compilation = await compileLatexUniversal({
     latex,
     engine: 'pdflatex',
     smart: true,
+    preferEngine,
   });
 
   if (!compilation.success || !compilation.pdfBuffer) {
     return {
       success: false,
       latex,
-      error: compilation.error || 'Failed to compile PDF with FormaTeX',
+      error: compilation.error || 'Failed to compile PDF with LaTeX online engine',
     };
   }
 
   const pdfBuffer = compilation.pdfBuffer;
   const checksumSha256 = crypto.createHash('sha256').update(pdfBuffer).digest('hex');
-  const filename = `${exam.code || 'EXAM'}_Set_${setLetter}_Official_FormaTeX.pdf`;
+  const filename = `${exam.code || 'EXAM'}_Set_${setLetter}_Official_Paper.pdf`;
 
   // Save to local cache
   const localOutputDir = path.join(process.cwd(), 'public', 'compiled_papers');
@@ -464,7 +653,7 @@ export async function generateAndUploadFormatexPdf(params: {
       cloudinaryPublicId = uploadRes.public_id;
     }
   } catch (cErr) {
-    console.warn('Could not upload FormaTeX PDF to Cloudinary, using local cache:', cErr);
+    console.warn('Could not upload PDF to Cloudinary, using local cache:', cErr);
   }
 
   return {
@@ -474,5 +663,7 @@ export async function generateAndUploadFormatexPdf(params: {
     latex,
     sizeBytes: pdfBuffer.length,
     checksumSha256,
+    compilerService: compilation.compilerService || 'LaTeX.Online (Free)',
   };
 }
+

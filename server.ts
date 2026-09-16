@@ -35,8 +35,11 @@ import {
 } from './server/ai.ts';
 import {
   getFormatexHealth,
+  getLatexOnlineHealth,
   generateUniversityLatexDocument,
   compileLatexWithFormatex,
+  compileWithLatexOnline,
+  compileLatexUniversal,
   generateAndUploadFormatexPdf,
 } from './server/formatex.ts';
 import {
@@ -4624,7 +4627,12 @@ async function startServer() {
     return res.json(await getFormatexHealth());
   });
 
-  // Retrieve Formatted FormaTeX LaTeX Source for Examination
+  // Free LaTeX.Online Cloud Compiler Health
+  app.get('/api/latex-online/health', authenticateToken, async (_req: Request, res: Response) => {
+    return res.json(await getLatexOnlineHealth());
+  });
+
+  // Retrieve Formatted LaTeX Source for Examination
   app.get('/api/examinations/:id/formatex-latex', authenticateToken, async (req: Request, res: Response) => {
     try {
       const db = await getDb();
@@ -4712,7 +4720,7 @@ async function startServer() {
     }
   });
 
-  // Compile Official University PDF via FormaTeX Cloud Engine
+  // Compile Official University PDF via Universal Engine (LaTeX.Online primary, FormaTeX fallback)
   app.post('/api/examinations/:id/compile-formatex-pdf', authenticateToken, async (req: Request, res: Response) => {
     try {
       const db = await getDb();
@@ -4723,17 +4731,17 @@ async function startServer() {
       }
       if (!exam) return res.status(404).json({ error: 'Examination not found' });
 
-      const { setLetter = 'P', customLatex } = req.body || {};
+      const { setLetter = 'P', customLatex, preferEngine = 'auto' } = req.body || {};
 
       let result;
       if (customLatex && typeof customLatex === 'string' && customLatex.trim()) {
-        const compileRes = await compileLatexWithFormatex({ latex: customLatex, smart: true });
+        const compileRes = await compileLatexUniversal({ latex: customLatex, smart: true, preferEngine });
         if (!compileRes.success || !compileRes.pdfBuffer) {
-          return res.status(422).json({ success: false, error: compileRes.error || 'FormaTeX compilation failed.' });
+          return res.status(422).json({ success: false, error: compileRes.error || 'LaTeX online compilation failed.' });
         }
         const pdfBuffer = compileRes.pdfBuffer;
         const checksumSha256 = crypto.createHash('sha256').update(pdfBuffer).digest('hex');
-        const filename = `${exam.code || 'EXAM'}_Set_${setLetter}_FormaTeX.pdf`;
+        const filename = `${exam.code || 'EXAM'}_Set_${setLetter}_Paper.pdf`;
         const localOutputDir = path.join(process.cwd(), 'public', 'compiled_papers');
         if (!fs.existsSync(localOutputDir)) fs.mkdirSync(localOutputDir, { recursive: true });
         fs.writeFileSync(path.join(localOutputDir, filename), pdfBuffer);
@@ -4754,6 +4762,7 @@ async function startServer() {
           latex: customLatex,
           sizeBytes: pdfBuffer.length,
           checksumSha256,
+          compilerService: compileRes.compilerService || 'LaTeX.Online (Free)',
         };
       } else {
         const version = executeQuery(
@@ -4821,6 +4830,7 @@ async function startServer() {
           mcqs,
           theorySec1,
           theorySec2,
+          preferEngine,
         });
       }
 
