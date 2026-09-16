@@ -428,6 +428,11 @@ export const api = {
     const qs = examId ? `?exam_id=${encodeURIComponent(examId)}` : '';
     return request<{ success: boolean; papers: any[] }>(`/api/question-papers${qs}`);
   },
+  syncCloudinaryQuestionPapers: (exam_id?: string) =>
+    request<{ success: boolean; importedCount: number; totalAssetsInCloudinary: number; papers: any[] }>('/api/question-papers/sync-cloudinary', {
+      method: 'POST',
+      body: JSON.stringify({ exam_id }),
+    }),
   extractThreeStandardPapers: () =>
     request<{ message: string; extractedQuestions: any[]; papers: any[]; totalExtracted: number }>('/api/question-papers/extract-three-standard-papers', { method: 'POST' }),
   getExtractionProgress: (jobId: string) =>

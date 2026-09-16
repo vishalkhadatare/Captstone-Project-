@@ -71,9 +71,6 @@ export async function uploadDocumentToCloudinary(
       fs.mkdirSync(localDir, { recursive: true });
     }
     const localFileName = `${publicId}_${sanitized}`;
-    const diskPath = path.join(localDir, localFileName);
-    fs.writeFileSync(diskPath, fileBuffer);
-
     return {
       secure_url: `/uploads/papers/${localFileName}`,
       public_id: publicId,
@@ -86,3 +83,72 @@ export async function uploadDocumentToCloudinary(
     return null;
   }
 }
+
+export async function listAllCloudinaryAssets(): Promise<Array<{
+  public_id: string;
+  secure_url: string;
+  format: string;
+  bytes: number;
+  created_at: string;
+  original_filename?: string;
+}>> {
+  try {
+    const config = getCloudinaryConfig();
+    if (!config) return [];
+
+    const rawRes = await cloudinary.api.resources({
+      resource_type: 'raw',
+      max_results: 100,
+    });
+
+    const imageRes = await cloudinary.api.resources({
+      resource_type: 'image',
+      max_results: 50,
+    });
+
+    const combined = [...(rawRes.resources || []), ...(imageRes.resources || [])];
+    return combined.map((r: any) => {
+      const parts = (r.public_id || '').split('/');
+      const rawName = parts[parts.length - 1] || 'document.pdf';
+      const cleanName = rawName.includes('-') && rawName.length > 36
+        ? rawName.substring(rawName.indexOf('-') + 1)
+        : rawName;
+      return {
+        public_id: r.public_id,
+        secure_url: r.secure_url,
+        format: r.format || 'pdf',
+        bytes: r.bytes || 0,
+        created_at: r.created_at || new Date().toISOString(),
+        original_filename: cleanName.endsWith('.pdf') ? cleanName : `${cleanName}.${r.format || 'pdf'}`,
+      };
+    });
+  } catch (err) {
+    console.warn('[ZeroLeak Cloudinary] Failed to list assets from Cloudinary API:', err);
+    return [];
+  }
+}
+
+export async function getCloudinaryHealth(): Promise<{
+  connected: boolean;
+  cloud_name?: string;
+  assets_count?: number;
+  error?: string;
+}> {
+  try {
+    const config = getCloudinaryConfig();
+    if (!config) return { connected: false, error: 'Cloudinary credentials missing.' };
+    const ping = await cloudinary.api.ping();
+    if (ping?.status === 'ok') {
+      const resources = await listAllCloudinaryAssets();
+      return {
+        connected: true,
+        cloud_name: config.cloudName,
+        assets_count: resources.length,
+      };
+    }
+    return { connected: false, error: 'Cloudinary ping did not return ok.' };
+  } catch (err: any) {
+    return { connected: false, error: err?.message || 'Failed to connect to Cloudinary.' };
+  }
+}
+

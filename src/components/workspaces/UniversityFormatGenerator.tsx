@@ -143,11 +143,30 @@ export const UniversityFormatGenerator: React.FC<UniversityFormatGeneratorProps>
       const res = await api.getUploadedQuestionPapers(examId);
       if (res.success && Array.isArray(res.papers)) {
         setUploadedPapers(res.papers);
-        // Automatically pre-select all papers if none selected
         setSelectedPaperIds(prev => (prev.length === 0 ? res.papers.map(p => p.id) : prev));
       }
     } catch (e: any) {
       console.warn('Could not load uploaded question papers:', e);
+    } finally {
+      setLoadingPapers(false);
+    }
+  };
+
+  const handleSyncCloudinary = async () => {
+    setLoadingPapers(true);
+    try {
+      const res = await api.syncCloudinaryQuestionPapers(selectedExamId);
+      if (res.success && Array.isArray(res.papers)) {
+        setUploadedPapers(res.papers);
+        setSelectedPaperIds(res.papers.map(p => p.id));
+        setActionMessage({
+          type: 'success',
+          text: `Cloudinary sync successful! Imported ${res.importedCount} new documents. Total ${res.papers.length} drafts ready.`,
+        });
+      }
+    } catch (e: any) {
+      console.warn('Failed to sync from Cloudinary API:', e);
+      await loadUploadedPapers(selectedExamId);
     } finally {
       setLoadingPapers(false);
     }
@@ -398,12 +417,12 @@ export const UniversityFormatGenerator: React.FC<UniversityFormatGeneratorProps>
             )}
             <button
               type="button"
-              onClick={() => loadUploadedPapers(selectedExamId)}
-              title="Refresh uploaded drafts"
-              className="p-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white border border-slate-700 cursor-pointer transition-all flex items-center gap-1.5 text-xs font-bold"
+              onClick={handleSyncCloudinary}
+              title="Sync & import from Cloudinary Account"
+              className="p-1.5 px-3 rounded-lg bg-sky-600 hover:bg-sky-500 text-white font-bold border border-sky-500/40 cursor-pointer transition-all flex items-center gap-1.5 text-xs shadow-md shadow-sky-600/20"
             >
               <RefreshCw className={`w-3.5 h-3.5 ${loadingPapers ? 'animate-spin' : ''}`} />
-              <span>Sync</span>
+              <span>Sync Cloudinary</span>
             </button>
           </div>
         </div>
@@ -412,15 +431,23 @@ export const UniversityFormatGenerator: React.FC<UniversityFormatGeneratorProps>
         {loadingPapers ? (
           <div className="p-8 text-center text-slate-400 text-xs flex items-center justify-center gap-2">
             <RefreshCw className="w-4 h-4 animate-spin text-rose-500" />
-            <span>Fetching recently uploaded papers from Cloudinary vault...</span>
+            <span>Syncing & fetching recently uploaded papers from Cloudinary vault...</span>
           </div>
         ) : uploadedPapers.length === 0 ? (
-          <div className="p-8 rounded-xl bg-slate-800/50 border border-dashed border-slate-700 text-center space-y-2.5">
-            <UploadCloud className="w-9 h-9 text-slate-500 mx-auto" />
-            <div className="text-xs font-bold text-slate-200">No draft question papers uploaded yet</div>
+          <div className="p-8 rounded-xl bg-slate-800/50 border border-dashed border-slate-700 text-center space-y-3">
+            <UploadCloud className="w-9 h-9 text-sky-400 mx-auto" />
+            <div className="text-xs font-bold text-slate-200">No draft question papers indexed in local bank yet</div>
             <p className="text-[11px] text-slate-400 max-w-md mx-auto">
-              Go to <strong className="text-rose-400">Exam Workflow</strong> tab to upload your master question paper PDFs. They will be stored in Cloudinary and show up here instantly.
+              Click below to sync your Cloudinary account assets, or upload PDFs in <strong className="text-rose-400">Exam Workflow</strong>.
             </p>
+            <button
+              type="button"
+              onClick={handleSyncCloudinary}
+              className="px-4 py-2 bg-sky-600 hover:bg-sky-500 text-white rounded-xl font-bold text-xs shadow-lg shadow-sky-600/20 inline-flex items-center gap-2 cursor-pointer transition-all"
+            >
+              <Cloud className="w-4 h-4" />
+              <span>Import Documents from Cloudinary Vault</span>
+            </button>
           </div>
         ) : (
           <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3.5">
