@@ -152,3 +152,23 @@ export async function getCloudinaryHealth(): Promise<{
   }
 }
 
+export async function deleteAssetFromCloudinary(publicId: string): Promise<boolean> {
+  try {
+    const config = getCloudinaryConfig();
+    if (!config || !publicId) return false;
+
+    try {
+      await cloudinary.uploader.destroy(publicId, { resource_type: 'raw', invalidate: true });
+    } catch {}
+    try {
+      await cloudinary.uploader.destroy(publicId, { resource_type: 'image', invalidate: true });
+    } catch {}
+
+    return true;
+  } catch (err: any) {
+    console.warn('[ZeroLeak Cloudinary] Failed to delete asset from Cloudinary:', err?.message);
+    return false;
+  }
+}
+
+

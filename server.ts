@@ -10,7 +10,7 @@ import jwt from 'jsonwebtoken';
 import bcrypt from 'bcryptjs';
 import { v4 as uuidv4 } from 'uuid';
 import { getDb, executeQuery, executeRun, saveDb, resetDatabase, lookupUserInPostgres, lookupAuthorizedUserInPostgres, getPostgresPool } from './server/db.ts';
-import { uploadDocumentToCloudinary, listAllCloudinaryAssets, getCloudinaryHealth } from './server/cloudinary.ts';
+import { uploadDocumentToCloudinary, listAllCloudinaryAssets, getCloudinaryHealth, deleteAssetFromCloudinary } from './server/cloudinary.ts';
 import {
   encryptExamPaper,
   decryptExamPaper,
@@ -4438,18 +4438,43 @@ async function startServer() {
     }
   });
 
+  // Ensure deleted_vault_assets table exists
+  async function ensureDeletedVaultAssetsTable(db: any) {
+    executeRun(
+      db,
+      `CREATE TABLE IF NOT EXISTS deleted_vault_assets (
+        public_id TEXT PRIMARY KEY,
+        cloudinary_url TEXT,
+        deleted_at TEXT NOT NULL
+      )`
+    );
+  }
+
   // Get all uploaded question papers with Cloudinary metadata + auto-import
   app.get('/api/question-papers', authenticateToken, async (req: Request, res: Response) => {
     try {
       const db = await getDb();
+      await ensureDeletedVaultAssetsTable(db);
       const { exam_id } = req.query;
       const orgId = req.user?.org_id || '';
 
-      // Auto-sync any assets from Cloudinary account that are not yet in question_papers table
+      // Get set of deleted public_ids so they are NEVER re-imported
+      const deletedRows = executeQuery(db, `SELECT public_id, cloudinary_url FROM deleted_vault_assets`);
+      const deletedSet = new Set<string>();
+      deletedRows.forEach((r: any) => {
+        if (r.public_id) deletedSet.add(r.public_id);
+        if (r.cloudinary_url) deletedSet.add(r.cloudinary_url);
+      });
+
+      // Auto-sync any assets from Cloudinary account that are not yet in question_papers and NOT in deletedSet
       try {
         const cloudAssets = await listAllCloudinaryAssets();
         let newImported = false;
         for (const asset of cloudAssets) {
+          if (deletedSet.has(asset.public_id) || deletedSet.has(asset.secure_url)) {
+            continue;
+          }
+
           const existing = executeQuery(
             db,
             `SELECT id FROM question_papers WHERE cloudinary_public_id = ? OR cloudinary_url = ?`,
@@ -4508,12 +4533,25 @@ async function startServer() {
   app.post('/api/question-papers/sync-cloudinary', authenticateToken, async (req: Request, res: Response) => {
     try {
       const db = await getDb();
+      await ensureDeletedVaultAssetsTable(db);
       const orgId = req.user?.org_id || '';
       const { exam_id } = req.body || {};
+
+      const deletedRows = executeQuery(db, `SELECT public_id, cloudinary_url FROM deleted_vault_assets`);
+      const deletedSet = new Set<string>();
+      deletedRows.forEach((r: any) => {
+        if (r.public_id) deletedSet.add(r.public_id);
+        if (r.cloudinary_url) deletedSet.add(r.cloudinary_url);
+      });
+
       const cloudAssets = await listAllCloudinaryAssets();
       let importedCount = 0;
 
       for (const asset of cloudAssets) {
+        if (deletedSet.has(asset.public_id) || deletedSet.has(asset.secure_url)) {
+          continue;
+        }
+
         const existing = executeQuery(
           db,
           `SELECT id FROM question_papers WHERE cloudinary_public_id = ? OR cloudinary_url = ?`,
@@ -4579,7 +4617,23 @@ async function startServer() {
   app.delete('/api/question-papers/:id', authenticateToken, async (req: Request, res: Response) => {
     try {
       const db = await getDb();
+      await ensureDeletedVaultAssetsTable(db);
       const { id } = req.params;
+
+      const paper = executeQuery(db, `SELECT * FROM question_papers WHERE id = ?`, [id])[0];
+      if (paper) {
+        const pubId = paper.cloudinary_public_id || paper.id;
+        const cloudUrl = paper.cloudinary_url || '';
+        executeRun(
+          db,
+          `INSERT OR REPLACE INTO deleted_vault_assets (public_id, cloudinary_url, deleted_at) VALUES (?, ?, ?)`,
+          [pubId, cloudUrl, new Date().toISOString()]
+        );
+        if (paper.cloudinary_public_id) {
+          deleteAssetFromCloudinary(paper.cloudinary_public_id).catch(() => {});
+        }
+      }
+
       executeRun(db, `DELETE FROM question_paper_pages WHERE paper_id = ?`, [id]);
       executeRun(db, `DELETE FROM questions WHERE question_paper_id = ?`, [id]);
       executeRun(db, `DELETE FROM question_papers WHERE id = ?`, [id]);
@@ -4594,9 +4648,23 @@ async function startServer() {
   app.post('/api/question-papers/bulk-delete', authenticateToken, async (req: Request, res: Response) => {
     try {
       const db = await getDb();
+      await ensureDeletedVaultAssetsTable(db);
       const { ids } = req.body || {};
       if (Array.isArray(ids) && ids.length > 0) {
         for (const id of ids) {
+          const paper = executeQuery(db, `SELECT * FROM question_papers WHERE id = ?`, [id])[0];
+          if (paper) {
+            const pubId = paper.cloudinary_public_id || paper.id;
+            const cloudUrl = paper.cloudinary_url || '';
+            executeRun(
+              db,
+              `INSERT OR REPLACE INTO deleted_vault_assets (public_id, cloudinary_url, deleted_at) VALUES (?, ?, ?)`,
+              [pubId, cloudUrl, new Date().toISOString()]
+            );
+            if (paper.cloudinary_public_id) {
+              deleteAssetFromCloudinary(paper.cloudinary_public_id).catch(() => {});
+            }
+          }
           executeRun(db, `DELETE FROM question_paper_pages WHERE paper_id = ?`, [id]);
           executeRun(db, `DELETE FROM questions WHERE question_paper_id = ?`, [id]);
           executeRun(db, `DELETE FROM question_papers WHERE id = ?`, [id]);

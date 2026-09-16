@@ -386,6 +386,14 @@ export const UniversityFormatGenerator: React.FC<UniversityFormatGeneratorProps>
   const theorySec1 = realTheory.slice(0, Math.ceil(realTheory.length / 2));
   const theorySec2 = realTheory.slice(Math.ceil(realTheory.length / 2));
 
+  // Determine if the current questions are seeded dummy questions or authentic generated questions
+  const isDummyPaper = allQs.some(q => 
+    q.id?.includes('Q-PAPER-SRC-NEET') || 
+    q.question_text?.includes('Source Paper Question') ||
+    q.options?.some((opt: string) => typeof opt === 'string' && opt.includes('Option Alpha for Q-PAPER'))
+  );
+  const hasRealPaper = !!currentPaperData && allQs.length > 0 && !isDummyPaper;
+
   // Determine current set letter
   const setLetter = ['P', 'Q', 'R', 'S'][activeSetIndex] || 'P';
 
@@ -851,308 +859,341 @@ export const UniversityFormatGenerator: React.FC<UniversityFormatGeneratorProps>
 
         {/* Right Column: Live Printable Paper Preview */}
         <div className="lg:col-span-2 space-y-4">
-          {/* Controls Bar */}
-          <div className="bg-slate-900 border border-slate-800 p-3.5 rounded-2xl shadow-xl flex flex-wrap items-center justify-between gap-3">
-            {/* Set Switcher */}
-            <div className="flex items-center gap-1.5">
-              <span className="text-xs font-bold text-slate-400 mr-1">Select Set:</span>
-              {['Set P', 'Set Q', 'Set R', 'Set S'].map((setName, sIdx) => (
+          {!hasRealPaper ? (
+            <div className="bg-slate-900 border border-slate-800 p-12 rounded-2xl shadow-xl text-center space-y-5">
+              <div className="w-16 h-16 rounded-2xl bg-gradient-to-br from-rose-500/20 to-sky-500/20 border border-rose-500/30 text-rose-400 flex items-center justify-center mx-auto shadow-inner">
+                <Sparkles className="w-8 h-8" />
+              </div>
+              <div className="space-y-1.5 max-w-md mx-auto">
+                <h3 className="text-base font-extrabold text-white">No Examination Paper Generated Yet</h3>
+                <p className="text-xs text-slate-400 leading-relaxed">
+                  Select your uploaded source draft papers from the vault above and click <strong className="text-rose-400">"Generate Real Paper Sets"</strong> (or <strong className="text-sky-400">"Generate from Combination"</strong>) to compile 4 authentic, randomized sets (Set P, Set Q, Set R, Set S) using Ollama AI.
+                </p>
+              </div>
+
+              {selectedPaperIds.length > 0 && selectedExamId ? (
                 <button
-                  key={setName}
                   type="button"
-                  onClick={() => setActiveSetIndex(sIdx)}
-                  className={`px-3 py-1.5 rounded-lg text-xs font-black cursor-pointer transition-all ${
-                    activeSetIndex === sIdx
-                      ? 'bg-rose-600 text-white shadow-sm'
+                  onClick={() => triggerUniversityGenerator(selectedExamId, selectedPaperIds)}
+                  disabled={generating}
+                  className="px-6 py-3 bg-gradient-to-r from-rose-600 to-rose-500 hover:from-rose-500 hover:to-rose-400 text-white font-bold text-xs rounded-xl shadow-lg shadow-rose-600/30 inline-flex items-center gap-2 cursor-pointer transition-all disabled:opacity-50"
+                >
+                  <Zap className={`w-4 h-4 ${generating ? 'animate-spin' : ''}`} />
+                  <span>{generating ? 'Compiling Real Sets with Ollama...' : `Generate Real Sets from ${selectedPaperIds.length} Selected Drafts`}</span>
+                </button>
+              ) : (
+                <div className="inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-slate-800/80 border border-slate-700 text-slate-400 text-xs font-medium">
+                  <Info className="w-4 h-4 text-sky-400" />
+                  <span>Select at least 1 draft paper above to enable generation</span>
+                </div>
+              )}
+            </div>
+          ) : (
+            <>
+              {/* Controls Bar */}
+              <div className="bg-slate-900 border border-slate-800 p-3.5 rounded-2xl shadow-xl flex flex-wrap items-center justify-between gap-3">
+                {/* Set Switcher */}
+                <div className="flex items-center gap-1.5">
+                  <span className="text-xs font-bold text-slate-400 mr-1">Select Set:</span>
+                  {['Set P', 'Set Q', 'Set R', 'Set S'].map((setName, sIdx) => (
+                    <button
+                      key={setName}
+                      type="button"
+                      onClick={() => setActiveSetIndex(sIdx)}
+                      className={`px-3 py-1.5 rounded-lg text-xs font-black cursor-pointer transition-all ${
+                        activeSetIndex === sIdx
+                          ? 'bg-rose-600 text-white shadow-sm'
+                          : 'bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700'
+                      }`}
+                    >
+                      {setName}
+                    </button>
+                  ))}
+                </div>
+
+                {/* Answer Key Toggle */}
+                <button
+                  type="button"
+                  onClick={() => setShowAnswerKey(!showAnswerKey)}
+                  className={`px-3 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1.5 cursor-pointer transition-all ${
+                    showAnswerKey
+                      ? 'bg-amber-500/20 text-amber-300 border border-amber-500/40'
                       : 'bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700'
                   }`}
                 >
-                  {setName}
+                  {showAnswerKey ? <Eye className="w-3.5 h-3.5" /> : <EyeOff className="w-3.5 h-3.5" />}
+                  <span>{showAnswerKey ? 'Answer Key ON' : 'Answer Key OFF'}</span>
                 </button>
-              ))}
-            </div>
+              </div>
 
-            {/* Answer Key Toggle */}
-            <button
-              type="button"
-              onClick={() => setShowAnswerKey(!showAnswerKey)}
-              className={`px-3 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1.5 cursor-pointer transition-all ${
-                showAnswerKey
-                  ? 'bg-amber-500/20 text-amber-300 border border-amber-500/40'
-                  : 'bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700'
-              }`}
-            >
-              {showAnswerKey ? <Eye className="w-3.5 h-3.5" /> : <EyeOff className="w-3.5 h-3.5" />}
-              <span>{showAnswerKey ? 'Answer Key ON' : 'Answer Key OFF'}</span>
-            </button>
-          </div>
+              {/* Paper Preview Box */}
+              <div className="bg-white text-slate-900 p-6 sm:p-10 rounded-2xl shadow-2xl border border-slate-300 space-y-6 max-w-full overflow-hidden relative">
+                {/* Official University Header */}
+                <div className="space-y-3 border-b-2 border-slate-900 pb-4">
+                  <div className="flex items-center justify-between font-mono text-xs font-bold text-slate-900">
+                    <div className="flex items-center gap-2">
+                      <span className="border border-slate-900 px-2 py-1 text-xs font-black">Seat No.</span>
+                      <div className="w-28 h-6 border border-slate-900 flex items-center px-2 text-[10px] text-slate-400">
+                        [ Seat No ]
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-3">
+                      <span className="text-sm font-black tracking-wider uppercase text-slate-900">
+                        {selectedExam?.code || selectedExam?.paper_code || 'EXAM-2026'}
+                      </span>
+                      <div className="flex items-center border-2 border-slate-900 rounded overflow-hidden">
+                        <span className="bg-slate-900 text-white text-xs font-black px-2 py-0.5">Set</span>
+                        <span className="text-sm font-black px-2.5 py-0.5 text-slate-950 bg-slate-100">
+                          {setLetter}
+                        </span>
+                      </div>
+                    </div>
+                  </div>
 
-          {/* Paper Preview Box */}
-          <div className="bg-white text-slate-900 p-6 sm:p-10 rounded-2xl shadow-2xl border border-slate-300 space-y-6 max-w-full overflow-hidden relative">
-            {/* Official University Header */}
-            <div className="space-y-3 border-b-2 border-slate-900 pb-4">
-              <div className="flex items-center justify-between font-mono text-xs font-bold text-slate-900">
-                <div className="flex items-center gap-2">
-                  <span className="border border-slate-900 px-2 py-1 text-xs font-black">Seat No.</span>
-                  <div className="w-28 h-6 border border-slate-900 flex items-center px-2 text-[10px] text-slate-400">
-                    [ Seat No ]
+                  <div className="text-center space-y-1">
+                    <div className="text-[10px] font-black uppercase tracking-widest text-slate-500">
+                      CONFIDENTIAL &bull; UNIVERSITY BOARD EXAMINATION &bull; PROTECTED UNDER ZEROLEAK VAULT
+                    </div>
+                    <h1 className="text-lg font-black text-slate-950 uppercase leading-snug">
+                      {selectedExam?.university_name || 'Autonomous State Examination Board'}
+                    </h1>
+                    <h2 className="text-sm font-extrabold text-slate-900 uppercase">
+                      {selectedExam?.name || 'Annual Examination 2026'}
+                    </h2>
+                    <div className="text-xs font-bold text-slate-800 uppercase">
+                      Subject: {selectedExam?.subject || 'Core Engineering'} {selectedExam?.blueprint_pattern ? `• Pattern: ${selectedExam.blueprint_pattern}` : ''}
+                    </div>
+
+                    <div className="flex flex-wrap items-center justify-between pt-2 text-xs font-bold text-slate-900 border-t border-slate-300 mt-2 font-mono">
+                      <span>Day & Date: <strong>{new Date().toLocaleDateString('en-US', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })}</strong></span>
+                      <span>Duration: <strong>{selectedExam?.duration_minutes || 180} Minutes</strong></span>
+                      <span>Max. Marks: <strong>{selectedExam?.total_marks || 70} Marks</strong></span>
+                    </div>
+                  </div>
+
+                  <div className="p-3 bg-slate-50 rounded-lg border border-slate-300 text-xs text-slate-800 space-y-1">
+                    <div className="font-extrabold text-slate-950 uppercase text-[11px]">
+                      Instructions:
+                    </div>
+                    <ol className="list-decimal list-inside space-y-0.5 text-[11px] leading-relaxed">
+                      <li>Q. No. 1 is compulsory. It should be solved in the first 30 minutes in answer book. Each question carries marks as indicated.</li>
+                      <li>Mention question paper set <strong>({setLetter})</strong> clearly on top of the answer book.</li>
+                      <li>Figures to the right indicate full marks.</li>
+                      <li>Assume suitable data wherever needed and mention it clearly.</li>
+                      {selectedExam?.marking_scheme && <li>{selectedExam.marking_scheme}</li>}
+                    </ol>
                   </div>
                 </div>
-                <div className="flex items-center gap-3">
-                  <span className="text-sm font-black tracking-wider uppercase text-slate-900">
-                    {selectedExam?.code || selectedExam?.paper_code || 'EXAM-2026'}
-                  </span>
-                  <div className="flex items-center border-2 border-slate-900 rounded overflow-hidden">
-                    <span className="bg-slate-900 text-white text-xs font-black px-2 py-0.5">Set</span>
-                    <span className="text-sm font-black px-2.5 py-0.5 text-slate-950 bg-slate-100">
-                      {setLetter}
-                    </span>
+
+                {/* MCQ Section */}
+                <div className="space-y-3 border-b border-slate-300 pb-5">
+                  <div className="flex items-center justify-between font-bold text-xs border-b border-slate-400 pb-1 text-slate-900 font-mono">
+                    <span className="uppercase text-sm font-black">MCQ / Objective Type Questions</span>
+                    <span>Duration: 30 Minutes &nbsp;|&nbsp; Marks: {realMcqs.length || 14}</span>
                   </div>
-                </div>
-              </div>
 
-              <div className="text-center space-y-1">
-                <div className="text-[10px] font-black uppercase tracking-widest text-slate-500">
-                  CONFIDENTIAL &bull; UNIVERSITY BOARD EXAMINATION &bull; PROTECTED UNDER ZEROLEAK VAULT
-                </div>
-                <h1 className="text-lg font-black text-slate-950 uppercase leading-snug">
-                  {selectedExam?.university_name || 'Autonomous State Examination Board'}
-                </h1>
-                <h2 className="text-sm font-extrabold text-slate-900 uppercase">
-                  {selectedExam?.name || 'Annual Examination 2026'}
-                </h2>
-                <div className="text-xs font-bold text-slate-800 uppercase">
-                  Subject: {selectedExam?.subject || 'Core Engineering'} {selectedExam?.blueprint_pattern ? `• Pattern: ${selectedExam.blueprint_pattern}` : ''}
-                </div>
+                  <div className="flex items-center justify-between font-bold text-sm text-slate-950">
+                    <span>Q.1 Choose the correct alternatives from the options.</span>
+                    <span className="font-mono text-sm font-black pr-2">{realMcqs.length || 14}</span>
+                  </div>
 
-                <div className="flex flex-wrap items-center justify-between pt-2 text-xs font-bold text-slate-900 border-t border-slate-300 mt-2 font-mono">
-                  <span>Day & Date: <strong>{new Date().toLocaleDateString('en-US', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })}</strong></span>
-                  <span>Duration: <strong>{selectedExam?.duration_minutes || 180} Minutes</strong></span>
-                  <span>Max. Marks: <strong>{selectedExam?.total_marks || 70} Marks</strong></span>
-                </div>
-              </div>
+                  <div className="space-y-4 pl-2">
+                    {realMcqs.length > 0 ? (
+                      realMcqs.map((item, idx) => {
+                        let opts: any[] = [];
+                        try {
+                          opts = Array.isArray(item.options) ? item.options : (item.options_json ? JSON.parse(item.options_json) : []);
+                        } catch {
+                          opts = [];
+                        }
 
-              <div className="p-3 bg-slate-50 rounded-lg border border-slate-300 text-xs text-slate-800 space-y-1">
-                <div className="font-extrabold text-slate-950 uppercase text-[11px]">
-                  Instructions:
-                </div>
-                <ol className="list-decimal list-inside space-y-0.5 text-[11px] leading-relaxed">
-                  <li>Q. No. 1 is compulsory. It should be solved in the first 30 minutes in answer book. Each question carries marks as indicated.</li>
-                  <li>Mention question paper set <strong>({setLetter})</strong> clearly on top of the answer book.</li>
-                  <li>Figures to the right indicate full marks.</li>
-                  <li>Assume suitable data wherever needed and mention it clearly.</li>
-                  {selectedExam?.marking_scheme && <li>{selectedExam.marking_scheme}</li>}
-                </ol>
-              </div>
-            </div>
-
-            {/* MCQ Section */}
-            <div className="space-y-3 border-b border-slate-300 pb-5">
-              <div className="flex items-center justify-between font-bold text-xs border-b border-slate-400 pb-1 text-slate-900 font-mono">
-                <span className="uppercase text-sm font-black">MCQ / Objective Type Questions</span>
-                <span>Duration: 30 Minutes &nbsp;|&nbsp; Marks: {realMcqs.length || 14}</span>
-              </div>
-
-              <div className="flex items-center justify-between font-bold text-sm text-slate-950">
-                <span>Q.1 Choose the correct alternatives from the options.</span>
-                <span className="font-mono text-sm font-black pr-2">{realMcqs.length || 14}</span>
-              </div>
-
-              <div className="space-y-4 pl-2">
-                {realMcqs.length > 0 ? (
-                  realMcqs.map((item, idx) => {
-                    let opts: any[] = [];
-                    try {
-                      opts = Array.isArray(item.options) ? item.options : (item.options_json ? JSON.parse(item.options_json) : []);
-                    } catch {
-                      opts = [];
-                    }
-
-                    return (
-                      <div key={item.id || idx} className="space-y-1.5 text-xs">
-                        <div className="flex items-start gap-1.5 font-semibold text-slate-950">
-                          <span className="font-bold shrink-0">{idx + 1})</span>
-                          <div>
-                            <LaTeXText text={item.content_text || ''} />
-                          </div>
-                        </div>
-
-                        {/* Diagram if present */}
-                        {(item.diagram_url || item.image_url) && (
-                          <div className="my-2 pl-5">
-                            <img
-                              src={item.diagram_url || item.image_url}
-                              alt={`Diagram for Q.${idx + 1}`}
-                              className="max-h-48 border border-slate-200 rounded object-contain bg-white shadow-xs"
-                            />
-                          </div>
-                        )}
-
-                        {/* Options */}
-                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-1.5 pl-5 text-slate-800">
-                          {opts.map((opt, oIdx) => {
-                            const optText = typeof opt === 'string' ? opt : (opt.text || opt.label || '');
-                            const optLabel = typeof opt === 'object' && opt.label ? opt.label : String.fromCharCode(97 + oIdx);
-                            const isCorrect = item.correct_answer && (
-                              item.correct_answer.toLowerCase() === optLabel.toLowerCase() ||
-                              item.correct_answer === String.fromCharCode(65 + oIdx)
-                            );
-
-                            return (
-                              <div key={oIdx} className="flex items-start gap-1.5">
-                                <span className="font-bold shrink-0">{optLabel})</span>
-                                <div>
-                                  <LaTeXText text={optText} />
-                                </div>
-                                {showAnswerKey && isCorrect && (
-                                  <span className="ml-1 text-[9px] font-black text-emerald-700 bg-emerald-100 px-1 py-0.5 rounded shrink-0">
-                                    [CORRECT]
-                                  </span>
-                                )}
+                        return (
+                          <div key={item.id || idx} className="space-y-1.5 text-xs">
+                            <div className="flex items-start gap-1.5 font-semibold text-slate-950">
+                              <span className="font-bold shrink-0">{idx + 1})</span>
+                              <div>
+                                <LaTeXText text={item.content_text || ''} />
                               </div>
-                            );
-                          })}
-                        </div>
-                      </div>
-                    );
-                  })
-                ) : (
-                  <div className="text-xs text-slate-500 italic">
-                    Click "Generate Paper from Combination" above to populate real MCQs from your selected uploaded draft papers.
-                  </div>
-                )}
-              </div>
-            </div>
-
-            {/* Section – I Theory */}
-            <div className="space-y-3 border-b border-slate-300 pb-5">
-              <div className="flex items-center justify-between font-black text-sm border-b border-slate-400 pb-1 text-slate-950 uppercase font-mono">
-                <span>Section – I (Descriptive & Analytical)</span>
-                <span>Max. Marks: 28</span>
-              </div>
-
-              {theorySec1.length > 0 ? (
-                <div className="space-y-4">
-                  <div className="flex items-center justify-between font-bold text-sm text-slate-950">
-                    <span>Q.2 Answer the following questions.</span>
-                    <span className="font-mono text-sm font-black pr-2">16</span>
-                  </div>
-                  <div className="space-y-2.5 pl-4 text-xs font-medium text-slate-900">
-                    {theorySec1.slice(0, 5).map((tQ, tIdx) => (
-                      <div key={tQ.id || tIdx} className="space-y-1">
-                        <div className="flex items-start gap-1.5">
-                          <span className="font-bold shrink-0">{String.fromCharCode(97 + tIdx)})</span>
-                          <div>
-                            <LaTeXText text={tQ.content_text || ''} />
-                          </div>
-                        </div>
-                        {(tQ.diagram_url || tQ.image_url) && (
-                          <div className="my-1.5 pl-4">
-                            <img
-                              src={tQ.diagram_url || tQ.image_url}
-                              alt={`Diagram ${tIdx + 1}`}
-                              className="max-h-40 border border-slate-200 rounded object-contain bg-white"
-                            />
-                          </div>
-                        )}
-                      </div>
-                    ))}
-                  </div>
-
-                  {theorySec1.length > 5 && (
-                    <div className="space-y-2.5 pt-2">
-                      <div className="flex items-center justify-between font-bold text-sm text-slate-950">
-                        <span>Q.3 Answer the following questions in detail.</span>
-                        <span className="font-mono text-sm font-black pr-2">12</span>
-                      </div>
-                      <div className="space-y-2 pl-4 text-xs font-medium text-slate-900">
-                        {theorySec1.slice(5).map((tQ, tIdx) => (
-                          <div key={tQ.id || tIdx} className="flex items-start gap-1.5">
-                            <span className="font-bold shrink-0">{String.fromCharCode(97 + tIdx)})</span>
-                            <div>
-                              <LaTeXText text={tQ.content_text || ''} />
                             </div>
+
+                            {/* Diagram if present */}
+                            {(item.diagram_url || item.image_url) && (
+                              <div className="my-2 pl-5">
+                                <img
+                                  src={item.diagram_url || item.image_url}
+                                  alt={`Diagram for Q.${idx + 1}`}
+                                  className="max-h-48 border border-slate-200 rounded object-contain bg-white shadow-xs"
+                                />
+                              </div>
+                            )}
+
+                            {/* Options */}
+                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-1.5 pl-5 text-slate-800">
+                              {opts.map((opt, oIdx) => {
+                                const optText = typeof opt === 'string' ? opt : (opt.text || opt.label || '');
+                                const optLabel = typeof opt === 'object' && opt.label ? opt.label : String.fromCharCode(97 + oIdx);
+                                const isCorrect = item.correct_answer && (
+                                  item.correct_answer.toLowerCase() === optLabel.toLowerCase() ||
+                                  item.correct_answer === String.fromCharCode(65 + oIdx)
+                                );
+
+                                return (
+                                  <div key={oIdx} className="flex items-start gap-1.5">
+                                    <span className="font-bold shrink-0">{optLabel})</span>
+                                    <div>
+                                      <LaTeXText text={optText} />
+                                    </div>
+                                    {showAnswerKey && isCorrect && (
+                                      <span className="ml-1 text-[9px] font-black text-emerald-700 bg-emerald-100 px-1 py-0.5 rounded shrink-0">
+                                        [CORRECT]
+                                      </span>
+                                    )}
+                                  </div>
+                                );
+                              })}
+                            </div>
+                          </div>
+                        );
+                      })
+                    ) : (
+                      <div className="text-xs text-slate-500 italic">
+                        No MCQs formatted yet for this set.
+                      </div>
+                    )}
+                  </div>
+                </div>
+
+                {/* Section – I Theory */}
+                <div className="space-y-3 border-b border-slate-300 pb-5">
+                  <div className="flex items-center justify-between font-black text-sm border-b border-slate-400 pb-1 text-slate-950 uppercase font-mono">
+                    <span>Section – I (Theory & Analysis)</span>
+                    <span>Max. Marks: 28</span>
+                  </div>
+
+                  {theorySec1.length > 0 ? (
+                    <div className="space-y-4">
+                      <div className="flex items-center justify-between font-bold text-sm text-slate-950">
+                        <span>Q.2 Answer the following questions.</span>
+                        <span className="font-mono text-sm font-black pr-2">16</span>
+                      </div>
+                      <div className="space-y-2.5 pl-4 text-xs font-medium text-slate-900">
+                        {theorySec1.slice(0, 5).map((tQ, tIdx) => (
+                          <div key={tQ.id || tIdx} className="space-y-1">
+                            <div className="flex items-start gap-1.5">
+                              <span className="font-bold shrink-0">{String.fromCharCode(97 + tIdx)})</span>
+                              <div>
+                                <LaTeXText text={tQ.content_text || ''} />
+                              </div>
+                            </div>
+                            {(tQ.diagram_url || tQ.image_url) && (
+                              <div className="my-1.5 pl-4">
+                                <img
+                                  src={tQ.diagram_url || tQ.image_url}
+                                  alt={`Diagram ${tIdx + 1}`}
+                                  className="max-h-40 border border-slate-200 rounded object-contain bg-white"
+                                />
+                              </div>
+                            )}
                           </div>
                         ))}
                       </div>
+
+                      {theorySec1.length > 5 && (
+                        <div className="space-y-2.5 pt-2">
+                          <div className="flex items-center justify-between font-bold text-sm text-slate-950">
+                            <span>Q.3 Answer the following questions in detail.</span>
+                            <span className="font-mono text-sm font-black pr-2">12</span>
+                          </div>
+                          <div className="space-y-2 pl-4 text-xs font-medium text-slate-900">
+                            {theorySec1.slice(5).map((tQ, tIdx) => (
+                              <div key={tQ.id || tIdx} className="flex items-start gap-1.5">
+                                <span className="font-bold shrink-0">{String.fromCharCode(97 + tIdx)})</span>
+                                <div>
+                                  <LaTeXText text={tQ.content_text || ''} />
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  ) : (
+                    <div className="text-xs text-slate-500 italic">
+                      Click "Generate Paper from Combination" above to populate real theory questions.
                     </div>
                   )}
                 </div>
-              ) : (
-                <div className="text-xs text-slate-500 italic">
-                  Click "Generate Paper from Combination" above to populate real theory questions.
-                </div>
-              )}
-            </div>
 
-            {/* Section – II Theory */}
-            <div className="space-y-3 border-b border-slate-300 pb-5">
-              <div className="flex items-center justify-between font-black text-sm border-b border-slate-400 pb-1 text-slate-950 uppercase font-mono">
-                <span>Section – II (Applications & Problems)</span>
-                <span>Max. Marks: 28</span>
-              </div>
-
-              {theorySec2.length > 0 ? (
-                <div className="space-y-4">
-                  <div className="flex items-center justify-between font-bold text-sm text-slate-950">
-                    <span>Q.4 Answer the following questions.</span>
-                    <span className="font-mono text-sm font-black pr-2">16</span>
-                  </div>
-                  <div className="space-y-2.5 pl-4 text-xs font-medium text-slate-900">
-                    {theorySec2.slice(0, 5).map((tQ, tIdx) => (
-                      <div key={tQ.id || tIdx} className="space-y-1">
-                        <div className="flex items-start gap-1.5">
-                          <span className="font-bold shrink-0">{String.fromCharCode(97 + tIdx)})</span>
-                          <div>
-                            <LaTeXText text={tQ.content_text || ''} />
-                          </div>
-                        </div>
-                        {(tQ.diagram_url || tQ.image_url) && (
-                          <div className="my-1.5 pl-4">
-                            <img
-                              src={tQ.diagram_url || tQ.image_url}
-                              alt={`Diagram ${tIdx + 1}`}
-                              className="max-h-40 border border-slate-200 rounded object-contain bg-white"
-                            />
-                          </div>
-                        )}
-                      </div>
-                    ))}
+                {/* Section – II Theory */}
+                <div className="space-y-3 border-b border-slate-300 pb-5">
+                  <div className="flex items-center justify-between font-black text-sm border-b border-slate-400 pb-1 text-slate-950 uppercase font-mono">
+                    <span>Section – II (Applications & Problems)</span>
+                    <span>Max. Marks: 28</span>
                   </div>
 
-                  {theorySec2.length > 5 && (
-                    <div className="space-y-2.5 pt-2">
+                  {theorySec2.length > 0 ? (
+                    <div className="space-y-4">
                       <div className="flex items-center justify-between font-bold text-sm text-slate-950">
-                        <span>Q.5 Solve / Explain the following.</span>
-                        <span className="font-mono text-sm font-black pr-2">12</span>
+                        <span>Q.4 Answer the following questions.</span>
+                        <span className="font-mono text-sm font-black pr-2">16</span>
                       </div>
-                      <div className="space-y-2 pl-4 text-xs font-medium text-slate-900">
-                        {theorySec2.slice(5).map((tQ, tIdx) => (
-                          <div key={tQ.id || tIdx} className="flex items-start gap-1.5">
-                            <span className="font-bold shrink-0">{String.fromCharCode(97 + tIdx)})</span>
-                            <div>
-                              <LaTeXText text={tQ.content_text || ''} />
+                      <div className="space-y-2.5 pl-4 text-xs font-medium text-slate-900">
+                        {theorySec2.slice(0, 5).map((tQ, tIdx) => (
+                          <div key={tQ.id || tIdx} className="space-y-1">
+                            <div className="flex items-start gap-1.5">
+                              <span className="font-bold shrink-0">{String.fromCharCode(97 + tIdx)})</span>
+                              <div>
+                                <LaTeXText text={tQ.content_text || ''} />
+                              </div>
                             </div>
+                            {(tQ.diagram_url || tQ.image_url) && (
+                              <div className="my-1.5 pl-4">
+                                <img
+                                  src={tQ.diagram_url || tQ.image_url}
+                                  alt={`Diagram ${tIdx + 1}`}
+                                  className="max-h-40 border border-slate-200 rounded object-contain bg-white"
+                                />
+                              </div>
+                            )}
                           </div>
                         ))}
                       </div>
+
+                      {theorySec2.length > 5 && (
+                        <div className="space-y-2.5 pt-2">
+                          <div className="flex items-center justify-between font-bold text-sm text-slate-950">
+                            <span>Q.5 Solve / Explain the following.</span>
+                            <span className="font-mono text-sm font-black pr-2">12</span>
+                          </div>
+                          <div className="space-y-2 pl-4 text-xs font-medium text-slate-900">
+                            {theorySec2.slice(5).map((tQ, tIdx) => (
+                              <div key={tQ.id || tIdx} className="flex items-start gap-1.5">
+                                <span className="font-bold shrink-0">{String.fromCharCode(97 + tIdx)})</span>
+                                <div>
+                                  <LaTeXText text={tQ.content_text || ''} />
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  ) : (
+                    <div className="text-xs text-slate-500 italic">
+                      Click "Generate Paper from Combination" above to populate real theory questions.
                     </div>
                   )}
                 </div>
-              ) : (
-                <div className="text-xs text-slate-500 italic">
-                  Click "Generate Paper from Combination" above to populate real theory questions.
-                </div>
-              )}
-            </div>
 
-            {/* Paper Footer */}
-            <div className="pt-3 flex flex-wrap items-center justify-between text-[11px] text-slate-600 font-mono border-t-2 border-slate-900">
-              <div>Generated: {new Date().toLocaleDateString()}</div>
-              <div className="font-extrabold text-slate-900">*** END OF QUESTION PAPER ***</div>
-              <div>{selectedExam?.code || selectedExam?.paper_code || 'EXAM-2026'} (Set {setLetter})</div>
-            </div>
-          </div>
+                {/* Paper Footer */}
+                <div className="pt-3 flex flex-wrap items-center justify-between text-[11px] text-slate-600 font-mono border-t-2 border-slate-900">
+                  <div>Generated: {new Date().toLocaleDateString()}</div>
+                  <div className="font-extrabold text-slate-900">*** END OF QUESTION PAPER ***</div>
+                  <div>{selectedExam?.code || selectedExam?.paper_code || 'EXAM-2026'} (Set {setLetter})</div>
+                </div>
+              </div>
+            </>
+          )}
         </div>
       </div>
 
