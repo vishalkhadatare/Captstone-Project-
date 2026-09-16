@@ -303,162 +303,162 @@ export const QuestionPaperPdfModal: React.FC<QuestionPaperPdfModalProps> = ({
               </div>
 
               {/* Section 1: MCQ / Objective Type Questions */}
-              <div className="space-y-4 border-b border-slate-300 pb-6">
-                <div className="flex items-center justify-between font-bold text-xs border-b border-slate-400 pb-1 text-slate-900 font-mono">
-                  <span className="uppercase text-sm font-black">MCQ/Objective Type Questions</span>
-                  <span>Duration: 30 Minutes &nbsp;|&nbsp; Marks: 14</span>
-                </div>
+              {(() => {
+                const mcqs = paperData.questions.filter((q: any) => q.question_type === 'MCQ' || (Array.isArray(q.options) && q.options.length >= 2));
+                const theory = paperData.questions.filter((q: any) => q.question_type !== 'MCQ' && (!q.options || q.options.length < 2));
+                const theorySec1 = theory.slice(0, Math.ceil(theory.length / 2));
+                const theorySec2 = theory.slice(Math.ceil(theory.length / 2));
 
-                <div className="flex items-center justify-between font-bold text-sm text-slate-950">
-                  <span>Q.1 Choose the correct alternatives from the options.</span>
-                  <span className="font-mono text-sm font-black pr-2">14</span>
-                </div>
+                const activeMcqs = mcqs.length > 0 ? mcqs : paperData.questions.slice(0, 14);
 
-                <div className="space-y-3.5 pl-2">
-                  {paperData.questions.slice(0, 14).map((q, idx) => (
-                    <div key={q.id || idx} className="space-y-1.5 text-xs">
-                      <div className="flex items-start gap-2 font-semibold text-slate-950">
-                        <span className="font-bold shrink-0">{idx + 1})</span>
-                        <div className="whitespace-pre-wrap leading-snug">{q.content_text}</div>
+                return (
+                  <>
+                    <div className="space-y-4 border-b border-slate-300 pb-6">
+                      <div className="flex items-center justify-between font-bold text-xs border-b border-slate-400 pb-1 text-slate-900 font-mono">
+                        <span className="uppercase text-sm font-black">MCQ/Objective Type Questions</span>
+                        <span>Duration: 30 Minutes &nbsp;|&nbsp; Marks: {activeMcqs.length}</span>
                       </div>
 
-                      {/* Question Image / Diagram */}
-                      {(q.diagram_url || q.image_url) && (
-                        <div className="py-1 pl-6">
-                          <img
-                            src={q.diagram_url || q.image_url}
-                            alt="Question diagram"
-                            className="max-h-48 rounded border border-slate-300 object-contain bg-white"
-                          />
-                        </div>
-                      )}
+                      <div className="flex items-center justify-between font-bold text-sm text-slate-950">
+                        <span>Q.1 Choose the correct alternatives from the options.</span>
+                        <span className="font-mono text-sm font-black pr-2">{activeMcqs.length}</span>
+                      </div>
 
-                      {/* MCQ Options a), b), c), d) */}
-                      {Array.isArray(q.options) && q.options.length > 0 && (
-                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-1 pl-6 pt-0.5 text-slate-800">
-                          {q.options.map((opt: any, optIdx: number) => {
-                            const optText = typeof opt === 'string' ? opt : (opt?.text ?? opt?.value ?? '');
-                            const optLabel = opt?.label || String.fromCharCode(97 + optIdx);
-                            const isCorrect = q.correct_answer === optLabel || q.correct_answer === String.fromCharCode(65 + optIdx);
+                      <div className="space-y-3.5 pl-2">
+                        {activeMcqs.map((q, idx) => (
+                          <div key={q.id || idx} className="space-y-1.5 text-xs">
+                            <div className="flex items-start gap-2 font-semibold text-slate-950">
+                              <span className="font-bold shrink-0">{idx + 1})</span>
+                              <div className="whitespace-pre-wrap leading-snug">{q.content_text}</div>
+                            </div>
 
-                            return (
-                              <div key={optIdx} className="flex items-center gap-1.5 text-xs">
-                                <span className="font-bold shrink-0">{optLabel})</span>
-                                <span>{optText}</span>
-                                {showAnswerKey && isCorrect && (
-                                  <span className="ml-1 text-[9px] font-black uppercase text-emerald-700 bg-emerald-100 px-1 py-0.5 rounded">
-                                    [CORRECT]
-                                  </span>
-                                )}
+                            {/* MCQ Options a), b), c), d) */}
+                            {Array.isArray(q.options) && q.options.length > 0 && (
+                              <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-1 pl-6 pt-0.5 text-slate-800">
+                                {q.options.map((opt: any, optIdx: number) => {
+                                  const optText = typeof opt === 'string' ? opt : (opt?.text ?? opt?.value ?? '');
+                                  const optLabel = opt?.label || String.fromCharCode(97 + optIdx);
+                                  const isCorrect = q.correct_answer === optLabel || q.correct_answer === String.fromCharCode(65 + optIdx);
+
+                                  return (
+                                    <div key={optIdx} className="flex items-center gap-1.5 text-xs">
+                                      <span className="font-bold shrink-0">{optLabel})</span>
+                                      <span>{optText}</span>
+                                      {showAnswerKey && isCorrect && (
+                                        <span className="ml-1 text-[9px] font-black uppercase text-emerald-700 bg-emerald-100 px-1 py-0.5 rounded">
+                                          [CORRECT]
+                                        </span>
+                                      )}
+                                    </div>
+                                  );
+                                })}
                               </div>
-                            );
-                          })}
+                            )}
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+
+                    {/* Section – I Theory */}
+                    <div className="space-y-4 border-b border-slate-300 pb-6">
+                      <div className="flex items-center justify-between font-black text-sm border-b border-slate-400 pb-1 text-slate-950 uppercase font-mono">
+                        <span>Section – I (Theory & Core Concepts)</span>
+                        <span>Max. Marks: 28</span>
+                      </div>
+
+                      {theorySec1.length > 0 ? (
+                        <>
+                          <div className="space-y-2">
+                            <div className="flex items-center justify-between font-bold text-sm text-slate-950">
+                              <span>Q.2 Answer the following questions. (Attempt Any Four)</span>
+                              <span className="font-mono text-sm font-black pr-2">16</span>
+                            </div>
+                            <div className="space-y-2 pl-4 text-xs font-medium text-slate-900">
+                              {theorySec1.slice(0, 5).map((tQ, tIdx) => (
+                                <div key={tQ.id || tIdx} className="flex items-start justify-between gap-2">
+                                  <span>{String.fromCharCode(97 + tIdx)}) {tQ.content_text}</span>
+                                  <span className="font-mono font-bold shrink-0">[{tQ.marks || 4}]</span>
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+
+                          {theorySec1.length > 5 && (
+                            <div className="space-y-2 pt-2">
+                              <div className="flex items-center justify-between font-bold text-sm text-slate-950">
+                                <span>Q.3 Answer the following questions in detail. (Attempt Any Two)</span>
+                                <span className="font-mono text-sm font-black pr-2">12</span>
+                              </div>
+                              <div className="space-y-2 pl-4 text-xs font-medium text-slate-900">
+                                {theorySec1.slice(5).map((tQ, tIdx) => (
+                                  <div key={tQ.id || tIdx} className="flex items-start justify-between gap-2">
+                                    <span>{String.fromCharCode(97 + tIdx)}) {tQ.content_text}</span>
+                                    <span className="font-mono font-bold shrink-0">[{tQ.marks || 6}]</span>
+                                  </div>
+                                ))}
+                              </div>
+                            </div>
+                          )}
+                        </>
+                      ) : (
+                        <div className="space-y-2 pl-4 text-xs font-medium text-slate-900">
+                          <div>a) Explain system architecture and fundamental mechanisms of {exam.subject || 'the course'}.</div>
+                          <div>b) Compare the primary design techniques and evaluate their performance metrics.</div>
                         </div>
                       )}
                     </div>
-                  ))}
-                </div>
-              </div>
 
-              {/* Section – I */}
-              <div className="space-y-4 border-b border-slate-300 pb-6">
-                <div className="flex items-center justify-between font-black text-sm border-b border-slate-400 pb-1 text-slate-950 uppercase font-mono">
-                  <span>Section – I</span>
-                  <span>Max. Marks: 28</span>
-                </div>
+                    {/* Section – II Theory */}
+                    <div className="space-y-4 border-b border-slate-300 pb-6">
+                      <div className="flex items-center justify-between font-black text-sm border-b border-slate-400 pb-1 text-slate-950 uppercase font-mono">
+                        <span>Section – II (Analysis, Design & Applications)</span>
+                        <span>Max. Marks: 28</span>
+                      </div>
 
-                {/* Q.2 */}
-                <div className="space-y-2">
-                  <div className="flex items-center justify-between font-bold text-sm text-slate-950">
-                    <span>Q.2 Answer the following question. (Any Four)</span>
-                    <span className="font-mono text-sm font-black pr-2">16</span>
-                  </div>
-                  <div className="space-y-2 pl-4 text-xs font-medium text-slate-900">
-                    <div className="flex items-start justify-between gap-2">
-                      <span>a) Distinguish between the Raster Scan display and Random Scan display.</span>
+                      {theorySec2.length > 0 ? (
+                        <>
+                          <div className="space-y-2">
+                            <div className="flex items-center justify-between font-bold text-sm text-slate-950">
+                              <span>Q.4 Answer the following questions. (Attempt Any Four)</span>
+                              <span className="font-mono text-sm font-black pr-2">16</span>
+                            </div>
+                            <div className="space-y-2 pl-4 text-xs font-medium text-slate-900">
+                              {theorySec2.slice(0, 5).map((tQ, tIdx) => (
+                                <div key={tQ.id || tIdx} className="flex items-start justify-between gap-2">
+                                  <span>{String.fromCharCode(97 + tIdx)}) {tQ.content_text}</span>
+                                  <span className="font-mono font-bold shrink-0">[{tQ.marks || 4}]</span>
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+
+                          {theorySec2.length > 5 && (
+                            <div className="space-y-2 pt-2">
+                              <div className="flex items-center justify-between font-bold text-sm text-slate-950">
+                                <span>Q.5 Solve / Explain the following technical problems.</span>
+                                <span className="font-mono text-sm font-black pr-2">12</span>
+                              </div>
+                              <div className="space-y-2 pl-4 text-xs font-medium text-slate-900">
+                                {theorySec2.slice(5).map((tQ, tIdx) => (
+                                  <div key={tQ.id || tIdx} className="flex items-start justify-between gap-2">
+                                    <span>{String.fromCharCode(97 + tIdx)}) {tQ.content_text}</span>
+                                    <span className="font-mono font-bold shrink-0">[{tQ.marks || 6}]</span>
+                                  </div>
+                                ))}
+                              </div>
+                            </div>
+                          )}
+                        </>
+                      ) : (
+                        <div className="space-y-2 pl-4 text-xs font-medium text-slate-900">
+                          <div>a) Analyze edge cases and describe failure recovery strategies.</div>
+                          <div>b) Demonstrate mathematical proofs and algorithmic efficiency.</div>
+                        </div>
+                      )}
                     </div>
-                    <div className="flex items-start justify-between gap-2">
-                      <span>b) Explain 2D Rotation transformation with matrix representations.</span>
-                    </div>
-                    <div className="flex items-start justify-between gap-2">
-                      <span>c) Explain any four Computer graphics real-world applications.</span>
-                    </div>
-                    <div className="flex items-start justify-between gap-2">
-                      <span>d) Scale the polygon with coordinates P(2,5), Q(7,10), C(10,2) by 2 units in both x and y direction.</span>
-                    </div>
-                    <div className="flex items-start justify-between gap-2">
-                      <span>e) Explain Run Length Encoding in image compression.</span>
-                    </div>
-                  </div>
-                </div>
-
-                {/* Q.3 */}
-                <div className="space-y-2 pt-2">
-                  <div className="flex items-center justify-between font-bold text-sm text-slate-950">
-                    <span>Q.3 Answer the following question. (Any One)</span>
-                    <span className="font-mono text-sm font-black pr-2">06</span>
-                  </div>
-                  <div className="space-y-2 pl-4 text-xs font-medium text-slate-900">
-                    <div>a) Consider a line from (0,0) to (5,6). Use DDA algorithm to rasterize this line.</div>
-                    <div>b) Write Bresenham’s Circle generation algorithm with derivation.</div>
-                  </div>
-                </div>
-
-                {/* Q.4 */}
-                <div className="space-y-2 pt-2">
-                  <div className="flex items-center justify-between font-bold text-sm text-slate-950">
-                    <span>Q.4 Attempt the following.</span>
-                    <span className="font-mono text-sm font-black pr-2">06</span>
-                  </div>
-                  <div className="space-y-2 pl-4 text-xs font-medium text-slate-900">
-                    <div>a) Beam Penetration Technique in color CRT monitors.</div>
-                    <div>b) Shadow Mask Technique in color CRT monitors.</div>
-                  </div>
-                </div>
-              </div>
-
-              {/* Section – II */}
-              <div className="space-y-4 border-b border-slate-300 pb-6">
-                <div className="flex items-center justify-between font-black text-sm border-b border-slate-400 pb-1 text-slate-950 uppercase font-mono">
-                  <span>Section – II</span>
-                  <span>Max. Marks: 28</span>
-                </div>
-
-                {/* Q.5 */}
-                <div className="space-y-2">
-                  <div className="flex items-center justify-between font-bold text-sm text-slate-950">
-                    <span>Q.5 Answer the following question. (Any Four)</span>
-                    <span className="font-mono text-sm font-black pr-2">16</span>
-                  </div>
-                  <div className="space-y-2 pl-4 text-xs font-medium text-slate-900">
-                    <div>a) Write a short note on segmented display file structure.</div>
-                    <div>b) Explain Viewing transformation pipeline in detail.</div>
-                    <div>c) Explain properties of Bezier curves and control points.</div>
-                    <div>d) Explain Z-Buffer depth buffer algorithm for hidden surface removal.</div>
-                    <div>e) Explain Painter’s algorithm for surface visibility.</div>
-                  </div>
-                </div>
-
-                {/* Q.6 */}
-                <div className="space-y-2 pt-2">
-                  <div className="flex items-center justify-between font-bold text-sm text-slate-950">
-                    <span>Q.6 Answer the following question. (Any One)</span>
-                    <span className="font-mono text-sm font-black pr-2">06</span>
-                  </div>
-                  <div className="space-y-2 pl-4 text-xs font-medium text-slate-900">
-                    <div>a) Explain Warnock area subdivision algorithm.</div>
-                    <div>b) What is antialiasing? Explain different techniques of antialiasing.</div>
-                  </div>
-                </div>
-
-                {/* Q.7 */}
-                <div className="space-y-2 pt-2">
-                  <div className="flex items-center justify-between font-bold text-sm text-slate-950">
-                    <span>Q.7 Explain Cohen-Sutherland Line Clipping algorithm.</span>
-                    <span className="font-mono text-sm font-black pr-2">06</span>
-                  </div>
-                </div>
-              </div>
+                  </>
+                );
+              })()}
 
               {/* Official Paper Footer */}
               <div className="pt-4 flex flex-wrap items-center justify-between text-[11px] text-slate-600 font-mono border-t-2 border-slate-900">

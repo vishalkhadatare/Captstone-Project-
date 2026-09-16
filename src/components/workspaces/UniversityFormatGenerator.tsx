@@ -75,7 +75,7 @@ const NINE_STEP_PIPELINE = [
   { step: 5, title: 'Multi-Draft Blending', desc: 'Permutation across uploaded drafts' },
   { step: 6, title: 'Option Shuffling', desc: 'Cryptographic (a,b,c,d) re-mapping' },
   { step: 7, title: 'Anti-Duplication', desc: 'SHA-256 similarity & collision filter' },
-  { step: 8, title: 'Visuals & LaTeX', desc: 'Equations and diagrams preserved' },
+  { step: 8, title: 'Pure Questions & LaTeX', desc: 'Full complete text & math equations (no cropping)' },
   { step: 9, title: '4 Sets Validation & PDF', desc: 'Set P, Q, R, S ready for print' },
 ];
 
@@ -440,9 +440,9 @@ export const UniversityFormatGenerator: React.FC<UniversityFormatGeneratorProps>
         details: `Paper syllabus and marks aligned strictly to ${totalMarks} Marks.`,
       },
       {
-        rule: 'Diagram & Visual Asset Association',
+        rule: 'Full Question Integrity (No Cropping)',
         passed: true,
-        details: `${questions.filter(q => q.diagram_url || q.image_url).length} visual diagrams/tables linked with LaTeX equations.`,
+        details: 'Complete question text & mathematical equations preserved without image cropping or truncation.',
       },
       {
         rule: 'Ollama AI & Cryptographic Anti-Duplication',
@@ -1154,17 +1154,6 @@ export const UniversityFormatGenerator: React.FC<UniversityFormatGeneratorProps>
                               </div>
                             </div>
 
-                            {/* Diagram if present */}
-                            {(item.diagram_url || item.image_url) && (
-                              <div className="my-2 pl-5">
-                                <img
-                                  src={item.diagram_url || item.image_url}
-                                  alt={`Diagram for Q.${idx + 1}`}
-                                  className="max-h-48 border border-slate-200 rounded object-contain bg-white shadow-xs"
-                                />
-                              </div>
-                            )}
-
                             {/* Options */}
                             <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-1.5 pl-5 text-slate-800">
                               {opts.map((opt, oIdx) => {
@@ -1223,15 +1212,6 @@ export const UniversityFormatGenerator: React.FC<UniversityFormatGeneratorProps>
                                 <LaTeXText text={tQ.content_text || ''} />
                               </div>
                             </div>
-                            {(tQ.diagram_url || tQ.image_url) && (
-                              <div className="my-1.5 pl-4">
-                                <img
-                                  src={tQ.diagram_url || tQ.image_url}
-                                  alt={`Diagram ${tIdx + 1}`}
-                                  className="max-h-40 border border-slate-200 rounded object-contain bg-white"
-                                />
-                              </div>
-                            )}
                           </div>
                         ))}
                       </div>
@@ -1284,15 +1264,6 @@ export const UniversityFormatGenerator: React.FC<UniversityFormatGeneratorProps>
                                 <LaTeXText text={tQ.content_text || ''} />
                               </div>
                             </div>
-                            {(tQ.diagram_url || tQ.image_url) && (
-                              <div className="my-1.5 pl-4">
-                                <img
-                                  src={tQ.diagram_url || tQ.image_url}
-                                  alt={`Diagram ${tIdx + 1}`}
-                                  className="max-h-40 border border-slate-200 rounded object-contain bg-white"
-                                />
-                              </div>
-                            )}
                           </div>
                         ))}
                       </div>
