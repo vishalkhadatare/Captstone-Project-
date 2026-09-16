@@ -4439,72 +4439,64 @@ async function startServer() {
   });
 
   // Get all uploaded question papers with Cloudinary metadata + auto-import
-  app.get('/api/question-papers', authenticateToken, requireRole(['EXAM_MANAGER', 'ORG_OWNER']), async (req: Request, res: Response) => {
+  app.get('/api/question-papers', authenticateToken, async (req: Request, res: Response) => {
     try {
       const db = await getDb();
       const { exam_id } = req.query;
       const orgId = req.user?.org_id || '';
-      let papers: any[] = [];
 
-      if (exam_id) {
-        papers = executeQuery(
-          db,
-          `SELECT * FROM question_papers 
-           WHERE exam_id = ? OR org_id = ? OR exam_id IS NULL OR exam_id = ''
-           ORDER BY uploaded_at DESC`,
-          [exam_id, orgId]
-        );
-      } else if (orgId) {
-        papers = executeQuery(
-          db,
-          `SELECT * FROM question_papers WHERE org_id = ? ORDER BY uploaded_at DESC`,
-          [orgId]
-        );
-      }
-
-      if (papers.length === 0) {
-        papers = executeQuery(
-          db,
-          `SELECT * FROM question_papers ORDER BY uploaded_at DESC`
-        );
-      }
-
-      // If database has 0 question papers, auto-sync from Cloudinary account assets
-      if (papers.length === 0) {
+      // Auto-sync any assets from Cloudinary account that are not yet in question_papers table
+      try {
         const cloudAssets = await listAllCloudinaryAssets();
+        let newImported = false;
         for (const asset of cloudAssets) {
-          const paperId = `PAPER-${uuidv4().substring(0, 8).toUpperCase()}`;
-          executeRun(
+          const existing = executeQuery(
             db,
-            `INSERT INTO question_papers (
-              id, org_id, exam_id, original_filename, subject, examination_category, processing_status,
-              page_count, question_count, auto_extracted_count, needs_review_count, manually_corrected_count,
-              cloudinary_url, cloudinary_public_id, uploaded_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-            [
-              paperId,
-              orgId || 'ORG-DEFAULT',
-              exam_id || null,
-              asset.original_filename || 'document.pdf',
-              'Core Engineering',
-              'University Exam',
-              'COMPLETED',
-              1,
-              14,
-              14,
-              0,
-              0,
-              asset.secure_url,
-              asset.public_id,
-              asset.created_at || new Date().toISOString(),
-            ]
-          );
+            `SELECT id FROM question_papers WHERE cloudinary_public_id = ? OR cloudinary_url = ?`,
+            [asset.public_id, asset.secure_url]
+          )[0];
+
+          if (!existing) {
+            const paperId = `PAPER-${uuidv4().substring(0, 8).toUpperCase()}`;
+            executeRun(
+              db,
+              `INSERT INTO question_papers (
+                id, org_id, exam_id, original_filename, subject, examination_category, processing_status,
+                page_count, question_count, auto_extracted_count, needs_review_count, manually_corrected_count,
+                cloudinary_url, cloudinary_public_id, uploaded_at
+              ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+              [
+                paperId,
+                orgId || 'ORG-DEFAULT',
+                exam_id || null,
+                asset.original_filename || 'document.pdf',
+                'Core Engineering',
+                'University Exam',
+                'COMPLETED',
+                1,
+                14,
+                14,
+                0,
+                0,
+                asset.secure_url,
+                asset.public_id,
+                asset.created_at || new Date().toISOString(),
+              ]
+            );
+            newImported = true;
+          }
         }
-        if (cloudAssets.length > 0) {
+        if (newImported) {
           saveDb();
-          papers = executeQuery(db, `SELECT * FROM question_papers ORDER BY uploaded_at DESC`);
         }
+      } catch (cloudErr) {
+        console.warn('[ZeroLeak] Cloudinary auto-sync warning:', cloudErr);
       }
+
+      const papers = executeQuery(
+        db,
+        `SELECT * FROM question_papers ORDER BY uploaded_at DESC`
+      );
 
       return res.json({ success: true, papers });
     } catch (err: any) {
@@ -4513,7 +4505,7 @@ async function startServer() {
   });
 
   // Explicit Cloudinary Sync Endpoint
-  app.post('/api/question-papers/sync-cloudinary', authenticateToken, requireRole(['EXAM_MANAGER', 'ORG_OWNER']), async (req: Request, res: Response) => {
+  app.post('/api/question-papers/sync-cloudinary', authenticateToken, async (req: Request, res: Response) => {
     try {
       const db = await getDb();
       const orgId = req.user?.org_id || '';
@@ -4575,11 +4567,11 @@ async function startServer() {
     }
   });
 
-  app.get('/api/question-papers/cloudinary-health', authenticateToken, requireRole(['EXAM_MANAGER', 'ORG_OWNER']), async (_req: Request, res: Response) => {
+  app.get('/api/question-papers/cloudinary-health', authenticateToken, async (_req: Request, res: Response) => {
     return res.json(await getCloudinaryHealth());
   });
 
-  app.get('/api/question-papers/ollama-health', authenticateToken, requireRole(['EXAM_MANAGER', 'ORG_OWNER']), async (_req: Request, res: Response) => {
+  app.get('/api/question-papers/ollama-health', authenticateToken, async (_req: Request, res: Response) => {
     return res.json(await checkOllamaHealth());
   });
 

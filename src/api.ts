@@ -437,6 +437,7 @@ export const api = {
     request<{ message: string; extractedQuestions: any[]; papers: any[]; totalExtracted: number }>('/api/question-papers/extract-three-standard-papers', { method: 'POST' }),
   getExtractionProgress: (jobId: string) =>
     request<{ jobId: string; status: 'PENDING' | 'PROCESSING' | 'COMPLETED' | 'FAILED'; percent: number; stage: string; message: string; current: number; total: number; updatedAt: number }>(`/api/question-papers/extract-progress/${jobId}`),
+  getCloudinaryHealth: () => request<{ connected: boolean; cloud_name?: string; assets_count?: number; error?: string }>('/api/question-papers/cloudinary-health'),
   getOllamaHealth: () => request<{ connected: boolean; model: string; error?: string }>('/api/question-papers/ollama-health'),
   bulkCreateQuestions: (payload: { questions: any[]; auto_assign_sme_id?: string; auto_assign_translator_id?: string; target_language?: string; assignment_notes?: string; initial_status?: string }) =>
     request<{ message: string; createdCount: number; questionIds: string[] }>('/api/questions/bulk-create', { method: 'POST', body: JSON.stringify(payload) }),

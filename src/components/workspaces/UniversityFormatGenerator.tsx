@@ -109,8 +109,12 @@ export const UniversityFormatGenerator: React.FC<UniversityFormatGeneratorProps>
     checklist: Array<{ rule: string; passed: boolean; details: string }>;
   } | null>(null);
 
+  const [cloudinaryHealth, setCloudinaryHealth] = useState<{ connected: boolean; cloud_name?: string; assets_count?: number } | null>(null);
+
   useEffect(() => {
     loadExaminations();
+    loadUploadedPapers();
+    checkCloudinary();
   }, [currentUser]);
 
   useEffect(() => {
@@ -119,6 +123,15 @@ export const UniversityFormatGenerator: React.FC<UniversityFormatGeneratorProps>
       loadCurrentPaper(selectedExamId);
     }
   }, [selectedExamId]);
+
+  const checkCloudinary = async () => {
+    try {
+      const res = await api.getCloudinaryHealth();
+      setCloudinaryHealth(res);
+    } catch {
+      // ignore
+    }
+  };
 
   const loadExaminations = async () => {
     setLoading(true);
@@ -140,10 +153,17 @@ export const UniversityFormatGenerator: React.FC<UniversityFormatGeneratorProps>
   const loadUploadedPapers = async (examId?: string) => {
     setLoadingPapers(true);
     try {
-      const res = await api.getUploadedQuestionPapers(examId);
+      let res = await api.getUploadedQuestionPapers(examId);
+      if (res.success && Array.isArray(res.papers) && res.papers.length === 0) {
+        // Automatically sync from Cloudinary if local bank is currently empty
+        const syncRes = await api.syncCloudinaryQuestionPapers(examId);
+        if (syncRes.success && Array.isArray(syncRes.papers)) {
+          res = { success: true, papers: syncRes.papers };
+        }
+      }
       if (res.success && Array.isArray(res.papers)) {
         setUploadedPapers(res.papers);
-        setSelectedPaperIds(prev => (prev.length === 0 ? res.papers.map(p => p.id) : prev));
+        setSelectedPaperIds(prev => (prev.length === 0 ? res.papers.map((p: any) => p.id) : prev));
       }
     } catch (e: any) {
       console.warn('Could not load uploaded question papers:', e);
@@ -155,18 +175,19 @@ export const UniversityFormatGenerator: React.FC<UniversityFormatGeneratorProps>
   const handleSyncCloudinary = async () => {
     setLoadingPapers(true);
     try {
-      const res = await api.syncCloudinaryQuestionPapers(selectedExamId);
+      const res = await api.syncCloudinaryQuestionPapers(selectedExamId || undefined);
       if (res.success && Array.isArray(res.papers)) {
         setUploadedPapers(res.papers);
-        setSelectedPaperIds(res.papers.map(p => p.id));
+        setSelectedPaperIds(res.papers.map((p: any) => p.id));
         setActionMessage({
           type: 'success',
-          text: `Cloudinary sync successful! Imported ${res.importedCount} new documents. Total ${res.papers.length} drafts ready.`,
+          text: `Cloudinary sync successful! Total ${res.papers.length} draft question papers ready in vault.`,
         });
+        checkCloudinary();
       }
     } catch (e: any) {
       console.warn('Failed to sync from Cloudinary API:', e);
-      await loadUploadedPapers(selectedExamId);
+      await loadUploadedPapers(selectedExamId || undefined);
     } finally {
       setLoadingPapers(false);
     }
