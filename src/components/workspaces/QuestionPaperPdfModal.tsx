@@ -12,7 +12,8 @@ import {
   ChevronDown,
   Download,
   KeyRound,
-  AlertCircle
+  AlertCircle,
+  Zap
 } from 'lucide-react';
 import { api } from '../../api';
 import { Examination, PaperVersion } from '../../types';
@@ -87,6 +88,31 @@ export const QuestionPaperPdfModal: React.FC<QuestionPaperPdfModalProps> = ({
     fetchPaper(initialVersionId);
   }, [exam.id, initialVersionId]);
 
+  const [compilingFormatex, setCompilingFormatex] = useState(false);
+
+  const handleDownloadFormatex = async () => {
+    setCompilingFormatex(true);
+    try {
+      const setLetter = paperData?.version?.version_code?.includes('SET-2')
+        ? 'Q'
+        : paperData?.version?.version_code?.includes('SET-3')
+        ? 'R'
+        : paperData?.version?.version_code?.includes('SET-4')
+        ? 'S'
+        : 'P';
+      const res = await api.compileFormatexPdf(exam.id, { setLetter });
+      if (res.success && res.pdfUrl) {
+        window.open(res.pdfUrl, '_blank');
+      } else {
+        alert(res.error || 'FormaTeX compilation failed.');
+      }
+    } catch (err: any) {
+      alert(`FormaTeX Error: ${err.message}`);
+    } finally {
+      setCompilingFormatex(false);
+    }
+  };
+
   const handlePrint = () => {
     window.print();
   };
@@ -106,6 +132,9 @@ export const QuestionPaperPdfModal: React.FC<QuestionPaperPdfModalProps> = ({
                 <span className="font-extrabold text-sm text-white">Official Question Paper PDF</span>
                 <span className="px-2 py-0.5 rounded-full text-[10px] font-black bg-rose-500 text-white">
                   PDF READY
+                </span>
+                <span className="px-2 py-0.5 rounded text-[10px] font-black bg-amber-500/20 text-amber-300 border border-amber-500/30">
+                  ⚡ FORMATEX
                 </span>
               </div>
               <p className="text-[11px] text-slate-400 font-mono truncate max-w-md">
@@ -132,6 +161,18 @@ export const QuestionPaperPdfModal: React.FC<QuestionPaperPdfModalProps> = ({
                 ))}
               </select>
             )}
+
+            {/* FormaTeX PDF Download Button */}
+            <button
+              type="button"
+              onClick={handleDownloadFormatex}
+              disabled={compilingFormatex}
+              className="px-3.5 py-1.5 bg-amber-500 hover:bg-amber-400 text-slate-950 rounded-lg font-extrabold text-xs shadow-md shadow-amber-500/20 flex items-center gap-1.5 cursor-pointer transition-all disabled:opacity-50"
+              title="Compile and Download High-Fidelity FormaTeX PDF"
+            >
+              <Zap className={`w-3.5 h-3.5 ${compilingFormatex ? 'animate-spin' : ''}`} />
+              <span>{compilingFormatex ? 'Compiling PDF...' : '⚡ FormaTeX PDF'}</span>
+            </button>
 
             {/* Answer Key Toggle */}
             <button

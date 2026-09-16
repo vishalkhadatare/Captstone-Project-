@@ -34,6 +34,12 @@ import {
   callGroqChat,
 } from './server/ai.ts';
 import {
+  getFormatexHealth,
+  generateUniversityLatexDocument,
+  compileLatexWithFormatex,
+  generateAndUploadFormatexPdf,
+} from './server/formatex.ts';
+import {
   evaluateOrganizationVerification,
   getOrganizationVerificationSource,
 } from './server/organizationVerification.ts';
@@ -4611,6 +4617,144 @@ async function startServer() {
 
   app.get('/api/question-papers/ollama-health', authenticateToken, async (_req: Request, res: Response) => {
     return res.json(await checkOllamaHealth());
+  });
+
+  // FormaTeX Cloud LaTeX & AI Compilation Health
+  app.get('/api/formatex/health', authenticateToken, async (_req: Request, res: Response) => {
+    return res.json(await getFormatexHealth());
+  });
+
+  // Retrieve Formatted FormaTeX LaTeX Source for Examination
+  app.get('/api/examinations/:id/formatex-latex', authenticateToken, async (req: Request, res: Response) => {
+    try {
+      const db = await getDb();
+      const exam = executeQuery(db, 'SELECT * FROM examinations WHERE id = ?', [req.params.id])[0];
+      if (!exam) return res.status(404).json({ error: 'Examination not found' });
+
+      const setLetter = (req.query.setLetter as string) || 'P';
+      const version = executeQuery(
+        db,
+        `SELECT id FROM paper_versions WHERE exam_id = ? ORDER BY is_current DESC, generated_at DESC LIMIT 1`,
+        [exam.id]
+      )[0];
+
+      let questions: any[] = [];
+      if (version) {
+        questions = executeQuery(
+          db,
+          `SELECT q.*, pq.order_index, pq.marks as question_marks
+           FROM paper_questions pq
+           JOIN questions q ON pq.question_id = q.id
+           WHERE pq.paper_version_id = ?
+           ORDER BY pq.order_index ASC`,
+          [version.id]
+        );
+      }
+      if (questions.length === 0) {
+        questions = executeQuery(db, `SELECT * FROM questions WHERE org_id = ? LIMIT 30`, [exam.org_id]);
+      }
+
+      const mcqs = questions.filter(q => q.question_type === 'MCQ' || (q.options_json && q.options_json.length > 5));
+      const theory = questions.filter(q => q.question_type !== 'MCQ' && (!q.options_json || q.options_json.length <= 5));
+      const theorySec1 = theory.slice(0, Math.ceil(theory.length / 2));
+      const theorySec2 = theory.slice(Math.ceil(theory.length / 2));
+
+      const latex = generateUniversityLatexDocument({
+        exam,
+        setLetter,
+        mcqs,
+        theorySec1,
+        theorySec2,
+        durationMinutes: exam.duration_minutes || 180,
+        totalMarks: exam.total_marks || 70,
+      });
+
+      return res.json({ success: true, latex, setLetter });
+    } catch (e: any) {
+      return res.status(500).json({ error: e.message });
+    }
+  });
+
+  // Compile Official University PDF via FormaTeX Cloud Engine
+  app.post('/api/examinations/:id/compile-formatex-pdf', authenticateToken, requireApprovedDevice, async (req: Request, res: Response) => {
+    try {
+      const db = await getDb();
+      const exam = executeQuery(db, 'SELECT * FROM examinations WHERE id = ?', [req.params.id])[0];
+      if (!exam) return res.status(404).json({ error: 'Examination not found' });
+
+      const { setLetter = 'P', customLatex } = req.body || {};
+
+      let result;
+      if (customLatex && typeof customLatex === 'string' && customLatex.trim()) {
+        const compileRes = await compileLatexWithFormatex({ latex: customLatex, smart: true });
+        if (!compileRes.success || !compileRes.pdfBuffer) {
+          return res.status(422).json({ success: false, error: compileRes.error || 'FormaTeX compilation failed.' });
+        }
+        const pdfBuffer = compileRes.pdfBuffer;
+        const checksumSha256 = crypto.createHash('sha256').update(pdfBuffer).digest('hex');
+        const filename = `${exam.code || 'EXAM'}_Set_${setLetter}_FormaTeX.pdf`;
+        const localOutputDir = path.join(process.cwd(), 'public', 'compiled_papers');
+        if (!fs.existsSync(localOutputDir)) fs.mkdirSync(localOutputDir, { recursive: true });
+        fs.writeFileSync(path.join(localOutputDir, filename), pdfBuffer);
+
+        let pdfUrl = `/compiled_papers/${filename}`;
+        try {
+          const cRes = await uploadDocumentToCloudinary(
+            `data:application/pdf;base64,${pdfBuffer.toString('base64')}`,
+            filename,
+            'zeroleak/formatex-papers'
+          );
+          if (cRes?.secure_url) pdfUrl = cRes.secure_url;
+        } catch {}
+
+        result = {
+          success: true,
+          pdfUrl,
+          latex: customLatex,
+          sizeBytes: pdfBuffer.length,
+          checksumSha256,
+        };
+      } else {
+        const version = executeQuery(
+          db,
+          `SELECT id FROM paper_versions WHERE exam_id = ? ORDER BY is_current DESC, generated_at DESC LIMIT 1`,
+          [exam.id]
+        )[0];
+
+        let questions: any[] = [];
+        if (version) {
+          questions = executeQuery(
+            db,
+            `SELECT q.*, pq.order_index, pq.marks as question_marks
+             FROM paper_questions pq
+             JOIN questions q ON pq.question_id = q.id
+             WHERE pq.paper_version_id = ?
+             ORDER BY pq.order_index ASC`,
+            [version.id]
+          );
+        }
+        if (questions.length === 0) {
+          questions = executeQuery(db, `SELECT * FROM questions WHERE org_id = ? LIMIT 30`, [exam.org_id]);
+        }
+
+        const mcqs = questions.filter(q => q.question_type === 'MCQ' || (q.options_json && q.options_json.length > 5));
+        const theory = questions.filter(q => q.question_type !== 'MCQ' && (!q.options_json || q.options_json.length <= 5));
+        const theorySec1 = theory.slice(0, Math.ceil(theory.length / 2));
+        const theorySec2 = theory.slice(Math.ceil(theory.length / 2));
+
+        result = await generateAndUploadFormatexPdf({
+          exam,
+          setLetter,
+          mcqs,
+          theorySec1,
+          theorySec2,
+        });
+      }
+
+      return res.json(result);
+    } catch (e: any) {
+      return res.status(500).json({ error: e.message });
+    }
   });
 
   // Delete an individual question paper draft

@@ -35,7 +35,10 @@ import {
   Combine,
   Flame,
   Trash2,
-  Filter
+  Filter,
+  Code2,
+  Download,
+  Copy
 } from 'lucide-react';
 import { api } from '../../api';
 import { User, Examination } from '../../types';
@@ -112,11 +115,17 @@ export const UniversityFormatGenerator: React.FC<UniversityFormatGeneratorProps>
   } | null>(null);
 
   const [cloudinaryHealth, setCloudinaryHealth] = useState<{ connected: boolean; cloud_name?: string; assets_count?: number } | null>(null);
+  const [formatexHealth, setFormatexHealth] = useState<{ connected: boolean; engine?: string } | null>(null);
+  const [compilingFormatex, setCompilingFormatex] = useState(false);
+  const [showLatexModal, setShowLatexModal] = useState(false);
+  const [latexCode, setLatexCode] = useState('');
+  const [copiedLatex, setCopiedLatex] = useState(false);
 
   useEffect(() => {
     loadExaminations();
     loadUploadedPapers();
     checkCloudinary();
+    checkFormatex();
   }, [currentUser]);
 
   useEffect(() => {
@@ -130,6 +139,15 @@ export const UniversityFormatGenerator: React.FC<UniversityFormatGeneratorProps>
     try {
       const res = await api.getCloudinaryHealth();
       setCloudinaryHealth(res);
+    } catch {
+      // ignore
+    }
+  };
+
+  const checkFormatex = async () => {
+    try {
+      const res = await api.getFormatexHealth();
+      setFormatexHealth(res);
     } catch {
       // ignore
     }
@@ -331,6 +349,46 @@ export const UniversityFormatGenerator: React.FC<UniversityFormatGeneratorProps>
     }
   };
 
+  const handleCompileFormatexPdf = async (setLetterOverride?: string) => {
+    if (!selectedExamId) return;
+    setCompilingFormatex(true);
+    setActionMessage(null);
+    try {
+      const letter = setLetterOverride || ['P', 'Q', 'R', 'S'][activeSetIndex] || 'P';
+      const res = await api.compileFormatexPdf(selectedExamId, { setLetter: letter });
+      if (res.success && res.pdfUrl) {
+        setActionMessage({
+          type: 'success',
+          text: `⚡ FormaTeX compiled official publication PDF for Set ${letter} (${Math.round((res.sizeBytes || 0) / 1024)} KB)!`,
+        });
+        window.open(res.pdfUrl, '_blank');
+      } else {
+        setActionMessage({
+          type: 'error',
+          text: res.error || 'FormaTeX compilation failed.',
+        });
+      }
+    } catch (e: any) {
+      setActionMessage({ type: 'error', text: `FormaTeX Error: ${e.message}` });
+    } finally {
+      setCompilingFormatex(false);
+    }
+  };
+
+  const handleViewLatexCode = async (setLetterOverride?: string) => {
+    if (!selectedExamId) return;
+    try {
+      const letter = setLetterOverride || ['P', 'Q', 'R', 'S'][activeSetIndex] || 'P';
+      const res = await api.getFormatexLatex(selectedExamId, letter);
+      if (res.success && res.latex) {
+        setLatexCode(res.latex);
+        setShowLatexModal(true);
+      }
+    } catch (e: any) {
+      setActionMessage({ type: 'error', text: `Failed to fetch LaTeX: ${e.message}` });
+    }
+  };
+
   const runMasterBlueprintValidation = (questions: any[], exam: Examination) => {
     const mcqs = questions.filter((q: any) => q.question_type === 'MCQ' || (Array.isArray(q.options) && q.options.length >= 2));
     const theoryQuestions = questions.filter((q: any) => q.question_type !== 'MCQ' && (!q.options || q.options.length < 2));
@@ -434,9 +492,13 @@ export const UniversityFormatGenerator: React.FC<UniversityFormatGeneratorProps>
               <span className="px-2.5 py-0.5 rounded-full text-[10px] font-black bg-rose-500 text-white uppercase tracking-wide">
                 OLLAMA AI ENGINE
               </span>
+              <span className="px-2.5 py-0.5 rounded-full text-[10px] font-black bg-amber-500/20 text-amber-300 border border-amber-500/30 uppercase tracking-wide flex items-center gap-1">
+                <Zap className="w-3 h-3 text-amber-400" />
+                <span>FORMATEX LATEX</span>
+              </span>
             </div>
             <p className="text-xs text-slate-400 mt-0.5">
-              Multi-Draft Combination & Permutation &bull; Stored in Cloudinary &bull; 4 Distinct Sets (P, Q, R, S)
+              Multi-Draft Combination & Permutation &bull; Stored in Cloudinary &bull; FormaTeX Publication Engine
             </p>
           </div>
         </div>
@@ -934,19 +996,44 @@ export const UniversityFormatGenerator: React.FC<UniversityFormatGeneratorProps>
                   ))}
                 </div>
 
-                {/* Answer Key Toggle */}
-                <button
-                  type="button"
-                  onClick={() => setShowAnswerKey(!showAnswerKey)}
-                  className={`px-3 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1.5 cursor-pointer transition-all ${
-                    showAnswerKey
-                      ? 'bg-amber-500/20 text-amber-300 border border-amber-500/40'
-                      : 'bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700'
-                  }`}
-                >
-                  {showAnswerKey ? <Eye className="w-3.5 h-3.5" /> : <EyeOff className="w-3.5 h-3.5" />}
-                  <span>{showAnswerKey ? 'Answer Key ON' : 'Answer Key OFF'}</span>
-                </button>
+                <div className="flex flex-wrap items-center gap-2">
+                  {/* FormaTeX PDF Compilation */}
+                  <button
+                    type="button"
+                    onClick={() => handleCompileFormatexPdf(setLetter)}
+                    disabled={compilingFormatex}
+                    title="Compile and download publication-ready official PDF using FormaTeX Cloud LaTeX Engine"
+                    className="px-3 py-1.5 rounded-lg text-xs font-bold bg-amber-500 hover:bg-amber-400 text-slate-950 flex items-center gap-1.5 cursor-pointer transition-all shadow-md shadow-amber-500/20 disabled:opacity-50"
+                  >
+                    <Zap className={`w-3.5 h-3.5 ${compilingFormatex ? 'animate-spin' : ''}`} />
+                    <span>{compilingFormatex ? `Compiling Set ${setLetter}...` : `⚡ FormaTeX PDF (Set ${setLetter})`}</span>
+                  </button>
+
+                  {/* View LaTeX Source Code */}
+                  <button
+                    type="button"
+                    onClick={() => handleViewLatexCode(setLetter)}
+                    title="View and edit clean LaTeX source code"
+                    className="px-3 py-1.5 rounded-lg text-xs font-bold bg-slate-800 hover:bg-slate-700 text-sky-300 border border-sky-500/30 flex items-center gap-1.5 cursor-pointer transition-all"
+                  >
+                    <Code2 className="w-3.5 h-3.5 text-sky-400" />
+                    <span>LaTeX Source</span>
+                  </button>
+
+                  {/* Answer Key Toggle */}
+                  <button
+                    type="button"
+                    onClick={() => setShowAnswerKey(!showAnswerKey)}
+                    className={`px-3 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1.5 cursor-pointer transition-all ${
+                      showAnswerKey
+                        ? 'bg-amber-500/20 text-amber-300 border border-amber-500/40'
+                        : 'bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700'
+                    }`}
+                  >
+                    {showAnswerKey ? <Eye className="w-3.5 h-3.5" /> : <EyeOff className="w-3.5 h-3.5" />}
+                    <span>{showAnswerKey ? 'Answer Key ON' : 'Answer Key OFF'}</span>
+                  </button>
+                </div>
               </div>
 
               {/* Paper Preview Box */}
@@ -1226,6 +1313,88 @@ export const UniversityFormatGenerator: React.FC<UniversityFormatGeneratorProps>
           exam={selectedExam}
           onClose={() => setShowPdfModal(false)}
         />
+      )}
+
+      {/* FormaTeX LaTeX Source Code Modal */}
+      {showLatexModal && (
+        <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-xs flex items-center justify-center p-4 sm:p-6 animate-fadeIn">
+          <div className="bg-slate-900 border border-slate-700 rounded-2xl shadow-2xl w-full max-w-4xl max-h-[90vh] flex flex-col overflow-hidden">
+            {/* Modal Header */}
+            <div className="px-6 py-4 border-b border-slate-800 flex items-center justify-between bg-slate-950/60">
+              <div className="flex items-center gap-2.5">
+                <div className="p-2 rounded-xl bg-amber-500/20 text-amber-400 border border-amber-500/30">
+                  <Code2 className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="text-sm font-black text-white flex items-center gap-2">
+                    <span>FormaTeX LaTeX Publication Source</span>
+                    <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">
+                      SET {setLetter}
+                    </span>
+                  </h3>
+                  <p className="text-[11px] text-slate-400">
+                    Clean, publication-ready mathematical LaTeX markup with full typography rules
+                  </p>
+                </div>
+              </div>
+
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => {
+                    navigator.clipboard.writeText(latexCode);
+                    setCopiedLatex(true);
+                    setTimeout(() => setCopiedLatex(false), 2000);
+                  }}
+                  className="px-3 py-1.5 rounded-lg text-xs font-bold bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 flex items-center gap-1.5 cursor-pointer transition-all"
+                >
+                  {copiedLatex ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5 text-slate-400" />}
+                  <span>{copiedLatex ? 'Copied!' : 'Copy LaTeX'}</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => handleCompileFormatexPdf(setLetter)}
+                  disabled={compilingFormatex}
+                  className="px-3 py-1.5 rounded-lg text-xs font-bold bg-amber-500 hover:bg-amber-400 text-slate-950 flex items-center gap-1.5 cursor-pointer transition-all shadow-md shadow-amber-500/20 disabled:opacity-50"
+                >
+                  <Zap className={`w-3.5 h-3.5 ${compilingFormatex ? 'animate-spin' : ''}`} />
+                  <span>{compilingFormatex ? 'Compiling...' : 'Compile with FormaTeX'}</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => setShowLatexModal(false)}
+                  className="p-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-white cursor-pointer transition-all ml-2"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+            </div>
+
+            {/* Modal Code Editor / Viewer */}
+            <div className="flex-1 p-5 overflow-auto bg-slate-950 font-mono text-xs text-emerald-300 leading-relaxed">
+              <textarea
+                value={latexCode}
+                onChange={(e) => setLatexCode(e.target.value)}
+                className="w-full h-[60vh] bg-transparent text-slate-200 font-mono text-xs outline-hidden resize-none selection:bg-amber-500/30"
+                placeholder="LaTeX code..."
+                spellCheck={false}
+              />
+            </div>
+
+            {/* Modal Footer */}
+            <div className="px-6 py-3 border-t border-slate-800 bg-slate-950/80 flex items-center justify-between text-xs text-slate-400">
+              <div className="flex items-center gap-2">
+                <span className="inline-block w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
+                <span>FormaTeX Cloud Engine Ready</span>
+              </div>
+              <div>
+                <span>Characters: <strong>{latexCode.length}</strong></span>
+              </div>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );
