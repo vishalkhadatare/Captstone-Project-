@@ -4,6 +4,7 @@ import {
   Upload,
   Sparkles,
   CheckCircle2,
+  CheckCircle,
   AlertTriangle,
   Users,
   Search,

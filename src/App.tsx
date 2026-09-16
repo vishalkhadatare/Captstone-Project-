@@ -54,8 +54,6 @@ export function App() {
     multi_paper_generator: 'multi-paper-generator',
     paper_versions: 'paper-versions',
     examination_centres: 'examination-centres',
-    assigned_questions: 'assigned-questions',
-    question_verification: 'question-verification',
     translation_tasks: 'translation-tasks',
     verification_history: 'verification-history',
     released_examinations: 'released-examinations',
