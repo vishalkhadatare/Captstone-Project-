@@ -4156,7 +4156,17 @@ async function startServer() {
         };
       }
 
-      if (extraction?.extractedQuestions?.length && process.env.OLLAMA_MODEL) {
+      if (extraction?.extractedQuestions?.length && process.env.OLLAMA_MODEL && !extraction.engine?.includes('v12.0')) {
+        extractionProgressMap.set(effectiveJobId, {
+          jobId: effectiveJobId,
+          status: 'PROCESSING',
+          percent: 92,
+          stage: 'AI Semantic Verification',
+          message: 'Validating questions with Ollama...',
+          current: extraction.extractedQuestions.length,
+          total: extraction.extractedQuestions.length,
+          updatedAt: Date.now(),
+        });
         const beforeOllamaCount = extraction.extractedQuestions.length;
         extraction.extractedQuestions = await filterQuestionCandidatesWithOllama(extraction.extractedQuestions);
         extraction.questions = extraction.extractedQuestions;
@@ -4288,25 +4298,24 @@ async function startServer() {
 
       saveDb();
 
-      // Upload to Cloudinary asynchronously in the background so the user gets instant extraction results
+      let cloudinaryUrl: string | null = null;
+      let cloudinaryPublicId: string | null = null;
       if (pdfBase64) {
-        uploadDocumentToCloudinary(pdfBase64, file_name, 'zeroleak/question-papers')
-          .then(async (cUpload) => {
-            if (cUpload?.secure_url) {
-              try {
-                const asyncDb = await getDb();
-                executeRun(
-                  asyncDb,
-                  `UPDATE question_papers SET cloudinary_url = ?, cloudinary_public_id = ? WHERE id = ?`,
-                  [cUpload.secure_url, cUpload.public_id || null, sourcePaperId]
-                );
-                saveDb();
-              } catch (e) {
-                console.warn('Failed to update Cloudinary URL on question paper:', e);
-              }
-            }
-          })
-          .catch((err) => console.warn('Background Cloudinary upload skipped:', err));
+        try {
+          const cUpload = await uploadDocumentToCloudinary(pdfBase64, file_name, 'zeroleak/question-papers');
+          if (cUpload?.secure_url) {
+            cloudinaryUrl = cUpload.secure_url;
+            cloudinaryPublicId = cUpload.public_id || null;
+            executeRun(
+              db,
+              `UPDATE question_papers SET cloudinary_url = ?, cloudinary_public_id = ? WHERE id = ?`,
+              [cloudinaryUrl, cloudinaryPublicId, sourcePaperId]
+            );
+            saveDb();
+          }
+        } catch (err) {
+          console.warn('Cloudinary storage notice:', err);
+        }
       }
 
       await logAuditEvent({
@@ -4339,11 +4348,13 @@ async function startServer() {
         sourcePaperId,
         paperId: sourcePaperId,
         sourceFile: file_name || 'raw_text_entry',
+        cloudinary_url: cloudinaryUrl,
+        pdf_url: cloudinaryUrl,
         processingStatus,
         jobId: effectiveJobId,
         aiEngine: {
-          provider: extraction.engine || 'PyMuPDF + Python Regex',
-          model: extraction.aiEngineUsed ? (process.env.OLLAMA_MODEL || 'Gemini 3.7 Flash') : 'PyMuPDF + Regex (Local & 100% Free)',
+          provider: extraction.engine || 'ZeroLeak Reconstructed Question Pipeline',
+          model: extraction.aiEngineUsed ? (process.env.OLLAMA_MODEL || 'Gemini 3.7 Flash') : 'ZeroLeak Deterministic v13.0 (Local & Fast)',
         },
       });
     } catch (e: any) {

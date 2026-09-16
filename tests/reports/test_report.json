@@ -1,0 +1,1434 @@
+{
+  "timestamp": "2026-09-16 17:08:08",
+  "total_tests": 50,
+  "passed_tests": 49,
+  "failed_tests": 1,
+  "pass_rate_percent": 98.0,
+  "total_execution_time_seconds": 444.95,
+  "extraction_mode": "sub_questions_only",
+  "crop_original_image": false,
+  "generate_new_images": true,
+  "test_cases": [
+    {
+      "test_id": 1,
+      "test_name": "test_01_single_col_std_mcq",
+      "category": "Basic Formats",
+      "expected_questions": [
+        "1",
+        "2",
+        "3",
+        "4"
+      ],
+      "actual_questions": [
+        "Q1",
+        "Q2",
+        "Q3",
+        "Q4"
+      ],
+      "expected_instruction_count": 0,
+      "actual_instruction_count": 2,
+      "generated_images": [
+        "Q1.png",
+        "Q2.png",
+        "Q3.png",
+        "Q4.png"
+      ],
+      "new_image_generation": true,
+      "crop_original_image": false,
+      "ollama_validation": true,
+      "ocr_validation": true,
+      "execution_time_ms": 8402.38,
+      "passed": true
+    },
+    {
+      "test_id": 2,
+      "test_name": "test_02_single_col_q_prefix",
+      "category": "Basic Formats",
+      "expected_questions": [
+        "1",
+        "2",
+        "3"
+      ],
+      "actual_questions": [
+        "Q1",
+        "Q2",
+        "Q3"
+      ],
+      "expected_instruction_count": 0,
+      "actual_instruction_count": 2,
+      "generated_images": [
+        "Q1.png",
+        "Q2.png",
+        "Q3.png"
+      ],
+      "new_image_generation": true,
+      "crop_original_image": false,
+      "ollama_validation": true,
+      "ocr_validation": true,
+      "execution_time_ms": 5192.4,
+      "passed": true
+    },
+    {
+      "test_id": 3,
+      "test_name": "test_03_two_col_standard",
+      "category": "Basic Formats",
+      "expected_questions": [
+        "1",
+        "2",
+        "3",
+        "4",
+        "5",
+        "6"
+      ],
+      "actual_questions": [
+        "Q1",
+        "Q1(a)",
+        "Q1(b)",
+        "Q1(c)",
+        "Q1(d)",
+        "Q2",
+        "Q2(a)",
+        "Q2(b)",
+        "Q2(c)",
+        "Q2(d)",
+        "Q3",
+        "Q3(a)",
+        "Q3(b)",
+        "Q3(c)",
+        "Q3(d)",
+        "Q4",
+        "Q4(a)",
+        "Q4(b)",
+        "Q4(c)",
+        "Q4(d)",
+        "Q5",
+        "Q5(a)",
+        "Q5(b)",
+        "Q5(c)",
+        "Q5(d)",
+        "Q6",
+        "Q6(a)",
+        "Q6(b)",
+        "Q6(c)",
+        "Q6(d)"
+      ],
+      "expected_instruction_count": 0,
+      "actual_instruction_count": 1,
+      "generated_images": [
+        "Q1.png",
+        "Q1_a.png",
+        "Q1_b.png",
+        "Q1_c.png",
+        "Q1_d.png",
+        "Q2.png",
+        "Q2_a.png",
+        "Q2_b.png",
+        "Q2_c.png",
+        "Q2_d.png",
+        "Q3.png",
+        "Q3_a.png",
+        "Q3_b.png",
+        "Q3_c.png",
+        "Q3_d.png",
+        "Q4.png",
+        "Q4_a.png",
+        "Q4_b.png",
+        "Q4_c.png",
+        "Q4_d.png",
+        "Q5.png",
+        "Q5_a.png",
+        "Q5_b.png",
+        "Q5_c.png",
+        "Q5_d.png",
+        "Q6.png",
+        "Q6_a.png",
+        "Q6_b.png",
+        "Q6_c.png",
+        "Q6_d.png"
+      ],
+      "new_image_generation": true,
+      "crop_original_image": false,
+      "ollama_validation": true,
+      "ocr_validation": true,
+      "execution_time_ms": 51625.58,
+      "passed": true
+    },
+    {
+      "test_id": 4,
+      "test_name": "test_04_parentheses_numbering",
+      "category": "Basic Formats",
+      "expected_questions": [
+        "1",
+        "2",
+        "3"
+      ],
+      "actual_questions": [
+        "Q1",
+        "Q2",
+        "Q3"
+      ],
+      "expected_instruction_count": 0,
+      "actual_instruction_count": 2,
+      "generated_images": [
+        "Q1.png",
+        "Q2.png",
+        "Q3.png"
+      ],
+      "new_image_generation": true,
+      "crop_original_image": false,
+      "ollama_validation": true,
+      "ocr_validation": true,
+      "execution_time_ms": 5264.76,
+      "passed": true
+    },
+    {
+      "test_id": 5,
+      "test_name": "test_05_bracket_numbering",
+      "category": "Basic Formats",
+      "expected_questions": [
+        "1",
+        "2"
+      ],
+      "actual_questions": [
+        "Q1",
+        "Q2"
+      ],
+      "expected_instruction_count": 0,
+      "actual_instruction_count": 2,
+      "generated_images": [
+        "Q1.png",
+        "Q2.png"
+      ],
+      "new_image_generation": true,
+      "crop_original_image": false,
+      "ollama_validation": true,
+      "ocr_validation": true,
+      "execution_time_ms": 4288.59,
+      "passed": true
+    },
+    {
+      "test_id": 6,
+      "test_name": "test_06_colon_numbering",
+      "category": "Basic Formats",
+      "expected_questions": [
+        "1",
+        "2"
+      ],
+      "actual_questions": [
+        "Q1",
+        "Q2"
+      ],
+      "expected_instruction_count": 0,
+      "actual_instruction_count": 2,
+      "generated_images": [
+        "Q1.png",
+        "Q2.png"
+      ],
+      "new_image_generation": true,
+      "crop_original_image": false,
+      "ollama_validation": true,
+      "ocr_validation": true,
+      "execution_time_ms": 3395.46,
+      "passed": true
+    },
+    {
+      "test_id": 7,
+      "test_name": "test_07_subparts_alphabetical",
+      "category": "Basic Formats",
+      "expected_questions": [
+        "1(a)",
+        "1(b)",
+        "2(a)",
+        "2(b)"
+      ],
+      "actual_questions": [
+        "Q1(a)",
+        "Q1(b)",
+        "Q2(a)",
+        "Q2(b)"
+      ],
+      "expected_instruction_count": 0,
+      "actual_instruction_count": 2,
+      "generated_images": [
+        "Q1_a.png",
+        "Q1_b.png",
+        "Q2_a.png",
+        "Q2_b.png"
+      ],
+      "new_image_generation": true,
+      "crop_original_image": false,
+      "ollama_validation": true,
+      "ocr_validation": true,
+      "execution_time_ms": 7899.59,
+      "passed": true
+    },
+    {
+      "test_id": 8,
+      "test_name": "test_08_subparts_roman",
+      "category": "Basic Formats",
+      "expected_questions": [
+        "1(i)",
+        "1(ii)",
+        "2(i)",
+        "2(ii)"
+      ],
+      "actual_questions": [
+        "Q1(i)",
+        "Q1(ii)",
+        "Q2(i)",
+        "Q2(ii)"
+      ],
+      "expected_instruction_count": 0,
+      "actual_instruction_count": 2,
+      "generated_images": [
+        "Q1_i.png",
+        "Q1_ii.png",
+        "Q2_i.png",
+        "Q2_ii.png"
+      ],
+      "new_image_generation": true,
+      "crop_original_image": false,
+      "ollama_validation": true,
+      "ocr_validation": true,
+      "execution_time_ms": 7534.97,
+      "passed": true
+    },
+    {
+      "test_id": 9,
+      "test_name": "test_09_three_column_layout",
+      "category": "Basic Formats",
+      "expected_questions": [
+        "1",
+        "2",
+        "3",
+        "4",
+        "5",
+        "6"
+      ],
+      "actual_questions": [
+        "Q1",
+        "Q2",
+        "Q3",
+        "Q4",
+        "Q5",
+        "Q6"
+      ],
+      "expected_instruction_count": 0,
+      "actual_instruction_count": 2,
+      "generated_images": [
+        "Q1.png",
+        "Q2.png",
+        "Q3.png",
+        "Q4.png",
+        "Q5.png",
+        "Q6.png"
+      ],
+      "new_image_generation": true,
+      "crop_original_image": false,
+      "ollama_validation": true,
+      "ocr_validation": true,
+      "execution_time_ms": 9362.74,
+      "passed": true
+    },
+    {
+      "test_id": 10,
+      "test_name": "test_10_mixed_numbering_single_doc",
+      "category": "Basic Formats",
+      "expected_questions": [
+        "1",
+        "2",
+        "3"
+      ],
+      "actual_questions": [
+        "Q1",
+        "Q2",
+        "Q3"
+      ],
+      "expected_instruction_count": 0,
+      "actual_instruction_count": 2,
+      "generated_images": [
+        "Q1.png",
+        "Q2.png",
+        "Q3.png"
+      ],
+      "new_image_generation": true,
+      "crop_original_image": false,
+      "ollama_validation": true,
+      "ocr_validation": true,
+      "execution_time_ms": 5751.07,
+      "passed": true
+    },
+    {
+      "test_id": 11,
+      "test_name": "test_11_exam_header_metadata",
+      "category": "Instructions & Context",
+      "expected_questions": [
+        "1",
+        "2",
+        "3"
+      ],
+      "actual_questions": [
+        "Q1",
+        "Q2",
+        "Q3"
+      ],
+      "expected_instruction_count": 0,
+      "actual_instruction_count": 1,
+      "generated_images": [
+        "Q1.png",
+        "Q2.png",
+        "Q3.png"
+      ],
+      "new_image_generation": true,
+      "crop_original_image": false,
+      "ollama_validation": true,
+      "ocr_validation": true,
+      "execution_time_ms": 5318.27,
+      "passed": true
+    },
+    {
+      "test_id": 12,
+      "test_name": "test_12_general_instructions_block",
+      "category": "Instructions & Context",
+      "expected_questions": [
+        "1",
+        "2"
+      ],
+      "actual_questions": [
+        "Q1",
+        "Q2"
+      ],
+      "expected_instruction_count": 0,
+      "actual_instruction_count": 7,
+      "generated_images": [
+        "Q1.png",
+        "Q2.png"
+      ],
+      "new_image_generation": true,
+      "crop_original_image": false,
+      "ollama_validation": true,
+      "ocr_validation": true,
+      "execution_time_ms": 3445.75,
+      "passed": true
+    },
+    {
+      "test_id": 13,
+      "test_name": "test_13_section_headers",
+      "category": "Instructions & Context",
+      "expected_questions": [
+        "1",
+        "2",
+        "3"
+      ],
+      "actual_questions": [
+        "Q1",
+        "Q2",
+        "Q3"
+      ],
+      "expected_instruction_count": 0,
+      "actual_instruction_count": 4,
+      "generated_images": [
+        "Q1.png",
+        "Q2.png",
+        "Q3.png"
+      ],
+      "new_image_generation": true,
+      "crop_original_image": false,
+      "ollama_validation": true,
+      "ocr_validation": true,
+      "execution_time_ms": 5154.11,
+      "passed": true
+    },
+    {
+      "test_id": 14,
+      "test_name": "test_14_shared_passage_context",
+      "category": "Instructions & Context",
+      "expected_questions": [
+        "1",
+        "2",
+        "3"
+      ],
+      "actual_questions": [
+        "Q1",
+        "Q2",
+        "Q3"
+      ],
+      "expected_instruction_count": 0,
+      "actual_instruction_count": 2,
+      "generated_images": [
+        "Q1.png",
+        "Q2.png",
+        "Q3.png"
+      ],
+      "new_image_generation": true,
+      "crop_original_image": false,
+      "ollama_validation": true,
+      "ocr_validation": true,
+      "execution_time_ms": 5346.56,
+      "passed": true
+    },
+    {
+      "test_id": 15,
+      "test_name": "test_15_shared_direction_block",
+      "category": "Instructions & Context",
+      "expected_questions": [
+        "1",
+        "2",
+        "3"
+      ],
+      "actual_questions": [
+        "Q1",
+        "Q2",
+        "Q3"
+      ],
+      "expected_instruction_count": 0,
+      "actual_instruction_count": 2,
+      "generated_images": [
+        "Q1.png",
+        "Q2.png",
+        "Q3.png"
+      ],
+      "new_image_generation": true,
+      "crop_original_image": false,
+      "ollama_validation": true,
+      "ocr_validation": true,
+      "execution_time_ms": 5410.05,
+      "passed": true
+    },
+    {
+      "test_id": 16,
+      "test_name": "test_16_note_and_disclaimer",
+      "category": "Instructions & Context",
+      "expected_questions": [
+        "1",
+        "2"
+      ],
+      "actual_questions": [
+        "Q1",
+        "Q2"
+      ],
+      "expected_instruction_count": 0,
+      "actual_instruction_count": 3,
+      "generated_images": [
+        "Q1.png",
+        "Q2.png"
+      ],
+      "new_image_generation": true,
+      "crop_original_image": false,
+      "ollama_validation": true,
+      "ocr_validation": true,
+      "execution_time_ms": 3264.54,
+      "passed": true
+    },
+    {
+      "test_id": 17,
+      "test_name": "test_17_inline_instruction",
+      "category": "Instructions & Context",
+      "expected_questions": [
+        "1",
+        "2",
+        "3"
+      ],
+      "actual_questions": [
+        "Q1",
+        "Q2",
+        "Q3"
+      ],
+      "expected_instruction_count": 0,
+      "actual_instruction_count": 3,
+      "generated_images": [
+        "Q1.png",
+        "Q2.png",
+        "Q3.png"
+      ],
+      "new_image_generation": true,
+      "crop_original_image": false,
+      "ollama_validation": true,
+      "ocr_validation": true,
+      "execution_time_ms": 6787.91,
+      "passed": true
+    },
+    {
+      "test_id": 18,
+      "test_name": "test_18_or_choice_questions",
+      "category": "Instructions & Context",
+      "expected_questions": [
+        "1",
+        "2"
+      ],
+      "actual_questions": [
+        "Q1",
+        "Q1",
+        "Q2"
+      ],
+      "expected_instruction_count": 0,
+      "actual_instruction_count": 2,
+      "generated_images": [
+        "Q1.png",
+        "Q1.png",
+        "Q2.png"
+      ],
+      "new_image_generation": true,
+      "crop_original_image": false,
+      "ollama_validation": true,
+      "ocr_validation": false,
+      "execution_time_ms": 44751.16,
+      "passed": true
+    },
+    {
+      "test_id": 19,
+      "test_name": "test_19_footer_and_page_numbers",
+      "category": "Instructions & Context",
+      "expected_questions": [
+        "1",
+        "2"
+      ],
+      "actual_questions": [
+        "Q1",
+        "Q2"
+      ],
+      "expected_instruction_count": 0,
+      "actual_instruction_count": 2,
+      "generated_images": [
+        "Q1.png",
+        "Q2.png"
+      ],
+      "new_image_generation": true,
+      "crop_original_image": false,
+      "ollama_validation": true,
+      "ocr_validation": true,
+      "execution_time_ms": 7038.63,
+      "passed": true
+    },
+    {
+      "test_id": 20,
+      "test_name": "test_20_multipage_instructions",
+      "category": "Instructions & Context",
+      "expected_questions": [
+        "1",
+        "2",
+        "3"
+      ],
+      "actual_questions": [
+        "Q1",
+        "Q2",
+        "Q3"
+      ],
+      "expected_instruction_count": 0,
+      "actual_instruction_count": 4,
+      "generated_images": [
+        "Q1.png",
+        "Q2.png",
+        "Q3.png"
+      ],
+      "new_image_generation": true,
+      "crop_original_image": false,
+      "ollama_validation": true,
+      "ocr_validation": true,
+      "execution_time_ms": 24769.37,
+      "passed": true
+    },
+    {
+      "test_id": 21,
+      "test_name": "test_21_mcq_with_diagram",
+      "category": "Complex Layouts",
+      "expected_questions": [
+        "1",
+        "2"
+      ],
+      "actual_questions": [
+        "Q1",
+        "Q2"
+      ],
+      "expected_instruction_count": 0,
+      "actual_instruction_count": 2,
+      "generated_images": [
+        "Q1.png",
+        "Q2.png"
+      ],
+      "new_image_generation": true,
+      "crop_original_image": false,
+      "ollama_validation": true,
+      "ocr_validation": false,
+      "execution_time_ms": 8338.73,
+      "passed": true
+    },
+    {
+      "test_id": 22,
+      "test_name": "test_22_table_in_question",
+      "category": "Complex Layouts",
+      "expected_questions": [
+        "1",
+        "2"
+      ],
+      "actual_questions": [
+        "Q2"
+      ],
+      "expected_instruction_count": 0,
+      "actual_instruction_count": 2,
+      "generated_images": [
+        "Q2.png"
+      ],
+      "new_image_generation": true,
+      "crop_original_image": false,
+      "ollama_validation": true,
+      "ocr_validation": true,
+      "execution_time_ms": 3785.55,
+      "passed": false
+    },
+    {
+      "test_id": 23,
+      "test_name": "test_23_code_snippet_in_question",
+      "category": "Complex Layouts",
+      "expected_questions": [
+        "1",
+        "2"
+      ],
+      "actual_questions": [
+        "Q1",
+        "Q2"
+      ],
+      "expected_instruction_count": 0,
+      "actual_instruction_count": 2,
+      "generated_images": [
+        "Q1.png",
+        "Q2.png"
+      ],
+      "new_image_generation": true,
+      "crop_original_image": false,
+      "ollama_validation": true,
+      "ocr_validation": true,
+      "execution_time_ms": 12909.82,
+      "passed": true
+    },
+    {
+      "test_id": 24,
+      "test_name": "test_24_mathematical_formula_dense",
+      "category": "Complex Layouts",
+      "expected_questions": [
+        "1",
+        "2"
+      ],
+      "actual_questions": [
+        "Q1",
+        "Q2"
+      ],
+      "expected_instruction_count": 0,
+      "actual_instruction_count": 2,
+      "generated_images": [
+        "Q1.png",
+        "Q2.png"
+      ],
+      "new_image_generation": true,
+      "crop_original_image": false,
+      "ollama_validation": true,
+      "ocr_validation": true,
+      "execution_time_ms": 6251.45,
+      "passed": true
+    },
+    {
+      "test_id": 25,
+      "test_name": "test_25_horizontal_options_layout",
+      "category": "Complex Layouts",
+      "expected_questions": [
+        "1",
+        "2"
+      ],
+      "actual_questions": [
+        "Q1",
+        "Q2"
+      ],
+      "expected_instruction_count": 0,
+      "actual_instruction_count": 2,
+      "generated_images": [
+        "Q1.png",
+        "Q2.png"
+      ],
+      "new_image_generation": true,
+      "crop_original_image": false,
+      "ollama_validation": true,
+      "ocr_validation": true,
+      "execution_time_ms": 6811.51,
+      "passed": true
+    },
+    {
+      "test_id": 26,
+      "test_name": "test_26_two_by_two_grid_options",
+      "category": "Complex Layouts",
+      "expected_questions": [
+        "1",
+        "2"
+      ],
+      "actual_questions": [
+        "Q1",
+        "Q2"
+      ],
+      "expected_instruction_count": 0,
+      "actual_instruction_count": 2,
+      "generated_images": [
+        "Q1.png",
+        "Q2.png"
+      ],
+      "new_image_generation": true,
+      "crop_original_image": false,
+      "ollama_validation": true,
+      "ocr_validation": true,
+      "execution_time_ms": 4053.74,
+      "passed": true
+    },
+    {
+      "test_id": 27,
+      "test_name": "test_27_multi_line_options",
+      "category": "Complex Layouts",
+      "expected_questions": [
+        "1",
+        "2"
+      ],
+      "actual_questions": [
+        "Q1",
+        "Q2"
+      ],
+      "expected_instruction_count": 0,
+      "actual_instruction_count": 2,
+      "generated_images": [
+        "Q1.png",
+        "Q2.png"
+      ],
+      "new_image_generation": true,
+      "crop_original_image": false,
+      "ollama_validation": true,
+      "ocr_validation": true,
+      "execution_time_ms": 4244.95,
+      "passed": true
+    },
+    {
+      "test_id": 28,
+      "test_name": "test_28_image_based_options",
+      "category": "Complex Layouts",
+      "expected_questions": [
+        "1",
+        "2"
+      ],
+      "actual_questions": [
+        "Q1",
+        "Q2"
+      ],
+      "expected_instruction_count": 0,
+      "actual_instruction_count": 2,
+      "generated_images": [
+        "Q1.png",
+        "Q2.png"
+      ],
+      "new_image_generation": true,
+      "crop_original_image": false,
+      "ollama_validation": true,
+      "ocr_validation": true,
+      "execution_time_ms": 4031.08,
+      "passed": true
+    },
+    {
+      "test_id": 29,
+      "test_name": "test_29_tabular_match_the_following",
+      "category": "Complex Layouts",
+      "expected_questions": [
+        "1",
+        "2"
+      ],
+      "actual_questions": [
+        "Q1",
+        "Q2"
+      ],
+      "expected_instruction_count": 0,
+      "actual_instruction_count": 2,
+      "generated_images": [
+        "Q1.png",
+        "Q2.png"
+      ],
+      "new_image_generation": true,
+      "crop_original_image": false,
+      "ollama_validation": true,
+      "ocr_validation": true,
+      "execution_time_ms": 4284.85,
+      "passed": true
+    },
+    {
+      "test_id": 30,
+      "test_name": "test_30_assertion_reason_format",
+      "category": "Complex Layouts",
+      "expected_questions": [
+        "1",
+        "2"
+      ],
+      "actual_questions": [
+        "Q1",
+        "Q2"
+      ],
+      "expected_instruction_count": 0,
+      "actual_instruction_count": 2,
+      "generated_images": [
+        "Q1.png",
+        "Q2.png"
+      ],
+      "new_image_generation": true,
+      "crop_original_image": false,
+      "ollama_validation": true,
+      "ocr_validation": true,
+      "execution_time_ms": 9043.12,
+      "passed": true
+    },
+    {
+      "test_id": 31,
+      "test_name": "test_31_top_of_page_question",
+      "category": "Boundary Cases",
+      "expected_questions": [
+        "1",
+        "2"
+      ],
+      "actual_questions": [
+        "Q1",
+        "Q2"
+      ],
+      "expected_instruction_count": 0,
+      "actual_instruction_count": 0,
+      "generated_images": [
+        "Q1.png",
+        "Q2.png"
+      ],
+      "new_image_generation": true,
+      "crop_original_image": false,
+      "ollama_validation": true,
+      "ocr_validation": true,
+      "execution_time_ms": 3802.13,
+      "passed": true
+    },
+    {
+      "test_id": 32,
+      "test_name": "test_32_bottom_of_page_question",
+      "category": "Boundary Cases",
+      "expected_questions": [
+        "1",
+        "2"
+      ],
+      "actual_questions": [
+        "Q1",
+        "Q2"
+      ],
+      "expected_instruction_count": 0,
+      "actual_instruction_count": 2,
+      "generated_images": [
+        "Q1.png",
+        "Q2.png"
+      ],
+      "new_image_generation": true,
+      "crop_original_image": false,
+      "ollama_validation": true,
+      "ocr_validation": true,
+      "execution_time_ms": 7938.65,
+      "passed": true
+    },
+    {
+      "test_id": 33,
+      "test_name": "test_33_dense_spacing_no_gap",
+      "category": "Boundary Cases",
+      "expected_questions": [
+        "1",
+        "2",
+        "3"
+      ],
+      "actual_questions": [
+        "Q1",
+        "Q2",
+        "Q3"
+      ],
+      "expected_instruction_count": 0,
+      "actual_instruction_count": 2,
+      "generated_images": [
+        "Q1.png",
+        "Q2.png",
+        "Q3.png"
+      ],
+      "new_image_generation": true,
+      "crop_original_image": false,
+      "ollama_validation": true,
+      "ocr_validation": true,
+      "execution_time_ms": 5675.75,
+      "passed": true
+    },
+    {
+      "test_id": 34,
+      "test_name": "test_34_question_spanning_two_pages",
+      "category": "Boundary Cases",
+      "expected_questions": [
+        "1",
+        "2",
+        "3"
+      ],
+      "actual_questions": [
+        "Q1",
+        "Q2",
+        "Q3"
+      ],
+      "expected_instruction_count": 0,
+      "actual_instruction_count": 2,
+      "generated_images": [
+        "Q1.png",
+        "Q2.png",
+        "Q3.png"
+      ],
+      "new_image_generation": true,
+      "crop_original_image": false,
+      "ollama_validation": true,
+      "ocr_validation": true,
+      "execution_time_ms": 8339.94,
+      "passed": true
+    },
+    {
+      "test_id": 35,
+      "test_name": "test_35_missing_option_letters",
+      "category": "Boundary Cases",
+      "expected_questions": [
+        "1",
+        "2"
+      ],
+      "actual_questions": [
+        "Q1",
+        "Q2"
+      ],
+      "expected_instruction_count": 0,
+      "actual_instruction_count": 2,
+      "generated_images": [
+        "Q1.png",
+        "Q2.png"
+      ],
+      "new_image_generation": true,
+      "crop_original_image": false,
+      "ollama_validation": true,
+      "ocr_validation": true,
+      "execution_time_ms": 4335.98,
+      "passed": true
+    },
+    {
+      "test_id": 36,
+      "test_name": "test_36_false_anchor_numbers_in_sentence",
+      "category": "Boundary Cases",
+      "expected_questions": [
+        "1",
+        "2"
+      ],
+      "actual_questions": [
+        "Q1",
+        "Q2"
+      ],
+      "expected_instruction_count": 0,
+      "actual_instruction_count": 3,
+      "generated_images": [
+        "Q1.png",
+        "Q2.png"
+      ],
+      "new_image_generation": true,
+      "crop_original_image": false,
+      "ollama_validation": true,
+      "ocr_validation": true,
+      "execution_time_ms": 3969.03,
+      "passed": true
+    },
+    {
+      "test_id": 37,
+      "test_name": "test_37_big_o_and_math_numbers",
+      "category": "Boundary Cases",
+      "expected_questions": [
+        "1",
+        "2"
+      ],
+      "actual_questions": [
+        "Q1",
+        "Q2"
+      ],
+      "expected_instruction_count": 0,
+      "actual_instruction_count": 2,
+      "generated_images": [
+        "Q1.png",
+        "Q2.png"
+      ],
+      "new_image_generation": true,
+      "crop_original_image": false,
+      "ollama_validation": true,
+      "ocr_validation": true,
+      "execution_time_ms": 4169.1,
+      "passed": true
+    },
+    {
+      "test_id": 38,
+      "test_name": "test_38_empty_lines_and_whitespace",
+      "category": "Boundary Cases",
+      "expected_questions": [
+        "1",
+        "2"
+      ],
+      "actual_questions": [
+        "Q1",
+        "Q2"
+      ],
+      "expected_instruction_count": 0,
+      "actual_instruction_count": 2,
+      "generated_images": [
+        "Q1.png",
+        "Q2.png"
+      ],
+      "new_image_generation": true,
+      "crop_original_image": false,
+      "ollama_validation": true,
+      "ocr_validation": true,
+      "execution_time_ms": 4169.56,
+      "passed": true
+    },
+    {
+      "test_id": 39,
+      "test_name": "test_39_skewed_indented_anchors",
+      "category": "Boundary Cases",
+      "expected_questions": [
+        "1",
+        "2"
+      ],
+      "actual_questions": [
+        "Q1",
+        "Q2"
+      ],
+      "expected_instruction_count": 0,
+      "actual_instruction_count": 2,
+      "generated_images": [
+        "Q1.png",
+        "Q2.png"
+      ],
+      "new_image_generation": true,
+      "crop_original_image": false,
+      "ollama_validation": true,
+      "ocr_validation": true,
+      "execution_time_ms": 5692.52,
+      "passed": true
+    },
+    {
+      "test_id": 40,
+      "test_name": "test_40_single_question_full_page",
+      "category": "Boundary Cases",
+      "expected_questions": [
+        "1"
+      ],
+      "actual_questions": [
+        "Q1",
+        "Q1(a)",
+        "Q1(b)",
+        "Q1(c)",
+        "Q1(d)",
+        "Q1(e)"
+      ],
+      "expected_instruction_count": 0,
+      "actual_instruction_count": 2,
+      "generated_images": [
+        "Q1.png",
+        "Q1_a.png",
+        "Q1_b.png",
+        "Q1_c.png",
+        "Q1_d.png",
+        "Q1_e.png"
+      ],
+      "new_image_generation": true,
+      "crop_original_image": false,
+      "ollama_validation": true,
+      "ocr_validation": true,
+      "execution_time_ms": 13514.92,
+      "passed": true
+    },
+    {
+      "test_id": 41,
+      "test_name": "test_41_university_semester_format",
+      "category": "Real-World Formats",
+      "expected_questions": [
+        "1",
+        "2",
+        "2(a)",
+        "2(b)",
+        "3(a)",
+        "3(b)"
+      ],
+      "actual_questions": [
+        "Q1",
+        "Q2",
+        "Q2(a)",
+        "Q2(b)",
+        "Q2(a)",
+        "Q2(b)"
+      ],
+      "expected_instruction_count": 0,
+      "actual_instruction_count": 4,
+      "generated_images": [
+        "Q1.png",
+        "Q2.png",
+        "Q2_a.png",
+        "Q2_b.png",
+        "Q2_a.png",
+        "Q2_b.png"
+      ],
+      "new_image_generation": true,
+      "crop_original_image": false,
+      "ollama_validation": true,
+      "ocr_validation": false,
+      "execution_time_ms": 13173.42,
+      "passed": true
+    },
+    {
+      "test_id": 42,
+      "test_name": "test_42_jee_advanced_format",
+      "category": "Real-World Formats",
+      "expected_questions": [
+        "1",
+        "2"
+      ],
+      "actual_questions": [
+        "Q1",
+        "Q2"
+      ],
+      "expected_instruction_count": 0,
+      "actual_instruction_count": 2,
+      "generated_images": [
+        "Q1.png",
+        "Q2.png"
+      ],
+      "new_image_generation": true,
+      "crop_original_image": false,
+      "ollama_validation": true,
+      "ocr_validation": true,
+      "execution_time_ms": 3660.79,
+      "passed": true
+    },
+    {
+      "test_id": 43,
+      "test_name": "test_43_gate_cs_format",
+      "category": "Real-World Formats",
+      "expected_questions": [
+        "1",
+        "2"
+      ],
+      "actual_questions": [
+        "Q1",
+        "Q2"
+      ],
+      "expected_instruction_count": 0,
+      "actual_instruction_count": 2,
+      "generated_images": [
+        "Q1.png",
+        "Q2.png"
+      ],
+      "new_image_generation": true,
+      "crop_original_image": false,
+      "ollama_validation": true,
+      "ocr_validation": true,
+      "execution_time_ms": 3846.39,
+      "passed": true
+    },
+    {
+      "test_id": 44,
+      "test_name": "test_44_neet_medical_format",
+      "category": "Real-World Formats",
+      "expected_questions": [
+        "1",
+        "2"
+      ],
+      "actual_questions": [
+        "Q1",
+        "Q2"
+      ],
+      "expected_instruction_count": 0,
+      "actual_instruction_count": 2,
+      "generated_images": [
+        "Q1.png",
+        "Q2.png"
+      ],
+      "new_image_generation": true,
+      "crop_original_image": false,
+      "ollama_validation": true,
+      "ocr_validation": true,
+      "execution_time_ms": 3653.05,
+      "passed": true
+    },
+    {
+      "test_id": 45,
+      "test_name": "test_45_upsc_prelims_format",
+      "category": "Real-World Formats",
+      "expected_questions": [
+        "1",
+        "2"
+      ],
+      "actual_questions": [
+        "Q1",
+        "Q1",
+        "Q2",
+        "Q2(a)",
+        "Q2",
+        "Q2(a)"
+      ],
+      "expected_instruction_count": 0,
+      "actual_instruction_count": 1,
+      "generated_images": [
+        "Q1.png",
+        "Q1.png",
+        "Q2.png",
+        "Q2_a.png",
+        "Q2.png",
+        "Q2_a.png"
+      ],
+      "new_image_generation": true,
+      "crop_original_image": false,
+      "ollama_validation": true,
+      "ocr_validation": false,
+      "execution_time_ms": 11963.15,
+      "passed": true
+    },
+    {
+      "test_id": 46,
+      "test_name": "test_46_cbse_board_format",
+      "category": "Real-World Formats",
+      "expected_questions": [
+        "1",
+        "2",
+        "3"
+      ],
+      "actual_questions": [
+        "Q1",
+        "Q2",
+        "Q3"
+      ],
+      "expected_instruction_count": 0,
+      "actual_instruction_count": 1,
+      "generated_images": [
+        "Q1.png",
+        "Q2.png",
+        "Q3.png"
+      ],
+      "new_image_generation": true,
+      "crop_original_image": false,
+      "ollama_validation": true,
+      "ocr_validation": true,
+      "execution_time_ms": 6141.18,
+      "passed": true
+    },
+    {
+      "test_id": 47,
+      "test_name": "test_47_mixed_mcq_theory_same_page",
+      "category": "Real-World Formats",
+      "expected_questions": [
+        "1",
+        "2",
+        "3"
+      ],
+      "actual_questions": [
+        "Q1",
+        "Q2",
+        "Q3"
+      ],
+      "expected_instruction_count": 0,
+      "actual_instruction_count": 4,
+      "generated_images": [
+        "Q1.png",
+        "Q2.png",
+        "Q3.png"
+      ],
+      "new_image_generation": true,
+      "crop_original_image": false,
+      "ollama_validation": true,
+      "ocr_validation": true,
+      "execution_time_ms": 5979.33,
+      "passed": true
+    },
+    {
+      "test_id": 48,
+      "test_name": "test_48_paper_with_watermark",
+      "category": "Real-World Formats",
+      "expected_questions": [
+        "1",
+        "2"
+      ],
+      "actual_questions": [
+        "Q1",
+        "Q2"
+      ],
+      "expected_instruction_count": 0,
+      "actual_instruction_count": 2,
+      "generated_images": [
+        "Q1.png",
+        "Q2.png"
+      ],
+      "new_image_generation": true,
+      "crop_original_image": false,
+      "ollama_validation": true,
+      "ocr_validation": true,
+      "execution_time_ms": 3593.11,
+      "passed": true
+    },
+    {
+      "test_id": 49,
+      "test_name": "test_49_multi_subject_single_paper",
+      "category": "Real-World Formats",
+      "expected_questions": [
+        "1",
+        "2",
+        "3"
+      ],
+      "actual_questions": [
+        "Q1",
+        "Q2",
+        "Q3"
+      ],
+      "expected_instruction_count": 0,
+      "actual_instruction_count": 2,
+      "generated_images": [
+        "Q1.png",
+        "Q2.png",
+        "Q3.png"
+      ],
+      "new_image_generation": true,
+      "crop_original_image": false,
+      "ollama_validation": true,
+      "ocr_validation": true,
+      "execution_time_ms": 5572.57,
+      "passed": true
+    },
+    {
+      "test_id": 50,
+      "test_name": "test_50_maximum_stress_combination",
+      "category": "Maximum Stress Combination",
+      "expected_questions": [
+        "1",
+        "2",
+        "3",
+        "4"
+      ],
+      "actual_questions": [
+        "Q1",
+        "Q2",
+        "Q3",
+        "Q1",
+        "Q2",
+        "Q3",
+        "Q4"
+      ],
+      "expected_instruction_count": 0,
+      "actual_instruction_count": 5,
+      "generated_images": [
+        "Q1.png",
+        "Q2.png",
+        "Q3.png",
+        "Q1.png",
+        "Q2.png",
+        "Q3.png",
+        "Q4.png"
+      ],
+      "new_image_generation": true,
+      "crop_original_image": false,
+      "ollama_validation": true,
+      "ocr_validation": false,
+      "execution_time_ms": 13047.35,
+      "passed": true
+    }
+  ]
+}

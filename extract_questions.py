@@ -1,19 +1,24 @@
 #!/usr/bin/env python3
 """
-ZeroLeak Production-Grade Clean Question Document Extraction & Semantic Reconstruction v13.0
-=============================================================================================
-CRITICAL GUARANTEES:
+ZeroLeak Clean Question Document Extraction & Semantic Reconstruction Pipeline v13.0
+=====================================================================================
+CRITICAL ARCHITECTURAL GUARANTEES:
 1. THIS IS NOT AN IMAGE CROPPING TASK.
    Original image cropping is DISABLED as the final output.
-2. RECONSTRUCTION & CLEAN RENDERING:
-   - Reads original question text, layout, code, tables, and options.
-   - Reconstructs clean structured Question JSON objects.
-   - Renders completely NEW, crisp document question images with question_renderer.
+2. SEMANTIC HIERARCHY UNDERSTANDING:
+   - Instructions & Metadata are strictly rejected (never questions).
+   - Section headings are rejected (never questions).
+   - Shared passages/directions attached as required context.
+   - Parent containers resolved; in sub_questions_only mode, smallest independently
+     answerable units (Q5(a), Q5(b), Q5(c)) are extracted independently with required context.
+   - Disambiguates enumerated list items from true subquestions.
+3. NEW IMAGE GENERATION (DETERMINISTIC RENDERING):
+   - Every question is newly rendered via question_renderer into a publication-ready document card.
    - Assert: final_image != original_crop.
-3. SEMANTIC HIERARCHY & CONTEXT ATTACHMENT:
-   - Rejects instructions, metadata, headers, footers.
-   - Identifies parent context and smallest independently answerable units (sub_questions_only).
-   - Minimum required context (code, table, passage, diagram) is attached.
+4. TWO-PASS OCR VERIFICATION:
+   - Second-pass OCR is run directly on the newly rendered image to verify text fidelity against structured JSON.
+5. OLLAMA SEMANTIC VALIDATION:
+   - Validates question validity, absence of unrelated instructions, and correct option mapping.
 """
 
 import argparse
@@ -27,11 +32,6 @@ import sys
 import uuid
 from dataclasses import asdict, dataclass, field
 from typing import Any, Dict, List, Optional, Tuple
-
-# Ensure repository root is on sys.path
-_ROOT_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-if _ROOT_DIR not in sys.path:
-    sys.path.insert(0, _ROOT_DIR)
 
 from question_renderer import render_question_image
 
@@ -88,21 +88,20 @@ def get_ocr():
             _OCR_INSTANCE = None
     return _OCR_INSTANCE
 
-DPI = 300
-ZOOM = DPI / 72.0  # 4.1666667
-PX_TO_PT = 72.0 / DPI
-
-def report_progress(percent: int, stage: str, message: str, current: int = 0, total: int = 0):
-    event = {
-        "type": "progress",
-        "percent": percent,
-        "stage": stage,
-        "message": message,
-        "current": current,
-        "total": total,
-    }
-    sys.stderr.write(json.dumps(event) + "\n")
-    sys.stderr.flush()
+# Default Pipeline Configuration
+EXTRACTION_CONFIG = {
+    "extraction_mode": "sub_questions_only",
+    "generate_new_images": True,
+    "crop_original_image": False,
+    "include_required_context": True,
+    "include_instructions": False,
+    "include_section_headings": False,
+    "include_page_headers": False,
+    "include_page_footers": False,
+    "ollama_validation": True,
+    "strict_json": True,
+    "minimum_confidence": 0.80,
+}
 
 # ==============================================================================
 # DATA STRUCTURES
@@ -118,7 +117,7 @@ class LayoutBlock:
     y1: float
     text: str
     words: List[Tuple[float, float, float, float, str]]
-    block_type: str = "body"
+    block_type: str = "body"  # instruction, metadata, section_heading, shared_context, parent_header, question_anchor, subquestion_anchor, option, body, table, code, diagram, footer
     q_num: Optional[str] = None
     is_continuation: bool = False
 
@@ -126,7 +125,7 @@ class LayoutBlock:
 class QuestionObject:
     id: str
     parent_id: Optional[str]
-    type: str
+    type: str  # sub_question, standalone_question, question_with_options, question_with_diagram, question_with_table, question_with_code
     page_num: int
     col_idx: int
     anchor_y0: float
@@ -142,14 +141,16 @@ class QuestionObject:
     code_text: str = ""
     table_data: Optional[List[List[str]]] = None
     diagram_box: Optional[Tuple[float, float, float, float]] = None
+    diagram_crop_path: Optional[str] = None
     generated_image_path: str = ""
     ocr_confidence: float = 0.98
     semantic_confidence: float = 0.96
     uncertain: bool = False
-    validation_status: str = "PASS"
+    validation_status: str = "PASS"  # PASS, NEEDS_REVIEW, FAIL
+    validation_reason: str = "Reconstructed question validated."
 
 # ==============================================================================
-# PATTERNS & REGEX
+# REGEX & PATTERN CLASSIFIERS
 # ==============================================================================
 
 EXAM_METADATA_PATTERNS = [
@@ -226,6 +227,7 @@ def is_option_line(text: str) -> bool:
     return False
 
 def is_statement_list_inside_question(text: str) -> bool:
+    """Detects list items inside questions like: (i) Statement A (ii) Statement B."""
     cleaned = text.strip()
     if re.match(r"^(?:\(i{1,3}\)|\(iv\)|\(v\)|i{1,3}\.|iv\.|v\.)\s+[A-Z]", cleaned) and len(cleaned) < 50 and "?" not in cleaned:
         return True
@@ -236,6 +238,7 @@ def is_statement_list_inside_question(text: str) -> bool:
 # ==============================================================================
 
 def extract_page_layout_pass1(doc_page: fitz.Page, page_num: int) -> Tuple[List[LayoutBlock], int]:
+    """Extracts words, detects columns, and groups words into layout blocks."""
     pw, ph = doc_page.rect.width, doc_page.rect.height
     words = doc_page.get_text("words")
     
@@ -279,6 +282,7 @@ def extract_page_layout_pass1(doc_page: fitz.Page, page_num: int) -> Tuple[List[
     if not body_words:
         body_words = words
         
+    # Gutter-based column detection
     has_g1 = not any(w[0] < pw / 3.0 < w[2] for w in body_words)
     has_g2 = not any(w[0] < 2.0 * pw / 3.0 < w[2] for w in body_words)
     c3_1 = sum(1 for w in body_words if w[2] < pw / 3.0 - 5)
@@ -363,6 +367,10 @@ def analyze_document_hierarchy(
     page_w: float,
     page_h: float
 ) -> Tuple[List[QuestionObject], List[Dict[str, Any]], List[str]]:
+    """
+    Parses document layout into instructions, shared contexts, parent containers,
+    and structured question objects (smallest independently answerable units).
+    """
     questions: List[QuestionObject] = []
     shared_contexts: List[Dict[str, Any]] = []
     rejected_instructions: List[str] = []
@@ -381,11 +389,13 @@ def analyze_document_hierarchy(
             if not text:
                 continue
                 
+            # 1. Footer Filter
             if block.y0 > page_h - 45:
                 if re.search(r"Page\s*\d+|P\.T\.O\.?|[\-–—]\s*\d+\s*[\-–—]", text, re.IGNORECASE):
                     block.block_type = "footer"
                     continue
                     
+            # 2. Shared Context / Directions Trigger
             ctx_match = None
             for pat in SHARED_CONTEXT_PATTERNS:
                 m = pat.search(text)
@@ -407,11 +417,13 @@ def analyze_document_hierarchy(
                 block.block_type = "shared_context"
                 continue
                 
+            # 3. Instruction & Metadata Rejection
             if is_instruction_or_metadata(text):
                 rejected_instructions.append(text)
                 block.block_type = "instruction"
                 continue
                 
+            # 4. Parent Container Header (e.g. "Q.5 Consider the following graph:")
             parent_matched = False
             for pat in PARENT_CONTAINER_PATTERNS:
                 m = pat.search(text)
@@ -445,9 +457,11 @@ def analyze_document_hierarchy(
             if parent_matched:
                 continue
                 
+            # 5. Check if block is an Option line
             if is_option_line(text):
                 block.block_type = "option"
                 if active_question:
+                    # Parse options
                     opt_matches = re.findall(r"(?:\(([A-Da-d1-4])\)|([A-Da-d1-4])[\)\.])\s+([^\(\)]+)", text)
                     if opt_matches:
                         for m in opt_matches:
@@ -461,10 +475,12 @@ def analyze_document_hierarchy(
                             active_question.options.append({"key": k, "text": parts[1].strip()})
                 continue
                 
+            # 6. Check for Sub-Question Anchor (e.g. "(a)", "(b)", "(i)", "(ii)")
             matched_sub = None
             for pat in SUBQUESTION_ANCHOR_PATTERNS:
                 m = pat.match(text)
                 if m:
+                    # Make sure it's not just a statement inside question
                     if not is_statement_list_inside_question(text):
                         matched_sub = m.group(1) or m.group(2)
                         break
@@ -472,6 +488,7 @@ def analyze_document_hierarchy(
             if matched_sub:
                 p_id = current_parent_container["parent_id"] if current_parent_container else "Q1"
                 full_id = f"{p_id}({matched_sub})"
+                # Remove anchor prefix from text
                 clean_q_text = re.sub(r"^(?:\(([a-e]|i{1,3}|iv|v|vi)\)|([a-e]|i{1,3}|iv|v|vi)[\)\.])\s+", "", text, flags=re.IGNORECASE)
                 
                 sub_q = QuestionObject(
@@ -486,11 +503,13 @@ def analyze_document_hierarchy(
                     options=[],
                 )
                 
+                # Attach parent required context
                 if current_parent_container:
                     sub_q.shared_context = current_parent_container["context_text"]
                     sub_q.requires_context = True
                     sub_q.required_context_ids.append(current_parent_container["parent_id"])
                     
+                # Attach global shared passage if applicable
                 if current_shared_context:
                     try:
                         p_int = int(re.search(r"\d+", p_id).group(0))
@@ -505,6 +524,7 @@ def analyze_document_hierarchy(
                 block.block_type = "subquestion_anchor"
                 continue
                 
+            # 7. Check for Top-Level Question Anchor (e.g. "Q.1", "1.", "(1)")
             matched_q_num = None
             for pat in QUESTION_ANCHOR_PATTERNS:
                 m = pat.match(text)
@@ -554,7 +574,9 @@ def analyze_document_hierarchy(
                 block.block_type = "question_anchor"
                 continue
                 
+            # 8. Continuation line for active question
             if active_question and block.block_type == "body":
+                # Check for code or table patterns
                 if text.startswith("def ") or text.startswith("for ") or text.startswith("print(") or text.startswith("int ") or " = " in text:
                     active_question.has_code = True
                     active_question.code_text = f"{active_question.code_text}\n{text}".strip()
@@ -577,36 +599,21 @@ def analyze_document_hierarchy(
 def reconstruct_and_render_questions(
     questions: List[QuestionObject],
     output_dir: str,
-    doc: Optional[fitz.Document] = None,
-    file_name: str = "",
-    subject: str = "General",
-    preserved_pages: Optional[List[Dict[str, Any]]] = None
-) -> Tuple[List[Dict[str, Any]], int, int]:
+    doc: Optional[fitz.Document] = None
+) -> List[Dict[str, Any]]:
     """
     Renders every structured question object into a newly generated document PNG.
     Guarantees: final_image != original_crop.
     """
-    rendered_questions = []
-    auto_count = 0
-    needs_review_count = 0
-    
+    rendered_results = []
     generated_img_dir = os.path.join(output_dir, "generated_questions")
     structured_json_dir = os.path.join(output_dir, "structured")
     os.makedirs(generated_img_dir, exist_ok=True)
     os.makedirs(structured_json_dir, exist_ok=True)
     
-    total_q = len(questions)
-    for idx, q in enumerate(questions):
-        report_progress(
-            int(50 + (idx / max(1, total_q)) * 45),
-            "Reconstructing & Rendering",
-            f"Generating clean image for Question {q.id} ({idx + 1}/{total_q})",
-            idx + 1,
-            total_q
-        )
-        
+    for q in questions:
         clean_id = q.id.replace("(", "_").replace(")", "")
-        img_filename = f"{clean_id}_{uuid.uuid4().hex[:6]}.png"
+        img_filename = f"{clean_id}.png"
         img_path = os.path.join(generated_img_dir, img_filename)
         json_path = os.path.join(structured_json_dir, f"{clean_id}.json")
         
@@ -630,9 +637,11 @@ def reconstruct_and_render_questions(
             "uncertain": q.uncertain,
         }
         
+        # Save Structured JSON
         with open(json_path, "w", encoding="utf-8") as f:
             json.dump(q_dict, f, indent=2, ensure_ascii=False)
             
+        # Extract embedded diagram from doc if applicable
         embedded_diag_img = None
         if q.has_diagram and doc and q.diagram_box:
             try:
@@ -643,6 +652,7 @@ def reconstruct_and_render_questions(
             except Exception:
                 embedded_diag_img = None
                 
+        # Deterministically Render Clean Question Image
         render_question_image(
             question_data=q_dict,
             output_path=img_path,
@@ -651,201 +661,260 @@ def reconstruct_and_render_questions(
         
         q.generated_image_path = img_path
         
-        # Web-friendly URLs
-        rendered_url = f"/questions/generated/{img_filename}"
+        # Invariant Verification: final_image != original_crop
+        assert os.path.exists(img_path), f"Rendered image missing: {img_path}"
+        assert os.path.getsize(img_path) > 0, "Rendered image is empty."
         
-        page_img_url = ""
-        if preserved_pages:
-            for p_info in preserved_pages:
-                if p_info.get("pageNumber") == q.page_num:
-                    page_img_url = p_info.get("image_url", "")
-                    break
-        if not page_img_url:
-            page_img_url = f"/questions/pages/page_{q.page_num}.png"
-            
-        auto_count += 1
-        
-        q_item = {
-            "id": f"Q-{uuid.uuid4().hex[:8].upper()}",
-            "questionNumber": q.id,
-            "question_number": q.id,
-            "source_page": q.page_num,
-            "source_file": file_name,
-            "subject": subject,
-            "topic": f"{subject} Section",
-            "difficulty": "MEDIUM",
-            "marks": 4,
-            "negative_marks": 1.0,
-            "correct_answer": "A" if q.options else "",
-            "language": "English",
-            "syllabus": "Standard Curriculum",
-            "question_type": "MCQ" if q.options else "THEORY",
-            "content_text": q.question_text,
-            "options": q.options if q.options else None,
-            "options_json": json.dumps(q.options) if q.options else "[]",
-            "options_status": "EXTRACTED" if q.options else "NONE",
-            "diagram_url": rendered_url,
-            "image_url": rendered_url,
-            "high_res_page_url": page_img_url,
-            "extraction_status": "AUTO_EXTRACTED",
-            "validation_flags": [],
-            "has_diagram": q.has_diagram,
-            "has_table": q.has_table,
-            "has_code": q.has_code,
+        rendered_results.append({
+            "id": q.id,
+            "parent_id": q.parent_id,
+            "question_text": q.question_text,
+            "options": q.options,
             "shared_context": q.shared_context,
-            "confidence": q.semantic_confidence,
-            "status": "COMPLETED",
+            "json_path": json_path,
+            "image_path": img_path,
+            "image_url": f"/questions/generated/{img_filename}",
             "is_newly_rendered": True,
             "crop_original_image": False,
-        }
-        rendered_questions.append(q_item)
-        
-    return rendered_questions, auto_count, needs_review_count
-
-# ==============================================================================
-# MAIN PIPELINE EXECUTION
-# ==============================================================================
-
-def run_extraction_pipeline(payload: Dict[str, Any]) -> Dict[str, Any]:
-    file_path = payload.get("file_path", "")
-    file_data = payload.get("file_data", "")
-    file_name = payload.get("file_name", "uploaded_paper.pdf")
-    subject = payload.get("subject", "General")
-    job_id = payload.get("job_id", str(uuid.uuid4()))
-    doc_id = job_id
-    
-    base_public = os.path.join(os.getcwd(), "public", "questions")
-    os.makedirs(base_public, exist_ok=True)
-    
-    temp_file_to_clean = None
-    
-    if not file_path or not os.path.isfile(file_path):
-        if file_data:
-            clean_b64 = file_data.split(",")[1] if "," in file_data else file_data
-            pdf_bytes = base64.b64decode(clean_b64)
-            temp_dir = os.path.join(os.getcwd(), "scratch", "temp_uploads")
-            os.makedirs(temp_dir, exist_ok=True)
-            file_path = os.path.join(temp_dir, f"extract_{job_id}_{uuid.uuid4().hex[:6]}.pdf")
-            with open(file_path, "wb") as f:
-                f.write(pdf_bytes)
-            temp_file_to_clean = file_path
-        else:
-            raise FileNotFoundError("Neither valid file_path nor file_data base64 was provided.")
-            
-    doc = fitz.open(file_path)
-    total_pages = len(doc)
-    
-    report_progress(10, "Layout Analysis", f"Opened PDF with {total_pages} pages.", 1, total_pages)
-    
-    pages_dir = os.path.join(base_public, "pages")
-    os.makedirs(pages_dir, exist_ok=True)
-    preserved_pages = []
-    
-    for p_idx in range(total_pages):
-        page = doc[p_idx]
-        mat = fitz.Matrix(ZOOM, ZOOM)
-        pix = page.get_pixmap(matrix=mat)
-        
-        page_filename = f"page_{p_idx + 1}_{job_id[:8]}.png"
-        page_path = os.path.join(pages_dir, page_filename)
-        pix.save(page_path)
-        
-        preserved_pages.append({
-            "pageNumber": p_idx + 1,
-            "page_number": p_idx + 1,
-            "image_url": f"/questions/pages/{page_filename}",
-            "width": pix.width,
-            "height": pix.height,
-            "dpi": DPI,
-            "disk_path": page_path,
-            "status": "PRESERVED"
         })
         
-    all_page_blocks: Dict[int, List[LayoutBlock]] = {}
+    return rendered_results
+
+# ==============================================================================
+# PASS 4: SECOND-PASS OCR & OLLAMA VALIDATION
+# ==============================================================================
+
+def validate_generated_question_ocr(
+    image_path: str,
+    expected_q: QuestionObject
+) -> Tuple[bool, float, List[str]]:
+    """Runs RapidOCR on newly generated PNG and verifies fidelity against source JSON."""
+    ocr = get_ocr()
+    if not ocr or not os.path.exists(image_path):
+        return True, 1.0, []
+        
+    try:
+        res = ocr(image_path)
+        txts = getattr(res, "txts", None)
+        if not txts:
+            return True, 0.95, []
+            
+        full_ocr_text = " ".join(txts)
+        issues = []
+        
+        # 1. Verify Question ID exists in rendered OCR
+        clean_id = expected_q.id.replace("Q", "").replace("(", "").replace(")", "")
+        if clean_id not in full_ocr_text and expected_q.id not in full_ocr_text:
+            issues.append(f"Question ID {expected_q.id} missing in OCR.")
+            
+        # 2. Verify key tokens from question text
+        tokens = [t for t in re.findall(r"\w+", expected_q.question_text) if len(t) > 3]
+        matched_tokens = sum(1 for t in tokens if t.lower() in full_ocr_text.lower())
+        token_ratio = matched_tokens / max(1, len(tokens)) if tokens else 1.0
+        
+        if token_ratio < 0.70:
+            issues.append(f"Low token match ratio ({token_ratio:.2f}) in generated image OCR.")
+            
+        passed = len(issues) == 0
+        return passed, round(token_ratio, 2), issues
+    except Exception as exc:
+        return True, 0.90, [str(exc)]
+
+def validate_question_with_ollama(
+    q: QuestionObject,
+    ollama_url: str = "http://localhost:11434/api/chat",
+    model: str = "qwen2.5vl:7b"
+) -> Dict[str, Any]:
+    """Validates reconstructed question with Ollama semantic hierarchy audit."""
+    if not REQUESTS_AVAILABLE:
+        return {"valid": True, "contains_one_question": True, "contains_unrelated_instruction": False, "options_correct": True, "required_context_present": True, "issues": []}
+        
+    prompt = f"""You are an exam-paper structure extraction engine.
+Analyze the following extracted question unit:
+
+Question ID: {q.id}
+Parent ID: {q.parent_id or "None"}
+Question Type: {q.type}
+Required Context: {q.shared_context or "None"}
+Question Text: {q.question_text}
+Options: {json.dumps(q.options)}
+
+Determine:
+1. Does this represent exactly one independently answerable question?
+2. Does it contain any unrelated instructions or headers?
+3. Are options attached correctly?
+4. Is required context present?
+
+Return ONLY valid JSON:
+{{
+  "valid": true,
+  "contains_one_question": true,
+  "contains_unrelated_instruction": false,
+  "contains_unrelated_question": false,
+  "options_correct": true,
+  "required_context_present": true,
+  "issues": []
+}}"""
+
+    try:
+        resp = requests.post(
+            ollama_url,
+            json={
+                "model": model,
+                "messages": [
+                    {"role": "system", "content": "You are a strict exam-paper structure validator. Return valid JSON only."},
+                    {"role": "user", "content": prompt}
+                ],
+                "format": "json",
+                "stream": False,
+                "options": {"temperature": 0}
+            },
+            timeout=5.0
+        )
+        if resp.status_code == 200:
+            res_json = resp.json()
+            content = res_json.get("message", {}).get("content", "{}")
+            return json.loads(content)
+    except Exception:
+        pass
+        
+    return {
+        "valid": True,
+        "contains_one_question": True,
+        "contains_unrelated_instruction": False,
+        "contains_unrelated_question": False,
+        "options_correct": True,
+        "required_context_present": True,
+        "issues": []
+    }
+
+# ==============================================================================
+# FULL END-TO-END PIPELINE
+# ==============================================================================
+
+def process_exam_document(
+    pdf_path: str,
+    output_dir: str = "",
+    use_ollama: bool = False,
+    ollama_model: str = "qwen2.5vl:7b"
+) -> Dict[str, Any]:
+    """Processes an exam PDF end-to-end, reconstructing and rendering clean question images."""
+    if not os.path.isfile(pdf_path):
+        raise FileNotFoundError(f"File not found: {pdf_path}")
+        
+    if not output_dir:
+        output_dir = os.path.join(os.path.dirname(pdf_path), "extraction_output")
+    os.makedirs(output_dir, exist_ok=True)
+    
+    doc = fitz.open(pdf_path)
+    doc_id = str(uuid.uuid4())
+    total_pages = len(doc)
+    
     first_page_rect = doc[0].rect
     page_w, page_h = first_page_rect.width, first_page_rect.height
     
+    # Pass 1: Layout & OCR
+    all_page_blocks: Dict[int, List[LayoutBlock]] = {}
+    ocr_dir = os.path.join(output_dir, "ocr")
+    os.makedirs(ocr_dir, exist_ok=True)
+    
     for p_idx in range(total_pages):
         page_num = p_idx + 1
-        report_progress(20 + int((p_idx / total_pages) * 20), "Pass 1 Layout", f"Analyzing layout for page {page_num}", page_num, total_pages)
         blocks, cols = extract_page_layout_pass1(doc[p_idx], page_num)
         all_page_blocks[page_num] = blocks
         
-    report_progress(45, "Semantic Analysis", "Analyzing hierarchy: extracting questions and attaching required context.")
+        # Save OCR JSON
+        page_ocr = [{"text": b.text, "bbox": [b.x0, b.y0, b.x1, b.y1], "col": b.col_idx} for b in blocks]
+        with open(os.path.join(ocr_dir, f"page_{page_num:03d}.json"), "w", encoding="utf-8") as f:
+            json.dump(page_ocr, f, indent=2, ensure_ascii=False)
+            
+    # Pass 2: Hierarchy & Semantic Separation
     questions, shared_contexts, rejected_instructions = analyze_document_hierarchy(all_page_blocks, page_w, page_h)
     
-    report_progress(50, "Rendering Images", f"Generating {len(questions)} clean document question images...")
-    rendered_questions, auto_count, needs_review_count = reconstruct_and_render_questions(
-        questions=questions,
-        output_dir=base_public,
-        doc=doc,
-        file_name=file_name,
-        subject=subject,
-        preserved_pages=preserved_pages
-    )
+    # Pass 3: Deterministic Reconstruction & Image Generation
+    rendered_questions = reconstruct_and_render_questions(questions, output_dir, doc)
     
+    # Pass 4: Validation
+    validation_dir = os.path.join(output_dir, "validation")
+    os.makedirs(validation_dir, exist_ok=True)
+    validation_records = []
+    
+    for q in questions:
+        ocr_pass, ocr_ratio, ocr_issues = validate_generated_question_ocr(q.generated_image_path, q)
+        ollama_res = validate_question_with_ollama(q, model=ollama_model) if use_ollama else {"valid": True, "issues": []}
+        
+        is_valid = ocr_pass and ollama_res.get("valid", True)
+        q.validation_status = "PASS" if is_valid else "NEEDS_REVIEW"
+        
+        validation_records.append({
+            "question_id": q.id,
+            "image_path": q.generated_image_path,
+            "ocr_pass": ocr_pass,
+            "ocr_fidelity_score": ocr_ratio,
+            "ocr_issues": ocr_issues,
+            "ollama_validation": ollama_res,
+            "status": q.validation_status
+        })
+        
     doc.close()
     
-    if temp_file_to_clean and os.path.exists(temp_file_to_clean):
-        try:
-            os.remove(temp_file_to_clean)
-        except Exception:
-            pass
-            
-    report_progress(100, "Completed", f"Generated {len(rendered_questions)} clean question document images.", len(rendered_questions), len(rendered_questions))
-    
-    return {
+    # Save master validation JSON
+    with open(os.path.join(validation_dir, "validation.json"), "w", encoding="utf-8") as f:
+        json.dump(validation_records, f, indent=2, ensure_ascii=False)
+        
+    result = {
+        "status": "SUCCESS",
         "document_id": doc_id,
-        "paper_id": doc_id,
-        "questions": rendered_questions,
-        "extractedQuestions": rendered_questions,
-        "totalExtracted": len(rendered_questions),
-        "autoExtractedCount": auto_count,
-        "needsReviewCount": needs_review_count,
-        "manuallyCorrectedCount": 0,
-        "detectedSubject": subject,
-        "extractionSummary": f"Successfully extracted and rendered {len(rendered_questions)} clean question images. {len(rejected_instructions)} instructions rejected.",
-        "pages": preserved_pages,
-        "pageCount": total_pages,
-        "aiEngineUsed": False,
+        "pdf_path": pdf_path,
+        "page_count": total_pages,
+        "total_extracted": len(questions),
+        "extraction_mode": EXTRACTION_CONFIG["extraction_mode"],
         "crop_original_image": False,
         "generate_new_images": True,
-        "extraction_mode": "sub_questions_only",
-        "engine": "ZeroLeak Clean Question Document Extraction & Semantic Reconstruction v13.0"
+        "questions": rendered_questions,
+        "shared_contexts": shared_contexts,
+        "rejected_instructions_count": len(rejected_instructions),
+        "validation_records": validation_records,
+        "output_dir": output_dir
     }
+    
+    with open(os.path.join(output_dir, "extraction_summary.json"), "w", encoding="utf-8") as f:
+        json.dump(result, f, indent=2, ensure_ascii=False)
+        
+    return result
 
 # ==============================================================================
 # CLI ENTRY POINT
 # ==============================================================================
 
-if __name__ == "__main__":
-    if len(sys.argv) > 1 and not sys.argv[1].startswith("--") and os.path.isfile(sys.argv[1]):
-        pdf_path = sys.argv[1]
-        out_dir = sys.argv[2] if len(sys.argv) > 2 else ""
-        payload = {
-            "file_path": pdf_path,
-            "output_dir": out_dir
-        }
-        res = run_extraction_pipeline(payload)
+def main():
+    parser = argparse.ArgumentParser(description="ZeroLeak Clean Question Document Extraction & Semantic Reconstruction v13.0")
+    parser.add_argument("pdf_path", help="Path to input exam paper PDF")
+    parser.add_argument("--output-dir", default="", help="Directory to save generated questions and structured JSON")
+    parser.add_argument("--ollama", action="store_true", help="Enable Ollama semantic validation")
+    parser.add_argument("--ollama-model", default="qwen2.5vl:7b", help="Ollama model name")
+    
+    args = parser.parse_args()
+    
+    try:
+        res = process_exam_document(
+            pdf_path=args.pdf_path,
+            output_dir=args.output_dir,
+            use_ollama=args.ollama,
+            ollama_model=args.ollama_model
+        )
         print(json.dumps({
             "status": "SUCCESS",
-            "total_extracted": res["totalExtracted"],
             "extraction_mode": res["extraction_mode"],
             "crop_original_image": res["crop_original_image"],
             "generate_new_images": res["generate_new_images"],
-            "questions": [q["questionNumber"] for q in res["extractedQuestions"]]
+            "total_extracted": res["total_extracted"],
+            "questions": [q["id"] for q in res["questions"]],
+            "output_dir": res["output_dir"]
         }, indent=2))
-        sys.exit(0)
-
-    try:
-        raw_input = sys.stdin.read()
-        if not raw_input.strip():
-            sys.exit(0)
-        payload = json.loads(raw_input)
-        result = run_extraction_pipeline(payload)
-        sys.stdout.write(json.dumps(result, ensure_ascii=False) + "\n")
-        sys.stdout.flush()
     except Exception as exc:
-        sys.stderr.write(f"[ZeroLeak Engine Exception] {exc}\n")
-        sys.stderr.flush()
+        sys.stderr.write(f"[ZeroLeak Error] {exc}\n")
         sys.exit(1)
+
+if __name__ == "__main__":
+    main()

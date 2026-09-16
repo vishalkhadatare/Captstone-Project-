@@ -39,3 +39,9 @@ NaviDC-OCR/outputs/
 *.bin
 .cache/
 
+# Generated questions and test suites
+test_results/
+output/
+tests/synthetic_data/
+public/uploads/
+

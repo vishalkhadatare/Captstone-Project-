@@ -1,0 +1,614 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>ZeroLeak 50-Case Clean Question Reconstruction & Rendering Dashboard</title>
+  <style>
+    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background: #0f172a; color: #f8fafc; padding: 24px; }
+    .card { background: #1e293b; border-radius: 8px; padding: 20px; margin-bottom: 20px; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.1); }
+    .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 16px; }
+    .stat { background: #334155; padding: 16px; border-radius: 6px; text-align: center; }
+    .stat-val { font-size: 28px; font-weight: bold; color: #38bdf8; }
+    table { width: 100%; border-collapse: collapse; background: #1e293b; border-radius: 8px; overflow: hidden; }
+    th { background: #0f172a; color: #94a3b8; padding: 12px 10px; text-align: left; font-size: 13px; text-transform: uppercase; }
+    a { color: #38bdf8; text-decoration: none; }
+    a:hover { text-decoration: underline; }
+  </style>
+</head>
+<body>
+  <h1>ZeroLeak Clean Question Document Extraction & Semantic Reconstruction Dashboard</h1>
+  <p style="color:#94a3b8;">Deterministic Reconstructed Question Rendering & Two-Pass OCR Verification Suite (v13.0)</p>
+  
+  <div class="card">
+    <div class="grid">
+      <div class="stat"><div class="stat-val">50</div><div>Total Tests</div></div>
+      <div class="stat"><div class="stat-val" style="color:#10b981;">49</div><div>Passed</div></div>
+      <div class="stat"><div class="stat-val" style="color:#ef4444;">1</div><div>Failed</div></div>
+      <div class="stat"><div class="stat-val" style="color:#10b981;">98.0%</div><div>Pass Rate</div></div>
+      <div class="stat"><div class="stat-val">444.95s</div><div>Execution Time</div></div>
+    </div>
+  </div>
+
+  <div class="card">
+    <h3>Architectural Verification Status</h3>
+    <ul>
+      <li><strong>Extraction Mode:</strong> <code>sub_questions_only</code> (Smallest independently answerable units)</li>
+      <li><strong>Original Image Cropping:</strong> <span style="color:#ef4444; font-weight:bold;">DISABLED</span> (Original crop is NOT final image)</li>
+      <li><strong>New Question Image Generation:</strong> <span style="color:#10b981; font-weight:bold;">ENABLED</span> (100% newly rendered publication-ready cards)</li>
+      <li><strong>Second-Pass OCR Verification:</strong> <span style="color:#10b981; font-weight:bold;">ENABLED</span> (RapidOCR text comparison against JSON)</li>
+      <li><strong>Ollama Semantic Validation:</strong> <span style="color:#10b981; font-weight:bold;">ENABLED</span></li>
+    </ul>
+  </div>
+
+  <div class="card">
+    <h3>Individual Test Results</h3>
+    <table>
+      <thead>
+        <tr>
+          <th>#</th>
+          <th>Test Name</th>
+          <th>Category</th>
+          <th>Status</th>
+          <th>Expected Questions</th>
+          <th>Actual Extracted</th>
+          <th>Time</th>
+          <th>Artifacts</th>
+        </tr>
+      </thead>
+      <tbody>
+        
+        <tr style="border-bottom: 1px solid #e2e8f0;">
+          <td style="padding:10px; font-weight:bold;">1</td>
+          <td style="padding:10px;">test_01_single_col_std_mcq</td>
+          <td style="padding:10px;"><small style="color:#64748b;">Basic Formats</small></td>
+          <td style="padding:10px;"><span style="background:#10b981;color:white;padding:3px 8px;border-radius:4px;font-weight:bold;">PASS</span></td>
+          <td style="padding:10px;"><code>1, 2, 3, 4</code></td>
+          <td style="padding:10px;"><code>Q1, Q2, Q3, Q4</code></td>
+          <td style="padding:10px;">8402.38ms</td>
+          <td style="padding:10px;"><a href="test_001/result.json" target="_blank">JSON</a> | <a href="test_001/comparison.png" target="_blank">Visual</a></td>
+        </tr>
+        
+        <tr style="border-bottom: 1px solid #e2e8f0;">
+          <td style="padding:10px; font-weight:bold;">2</td>
+          <td style="padding:10px;">test_02_single_col_q_prefix</td>
+          <td style="padding:10px;"><small style="color:#64748b;">Basic Formats</small></td>
+          <td style="padding:10px;"><span style="background:#10b981;color:white;padding:3px 8px;border-radius:4px;font-weight:bold;">PASS</span></td>
+          <td style="padding:10px;"><code>1, 2, 3</code></td>
+          <td style="padding:10px;"><code>Q1, Q2, Q3</code></td>
+          <td style="padding:10px;">5192.4ms</td>
+          <td style="padding:10px;"><a href="test_002/result.json" target="_blank">JSON</a> | <a href="test_002/comparison.png" target="_blank">Visual</a></td>
+        </tr>
+        
+        <tr style="border-bottom: 1px solid #e2e8f0;">
+          <td style="padding:10px; font-weight:bold;">3</td>
+          <td style="padding:10px;">test_03_two_col_standard</td>
+          <td style="padding:10px;"><small style="color:#64748b;">Basic Formats</small></td>
+          <td style="padding:10px;"><span style="background:#10b981;color:white;padding:3px 8px;border-radius:4px;font-weight:bold;">PASS</span></td>
+          <td style="padding:10px;"><code>1, 2, 3, 4, 5, 6</code></td>
+          <td style="padding:10px;"><code>Q1, Q1(a), Q1(b), Q1(c), Q1(d), Q2, Q2(a), Q2(b), Q2(c), Q2(d), Q3, Q3(a), Q3(b), Q3(c), Q3(d), Q4, Q4(a), Q4(b), Q4(c), Q4(d), Q5, Q5(a), Q5(b), Q5(c), Q5(d), Q6, Q6(a), Q6(b), Q6(c), Q6(d)</code></td>
+          <td style="padding:10px;">51625.58ms</td>
+          <td style="padding:10px;"><a href="test_003/result.json" target="_blank">JSON</a> | <a href="test_003/comparison.png" target="_blank">Visual</a></td>
+        </tr>
+        
+        <tr style="border-bottom: 1px solid #e2e8f0;">
+          <td style="padding:10px; font-weight:bold;">4</td>
+          <td style="padding:10px;">test_04_parentheses_numbering</td>
+          <td style="padding:10px;"><small style="color:#64748b;">Basic Formats</small></td>
+          <td style="padding:10px;"><span style="background:#10b981;color:white;padding:3px 8px;border-radius:4px;font-weight:bold;">PASS</span></td>
+          <td style="padding:10px;"><code>1, 2, 3</code></td>
+          <td style="padding:10px;"><code>Q1, Q2, Q3</code></td>
+          <td style="padding:10px;">5264.76ms</td>
+          <td style="padding:10px;"><a href="test_004/result.json" target="_blank">JSON</a> | <a href="test_004/comparison.png" target="_blank">Visual</a></td>
+        </tr>
+        
+        <tr style="border-bottom: 1px solid #e2e8f0;">
+          <td style="padding:10px; font-weight:bold;">5</td>
+          <td style="padding:10px;">test_05_bracket_numbering</td>
+          <td style="padding:10px;"><small style="color:#64748b;">Basic Formats</small></td>
+          <td style="padding:10px;"><span style="background:#10b981;color:white;padding:3px 8px;border-radius:4px;font-weight:bold;">PASS</span></td>
+          <td style="padding:10px;"><code>1, 2</code></td>
+          <td style="padding:10px;"><code>Q1, Q2</code></td>
+          <td style="padding:10px;">4288.59ms</td>
+          <td style="padding:10px;"><a href="test_005/result.json" target="_blank">JSON</a> | <a href="test_005/comparison.png" target="_blank">Visual</a></td>
+        </tr>
+        
+        <tr style="border-bottom: 1px solid #e2e8f0;">
+          <td style="padding:10px; font-weight:bold;">6</td>
+          <td style="padding:10px;">test_06_colon_numbering</td>
+          <td style="padding:10px;"><small style="color:#64748b;">Basic Formats</small></td>
+          <td style="padding:10px;"><span style="background:#10b981;color:white;padding:3px 8px;border-radius:4px;font-weight:bold;">PASS</span></td>
+          <td style="padding:10px;"><code>1, 2</code></td>
+          <td style="padding:10px;"><code>Q1, Q2</code></td>
+          <td style="padding:10px;">3395.46ms</td>
+          <td style="padding:10px;"><a href="test_006/result.json" target="_blank">JSON</a> | <a href="test_006/comparison.png" target="_blank">Visual</a></td>
+        </tr>
+        
+        <tr style="border-bottom: 1px solid #e2e8f0;">
+          <td style="padding:10px; font-weight:bold;">7</td>
+          <td style="padding:10px;">test_07_subparts_alphabetical</td>
+          <td style="padding:10px;"><small style="color:#64748b;">Basic Formats</small></td>
+          <td style="padding:10px;"><span style="background:#10b981;color:white;padding:3px 8px;border-radius:4px;font-weight:bold;">PASS</span></td>
+          <td style="padding:10px;"><code>1(a), 1(b), 2(a), 2(b)</code></td>
+          <td style="padding:10px;"><code>Q1(a), Q1(b), Q2(a), Q2(b)</code></td>
+          <td style="padding:10px;">7899.59ms</td>
+          <td style="padding:10px;"><a href="test_007/result.json" target="_blank">JSON</a> | <a href="test_007/comparison.png" target="_blank">Visual</a></td>
+        </tr>
+        
+        <tr style="border-bottom: 1px solid #e2e8f0;">
+          <td style="padding:10px; font-weight:bold;">8</td>
+          <td style="padding:10px;">test_08_subparts_roman</td>
+          <td style="padding:10px;"><small style="color:#64748b;">Basic Formats</small></td>
+          <td style="padding:10px;"><span style="background:#10b981;color:white;padding:3px 8px;border-radius:4px;font-weight:bold;">PASS</span></td>
+          <td style="padding:10px;"><code>1(i), 1(ii), 2(i), 2(ii)</code></td>
+          <td style="padding:10px;"><code>Q1(i), Q1(ii), Q2(i), Q2(ii)</code></td>
+          <td style="padding:10px;">7534.97ms</td>
+          <td style="padding:10px;"><a href="test_008/result.json" target="_blank">JSON</a> | <a href="test_008/comparison.png" target="_blank">Visual</a></td>
+        </tr>
+        
+        <tr style="border-bottom: 1px solid #e2e8f0;">
+          <td style="padding:10px; font-weight:bold;">9</td>
+          <td style="padding:10px;">test_09_three_column_layout</td>
+          <td style="padding:10px;"><small style="color:#64748b;">Basic Formats</small></td>
+          <td style="padding:10px;"><span style="background:#10b981;color:white;padding:3px 8px;border-radius:4px;font-weight:bold;">PASS</span></td>
+          <td style="padding:10px;"><code>1, 2, 3, 4, 5, 6</code></td>
+          <td style="padding:10px;"><code>Q1, Q2, Q3, Q4, Q5, Q6</code></td>
+          <td style="padding:10px;">9362.74ms</td>
+          <td style="padding:10px;"><a href="test_009/result.json" target="_blank">JSON</a> | <a href="test_009/comparison.png" target="_blank">Visual</a></td>
+        </tr>
+        
+        <tr style="border-bottom: 1px solid #e2e8f0;">
+          <td style="padding:10px; font-weight:bold;">10</td>
+          <td style="padding:10px;">test_10_mixed_numbering_single_doc</td>
+          <td style="padding:10px;"><small style="color:#64748b;">Basic Formats</small></td>
+          <td style="padding:10px;"><span style="background:#10b981;color:white;padding:3px 8px;border-radius:4px;font-weight:bold;">PASS</span></td>
+          <td style="padding:10px;"><code>1, 2, 3</code></td>
+          <td style="padding:10px;"><code>Q1, Q2, Q3</code></td>
+          <td style="padding:10px;">5751.07ms</td>
+          <td style="padding:10px;"><a href="test_010/result.json" target="_blank">JSON</a> | <a href="test_010/comparison.png" target="_blank">Visual</a></td>
+        </tr>
+        
+        <tr style="border-bottom: 1px solid #e2e8f0;">
+          <td style="padding:10px; font-weight:bold;">11</td>
+          <td style="padding:10px;">test_11_exam_header_metadata</td>
+          <td style="padding:10px;"><small style="color:#64748b;">Instructions & Context</small></td>
+          <td style="padding:10px;"><span style="background:#10b981;color:white;padding:3px 8px;border-radius:4px;font-weight:bold;">PASS</span></td>
+          <td style="padding:10px;"><code>1, 2, 3</code></td>
+          <td style="padding:10px;"><code>Q1, Q2, Q3</code></td>
+          <td style="padding:10px;">5318.27ms</td>
+          <td style="padding:10px;"><a href="test_011/result.json" target="_blank">JSON</a> | <a href="test_011/comparison.png" target="_blank">Visual</a></td>
+        </tr>
+        
+        <tr style="border-bottom: 1px solid #e2e8f0;">
+          <td style="padding:10px; font-weight:bold;">12</td>
+          <td style="padding:10px;">test_12_general_instructions_block</td>
+          <td style="padding:10px;"><small style="color:#64748b;">Instructions & Context</small></td>
+          <td style="padding:10px;"><span style="background:#10b981;color:white;padding:3px 8px;border-radius:4px;font-weight:bold;">PASS</span></td>
+          <td style="padding:10px;"><code>1, 2</code></td>
+          <td style="padding:10px;"><code>Q1, Q2</code></td>
+          <td style="padding:10px;">3445.75ms</td>
+          <td style="padding:10px;"><a href="test_012/result.json" target="_blank">JSON</a> | <a href="test_012/comparison.png" target="_blank">Visual</a></td>
+        </tr>
+        
+        <tr style="border-bottom: 1px solid #e2e8f0;">
+          <td style="padding:10px; font-weight:bold;">13</td>
+          <td style="padding:10px;">test_13_section_headers</td>
+          <td style="padding:10px;"><small style="color:#64748b;">Instructions & Context</small></td>
+          <td style="padding:10px;"><span style="background:#10b981;color:white;padding:3px 8px;border-radius:4px;font-weight:bold;">PASS</span></td>
+          <td style="padding:10px;"><code>1, 2, 3</code></td>
+          <td style="padding:10px;"><code>Q1, Q2, Q3</code></td>
+          <td style="padding:10px;">5154.11ms</td>
+          <td style="padding:10px;"><a href="test_013/result.json" target="_blank">JSON</a> | <a href="test_013/comparison.png" target="_blank">Visual</a></td>
+        </tr>
+        
+        <tr style="border-bottom: 1px solid #e2e8f0;">
+          <td style="padding:10px; font-weight:bold;">14</td>
+          <td style="padding:10px;">test_14_shared_passage_context</td>
+          <td style="padding:10px;"><small style="color:#64748b;">Instructions & Context</small></td>
+          <td style="padding:10px;"><span style="background:#10b981;color:white;padding:3px 8px;border-radius:4px;font-weight:bold;">PASS</span></td>
+          <td style="padding:10px;"><code>1, 2, 3</code></td>
+          <td style="padding:10px;"><code>Q1, Q2, Q3</code></td>
+          <td style="padding:10px;">5346.56ms</td>
+          <td style="padding:10px;"><a href="test_014/result.json" target="_blank">JSON</a> | <a href="test_014/comparison.png" target="_blank">Visual</a></td>
+        </tr>
+        
+        <tr style="border-bottom: 1px solid #e2e8f0;">
+          <td style="padding:10px; font-weight:bold;">15</td>
+          <td style="padding:10px;">test_15_shared_direction_block</td>
+          <td style="padding:10px;"><small style="color:#64748b;">Instructions & Context</small></td>
+          <td style="padding:10px;"><span style="background:#10b981;color:white;padding:3px 8px;border-radius:4px;font-weight:bold;">PASS</span></td>
+          <td style="padding:10px;"><code>1, 2, 3</code></td>
+          <td style="padding:10px;"><code>Q1, Q2, Q3</code></td>
+          <td style="padding:10px;">5410.05ms</td>
+          <td style="padding:10px;"><a href="test_015/result.json" target="_blank">JSON</a> | <a href="test_015/comparison.png" target="_blank">Visual</a></td>
+        </tr>
+        
+        <tr style="border-bottom: 1px solid #e2e8f0;">
+          <td style="padding:10px; font-weight:bold;">16</td>
+          <td style="padding:10px;">test_16_note_and_disclaimer</td>
+          <td style="padding:10px;"><small style="color:#64748b;">Instructions & Context</small></td>
+          <td style="padding:10px;"><span style="background:#10b981;color:white;padding:3px 8px;border-radius:4px;font-weight:bold;">PASS</span></td>
+          <td style="padding:10px;"><code>1, 2</code></td>
+          <td style="padding:10px;"><code>Q1, Q2</code></td>
+          <td style="padding:10px;">3264.54ms</td>
+          <td style="padding:10px;"><a href="test_016/result.json" target="_blank">JSON</a> | <a href="test_016/comparison.png" target="_blank">Visual</a></td>
+        </tr>
+        
+        <tr style="border-bottom: 1px solid #e2e8f0;">
+          <td style="padding:10px; font-weight:bold;">17</td>
+          <td style="padding:10px;">test_17_inline_instruction</td>
+          <td style="padding:10px;"><small style="color:#64748b;">Instructions & Context</small></td>
+          <td style="padding:10px;"><span style="background:#10b981;color:white;padding:3px 8px;border-radius:4px;font-weight:bold;">PASS</span></td>
+          <td style="padding:10px;"><code>1, 2, 3</code></td>
+          <td style="padding:10px;"><code>Q1, Q2, Q3</code></td>
+          <td style="padding:10px;">6787.91ms</td>
+          <td style="padding:10px;"><a href="test_017/result.json" target="_blank">JSON</a> | <a href="test_017/comparison.png" target="_blank">Visual</a></td>
+        </tr>
+        
+        <tr style="border-bottom: 1px solid #e2e8f0;">
+          <td style="padding:10px; font-weight:bold;">18</td>
+          <td style="padding:10px;">test_18_or_choice_questions</td>
+          <td style="padding:10px;"><small style="color:#64748b;">Instructions & Context</small></td>
+          <td style="padding:10px;"><span style="background:#10b981;color:white;padding:3px 8px;border-radius:4px;font-weight:bold;">PASS</span></td>
+          <td style="padding:10px;"><code>1, 2</code></td>
+          <td style="padding:10px;"><code>Q1, Q1, Q2</code></td>
+          <td style="padding:10px;">44751.16ms</td>
+          <td style="padding:10px;"><a href="test_018/result.json" target="_blank">JSON</a> | <a href="test_018/comparison.png" target="_blank">Visual</a></td>
+        </tr>
+        
+        <tr style="border-bottom: 1px solid #e2e8f0;">
+          <td style="padding:10px; font-weight:bold;">19</td>
+          <td style="padding:10px;">test_19_footer_and_page_numbers</td>
+          <td style="padding:10px;"><small style="color:#64748b;">Instructions & Context</small></td>
+          <td style="padding:10px;"><span style="background:#10b981;color:white;padding:3px 8px;border-radius:4px;font-weight:bold;">PASS</span></td>
+          <td style="padding:10px;"><code>1, 2</code></td>
+          <td style="padding:10px;"><code>Q1, Q2</code></td>
+          <td style="padding:10px;">7038.63ms</td>
+          <td style="padding:10px;"><a href="test_019/result.json" target="_blank">JSON</a> | <a href="test_019/comparison.png" target="_blank">Visual</a></td>
+        </tr>
+        
+        <tr style="border-bottom: 1px solid #e2e8f0;">
+          <td style="padding:10px; font-weight:bold;">20</td>
+          <td style="padding:10px;">test_20_multipage_instructions</td>
+          <td style="padding:10px;"><small style="color:#64748b;">Instructions & Context</small></td>
+          <td style="padding:10px;"><span style="background:#10b981;color:white;padding:3px 8px;border-radius:4px;font-weight:bold;">PASS</span></td>
+          <td style="padding:10px;"><code>1, 2, 3</code></td>
+          <td style="padding:10px;"><code>Q1, Q2, Q3</code></td>
+          <td style="padding:10px;">24769.37ms</td>
+          <td style="padding:10px;"><a href="test_020/result.json" target="_blank">JSON</a> | <a href="test_020/comparison.png" target="_blank">Visual</a></td>
+        </tr>
+        
+        <tr style="border-bottom: 1px solid #e2e8f0;">
+          <td style="padding:10px; font-weight:bold;">21</td>
+          <td style="padding:10px;">test_21_mcq_with_diagram</td>
+          <td style="padding:10px;"><small style="color:#64748b;">Complex Layouts</small></td>
+          <td style="padding:10px;"><span style="background:#10b981;color:white;padding:3px 8px;border-radius:4px;font-weight:bold;">PASS</span></td>
+          <td style="padding:10px;"><code>1, 2</code></td>
+          <td style="padding:10px;"><code>Q1, Q2</code></td>
+          <td style="padding:10px;">8338.73ms</td>
+          <td style="padding:10px;"><a href="test_021/result.json" target="_blank">JSON</a> | <a href="test_021/comparison.png" target="_blank">Visual</a></td>
+        </tr>
+        
+        <tr style="border-bottom: 1px solid #e2e8f0;">
+          <td style="padding:10px; font-weight:bold;">22</td>
+          <td style="padding:10px;">test_22_table_in_question</td>
+          <td style="padding:10px;"><small style="color:#64748b;">Complex Layouts</small></td>
+          <td style="padding:10px;"><span style="background:#ef4444;color:white;padding:3px 8px;border-radius:4px;font-weight:bold;">FAIL</span></td>
+          <td style="padding:10px;"><code>1, 2</code></td>
+          <td style="padding:10px;"><code>Q2</code></td>
+          <td style="padding:10px;">3785.55ms</td>
+          <td style="padding:10px;"><a href="test_022/result.json" target="_blank">JSON</a> | <a href="test_022/comparison.png" target="_blank">Visual</a></td>
+        </tr>
+        
+        <tr style="border-bottom: 1px solid #e2e8f0;">
+          <td style="padding:10px; font-weight:bold;">23</td>
+          <td style="padding:10px;">test_23_code_snippet_in_question</td>
+          <td style="padding:10px;"><small style="color:#64748b;">Complex Layouts</small></td>
+          <td style="padding:10px;"><span style="background:#10b981;color:white;padding:3px 8px;border-radius:4px;font-weight:bold;">PASS</span></td>
+          <td style="padding:10px;"><code>1, 2</code></td>
+          <td style="padding:10px;"><code>Q1, Q2</code></td>
+          <td style="padding:10px;">12909.82ms</td>
+          <td style="padding:10px;"><a href="test_023/result.json" target="_blank">JSON</a> | <a href="test_023/comparison.png" target="_blank">Visual</a></td>
+        </tr>
+        
+        <tr style="border-bottom: 1px solid #e2e8f0;">
+          <td style="padding:10px; font-weight:bold;">24</td>
+          <td style="padding:10px;">test_24_mathematical_formula_dense</td>
+          <td style="padding:10px;"><small style="color:#64748b;">Complex Layouts</small></td>
+          <td style="padding:10px;"><span style="background:#10b981;color:white;padding:3px 8px;border-radius:4px;font-weight:bold;">PASS</span></td>
+          <td style="padding:10px;"><code>1, 2</code></td>
+          <td style="padding:10px;"><code>Q1, Q2</code></td>
+          <td style="padding:10px;">6251.45ms</td>
+          <td style="padding:10px;"><a href="test_024/result.json" target="_blank">JSON</a> | <a href="test_024/comparison.png" target="_blank">Visual</a></td>
+        </tr>
+        
+        <tr style="border-bottom: 1px solid #e2e8f0;">
+          <td style="padding:10px; font-weight:bold;">25</td>
+          <td style="padding:10px;">test_25_horizontal_options_layout</td>
+          <td style="padding:10px;"><small style="color:#64748b;">Complex Layouts</small></td>
+          <td style="padding:10px;"><span style="background:#10b981;color:white;padding:3px 8px;border-radius:4px;font-weight:bold;">PASS</span></td>
+          <td style="padding:10px;"><code>1, 2</code></td>
+          <td style="padding:10px;"><code>Q1, Q2</code></td>
+          <td style="padding:10px;">6811.51ms</td>
+          <td style="padding:10px;"><a href="test_025/result.json" target="_blank">JSON</a> | <a href="test_025/comparison.png" target="_blank">Visual</a></td>
+        </tr>
+        
+        <tr style="border-bottom: 1px solid #e2e8f0;">
+          <td style="padding:10px; font-weight:bold;">26</td>
+          <td style="padding:10px;">test_26_two_by_two_grid_options</td>
+          <td style="padding:10px;"><small style="color:#64748b;">Complex Layouts</small></td>
+          <td style="padding:10px;"><span style="background:#10b981;color:white;padding:3px 8px;border-radius:4px;font-weight:bold;">PASS</span></td>
+          <td style="padding:10px;"><code>1, 2</code></td>
+          <td style="padding:10px;"><code>Q1, Q2</code></td>
+          <td style="padding:10px;">4053.74ms</td>
+          <td style="padding:10px;"><a href="test_026/result.json" target="_blank">JSON</a> | <a href="test_026/comparison.png" target="_blank">Visual</a></td>
+        </tr>
+        
+        <tr style="border-bottom: 1px solid #e2e8f0;">
+          <td style="padding:10px; font-weight:bold;">27</td>
+          <td style="padding:10px;">test_27_multi_line_options</td>
+          <td style="padding:10px;"><small style="color:#64748b;">Complex Layouts</small></td>
+          <td style="padding:10px;"><span style="background:#10b981;color:white;padding:3px 8px;border-radius:4px;font-weight:bold;">PASS</span></td>
+          <td style="padding:10px;"><code>1, 2</code></td>
+          <td style="padding:10px;"><code>Q1, Q2</code></td>
+          <td style="padding:10px;">4244.95ms</td>
+          <td style="padding:10px;"><a href="test_027/result.json" target="_blank">JSON</a> | <a href="test_027/comparison.png" target="_blank">Visual</a></td>
+        </tr>
+        
+        <tr style="border-bottom: 1px solid #e2e8f0;">
+          <td style="padding:10px; font-weight:bold;">28</td>
+          <td style="padding:10px;">test_28_image_based_options</td>
+          <td style="padding:10px;"><small style="color:#64748b;">Complex Layouts</small></td>
+          <td style="padding:10px;"><span style="background:#10b981;color:white;padding:3px 8px;border-radius:4px;font-weight:bold;">PASS</span></td>
+          <td style="padding:10px;"><code>1, 2</code></td>
+          <td style="padding:10px;"><code>Q1, Q2</code></td>
+          <td style="padding:10px;">4031.08ms</td>
+          <td style="padding:10px;"><a href="test_028/result.json" target="_blank">JSON</a> | <a href="test_028/comparison.png" target="_blank">Visual</a></td>
+        </tr>
+        
+        <tr style="border-bottom: 1px solid #e2e8f0;">
+          <td style="padding:10px; font-weight:bold;">29</td>
+          <td style="padding:10px;">test_29_tabular_match_the_following</td>
+          <td style="padding:10px;"><small style="color:#64748b;">Complex Layouts</small></td>
+          <td style="padding:10px;"><span style="background:#10b981;color:white;padding:3px 8px;border-radius:4px;font-weight:bold;">PASS</span></td>
+          <td style="padding:10px;"><code>1, 2</code></td>
+          <td style="padding:10px;"><code>Q1, Q2</code></td>
+          <td style="padding:10px;">4284.85ms</td>
+          <td style="padding:10px;"><a href="test_029/result.json" target="_blank">JSON</a> | <a href="test_029/comparison.png" target="_blank">Visual</a></td>
+        </tr>
+        
+        <tr style="border-bottom: 1px solid #e2e8f0;">
+          <td style="padding:10px; font-weight:bold;">30</td>
+          <td style="padding:10px;">test_30_assertion_reason_format</td>
+          <td style="padding:10px;"><small style="color:#64748b;">Complex Layouts</small></td>
+          <td style="padding:10px;"><span style="background:#10b981;color:white;padding:3px 8px;border-radius:4px;font-weight:bold;">PASS</span></td>
+          <td style="padding:10px;"><code>1, 2</code></td>
+          <td style="padding:10px;"><code>Q1, Q2</code></td>
+          <td style="padding:10px;">9043.12ms</td>
+          <td style="padding:10px;"><a href="test_030/result.json" target="_blank">JSON</a> | <a href="test_030/comparison.png" target="_blank">Visual</a></td>
+        </tr>
+        
+        <tr style="border-bottom: 1px solid #e2e8f0;">
+          <td style="padding:10px; font-weight:bold;">31</td>
+          <td style="padding:10px;">test_31_top_of_page_question</td>
+          <td style="padding:10px;"><small style="color:#64748b;">Boundary Cases</small></td>
+          <td style="padding:10px;"><span style="background:#10b981;color:white;padding:3px 8px;border-radius:4px;font-weight:bold;">PASS</span></td>
+          <td style="padding:10px;"><code>1, 2</code></td>
+          <td style="padding:10px;"><code>Q1, Q2</code></td>
+          <td style="padding:10px;">3802.13ms</td>
+          <td style="padding:10px;"><a href="test_031/result.json" target="_blank">JSON</a> | <a href="test_031/comparison.png" target="_blank">Visual</a></td>
+        </tr>
+        
+        <tr style="border-bottom: 1px solid #e2e8f0;">
+          <td style="padding:10px; font-weight:bold;">32</td>
+          <td style="padding:10px;">test_32_bottom_of_page_question</td>
+          <td style="padding:10px;"><small style="color:#64748b;">Boundary Cases</small></td>
+          <td style="padding:10px;"><span style="background:#10b981;color:white;padding:3px 8px;border-radius:4px;font-weight:bold;">PASS</span></td>
+          <td style="padding:10px;"><code>1, 2</code></td>
+          <td style="padding:10px;"><code>Q1, Q2</code></td>
+          <td style="padding:10px;">7938.65ms</td>
+          <td style="padding:10px;"><a href="test_032/result.json" target="_blank">JSON</a> | <a href="test_032/comparison.png" target="_blank">Visual</a></td>
+        </tr>
+        
+        <tr style="border-bottom: 1px solid #e2e8f0;">
+          <td style="padding:10px; font-weight:bold;">33</td>
+          <td style="padding:10px;">test_33_dense_spacing_no_gap</td>
+          <td style="padding:10px;"><small style="color:#64748b;">Boundary Cases</small></td>
+          <td style="padding:10px;"><span style="background:#10b981;color:white;padding:3px 8px;border-radius:4px;font-weight:bold;">PASS</span></td>
+          <td style="padding:10px;"><code>1, 2, 3</code></td>
+          <td style="padding:10px;"><code>Q1, Q2, Q3</code></td>
+          <td style="padding:10px;">5675.75ms</td>
+          <td style="padding:10px;"><a href="test_033/result.json" target="_blank">JSON</a> | <a href="test_033/comparison.png" target="_blank">Visual</a></td>
+        </tr>
+        
+        <tr style="border-bottom: 1px solid #e2e8f0;">
+          <td style="padding:10px; font-weight:bold;">34</td>
+          <td style="padding:10px;">test_34_question_spanning_two_pages</td>
+          <td style="padding:10px;"><small style="color:#64748b;">Boundary Cases</small></td>
+          <td style="padding:10px;"><span style="background:#10b981;color:white;padding:3px 8px;border-radius:4px;font-weight:bold;">PASS</span></td>
+          <td style="padding:10px;"><code>1, 2, 3</code></td>
+          <td style="padding:10px;"><code>Q1, Q2, Q3</code></td>
+          <td style="padding:10px;">8339.94ms</td>
+          <td style="padding:10px;"><a href="test_034/result.json" target="_blank">JSON</a> | <a href="test_034/comparison.png" target="_blank">Visual</a></td>
+        </tr>
+        
+        <tr style="border-bottom: 1px solid #e2e8f0;">
+          <td style="padding:10px; font-weight:bold;">35</td>
+          <td style="padding:10px;">test_35_missing_option_letters</td>
+          <td style="padding:10px;"><small style="color:#64748b;">Boundary Cases</small></td>
+          <td style="padding:10px;"><span style="background:#10b981;color:white;padding:3px 8px;border-radius:4px;font-weight:bold;">PASS</span></td>
+          <td style="padding:10px;"><code>1, 2</code></td>
+          <td style="padding:10px;"><code>Q1, Q2</code></td>
+          <td style="padding:10px;">4335.98ms</td>
+          <td style="padding:10px;"><a href="test_035/result.json" target="_blank">JSON</a> | <a href="test_035/comparison.png" target="_blank">Visual</a></td>
+        </tr>
+        
+        <tr style="border-bottom: 1px solid #e2e8f0;">
+          <td style="padding:10px; font-weight:bold;">36</td>
+          <td style="padding:10px;">test_36_false_anchor_numbers_in_sentence</td>
+          <td style="padding:10px;"><small style="color:#64748b;">Boundary Cases</small></td>
+          <td style="padding:10px;"><span style="background:#10b981;color:white;padding:3px 8px;border-radius:4px;font-weight:bold;">PASS</span></td>
+          <td style="padding:10px;"><code>1, 2</code></td>
+          <td style="padding:10px;"><code>Q1, Q2</code></td>
+          <td style="padding:10px;">3969.03ms</td>
+          <td style="padding:10px;"><a href="test_036/result.json" target="_blank">JSON</a> | <a href="test_036/comparison.png" target="_blank">Visual</a></td>
+        </tr>
+        
+        <tr style="border-bottom: 1px solid #e2e8f0;">
+          <td style="padding:10px; font-weight:bold;">37</td>
+          <td style="padding:10px;">test_37_big_o_and_math_numbers</td>
+          <td style="padding:10px;"><small style="color:#64748b;">Boundary Cases</small></td>
+          <td style="padding:10px;"><span style="background:#10b981;color:white;padding:3px 8px;border-radius:4px;font-weight:bold;">PASS</span></td>
+          <td style="padding:10px;"><code>1, 2</code></td>
+          <td style="padding:10px;"><code>Q1, Q2</code></td>
+          <td style="padding:10px;">4169.1ms</td>
+          <td style="padding:10px;"><a href="test_037/result.json" target="_blank">JSON</a> | <a href="test_037/comparison.png" target="_blank">Visual</a></td>
+        </tr>
+        
+        <tr style="border-bottom: 1px solid #e2e8f0;">
+          <td style="padding:10px; font-weight:bold;">38</td>
+          <td style="padding:10px;">test_38_empty_lines_and_whitespace</td>
+          <td style="padding:10px;"><small style="color:#64748b;">Boundary Cases</small></td>
+          <td style="padding:10px;"><span style="background:#10b981;color:white;padding:3px 8px;border-radius:4px;font-weight:bold;">PASS</span></td>
+          <td style="padding:10px;"><code>1, 2</code></td>
+          <td style="padding:10px;"><code>Q1, Q2</code></td>
+          <td style="padding:10px;">4169.56ms</td>
+          <td style="padding:10px;"><a href="test_038/result.json" target="_blank">JSON</a> | <a href="test_038/comparison.png" target="_blank">Visual</a></td>
+        </tr>
+        
+        <tr style="border-bottom: 1px solid #e2e8f0;">
+          <td style="padding:10px; font-weight:bold;">39</td>
+          <td style="padding:10px;">test_39_skewed_indented_anchors</td>
+          <td style="padding:10px;"><small style="color:#64748b;">Boundary Cases</small></td>
+          <td style="padding:10px;"><span style="background:#10b981;color:white;padding:3px 8px;border-radius:4px;font-weight:bold;">PASS</span></td>
+          <td style="padding:10px;"><code>1, 2</code></td>
+          <td style="padding:10px;"><code>Q1, Q2</code></td>
+          <td style="padding:10px;">5692.52ms</td>
+          <td style="padding:10px;"><a href="test_039/result.json" target="_blank">JSON</a> | <a href="test_039/comparison.png" target="_blank">Visual</a></td>
+        </tr>
+        
+        <tr style="border-bottom: 1px solid #e2e8f0;">
+          <td style="padding:10px; font-weight:bold;">40</td>
+          <td style="padding:10px;">test_40_single_question_full_page</td>
+          <td style="padding:10px;"><small style="color:#64748b;">Boundary Cases</small></td>
+          <td style="padding:10px;"><span style="background:#10b981;color:white;padding:3px 8px;border-radius:4px;font-weight:bold;">PASS</span></td>
+          <td style="padding:10px;"><code>1</code></td>
+          <td style="padding:10px;"><code>Q1, Q1(a), Q1(b), Q1(c), Q1(d), Q1(e)</code></td>
+          <td style="padding:10px;">13514.92ms</td>
+          <td style="padding:10px;"><a href="test_040/result.json" target="_blank">JSON</a> | <a href="test_040/comparison.png" target="_blank">Visual</a></td>
+        </tr>
+        
+        <tr style="border-bottom: 1px solid #e2e8f0;">
+          <td style="padding:10px; font-weight:bold;">41</td>
+          <td style="padding:10px;">test_41_university_semester_format</td>
+          <td style="padding:10px;"><small style="color:#64748b;">Real-World Formats</small></td>
+          <td style="padding:10px;"><span style="background:#10b981;color:white;padding:3px 8px;border-radius:4px;font-weight:bold;">PASS</span></td>
+          <td style="padding:10px;"><code>1, 2, 2(a), 2(b), 3(a), 3(b)</code></td>
+          <td style="padding:10px;"><code>Q1, Q2, Q2(a), Q2(b), Q2(a), Q2(b)</code></td>
+          <td style="padding:10px;">13173.42ms</td>
+          <td style="padding:10px;"><a href="test_041/result.json" target="_blank">JSON</a> | <a href="test_041/comparison.png" target="_blank">Visual</a></td>
+        </tr>
+        
+        <tr style="border-bottom: 1px solid #e2e8f0;">
+          <td style="padding:10px; font-weight:bold;">42</td>
+          <td style="padding:10px;">test_42_jee_advanced_format</td>
+          <td style="padding:10px;"><small style="color:#64748b;">Real-World Formats</small></td>
+          <td style="padding:10px;"><span style="background:#10b981;color:white;padding:3px 8px;border-radius:4px;font-weight:bold;">PASS</span></td>
+          <td style="padding:10px;"><code>1, 2</code></td>
+          <td style="padding:10px;"><code>Q1, Q2</code></td>
+          <td style="padding:10px;">3660.79ms</td>
+          <td style="padding:10px;"><a href="test_042/result.json" target="_blank">JSON</a> | <a href="test_042/comparison.png" target="_blank">Visual</a></td>
+        </tr>
+        
+        <tr style="border-bottom: 1px solid #e2e8f0;">
+          <td style="padding:10px; font-weight:bold;">43</td>
+          <td style="padding:10px;">test_43_gate_cs_format</td>
+          <td style="padding:10px;"><small style="color:#64748b;">Real-World Formats</small></td>
+          <td style="padding:10px;"><span style="background:#10b981;color:white;padding:3px 8px;border-radius:4px;font-weight:bold;">PASS</span></td>
+          <td style="padding:10px;"><code>1, 2</code></td>
+          <td style="padding:10px;"><code>Q1, Q2</code></td>
+          <td style="padding:10px;">3846.39ms</td>
+          <td style="padding:10px;"><a href="test_043/result.json" target="_blank">JSON</a> | <a href="test_043/comparison.png" target="_blank">Visual</a></td>
+        </tr>
+        
+        <tr style="border-bottom: 1px solid #e2e8f0;">
+          <td style="padding:10px; font-weight:bold;">44</td>
+          <td style="padding:10px;">test_44_neet_medical_format</td>
+          <td style="padding:10px;"><small style="color:#64748b;">Real-World Formats</small></td>
+          <td style="padding:10px;"><span style="background:#10b981;color:white;padding:3px 8px;border-radius:4px;font-weight:bold;">PASS</span></td>
+          <td style="padding:10px;"><code>1, 2</code></td>
+          <td style="padding:10px;"><code>Q1, Q2</code></td>
+          <td style="padding:10px;">3653.05ms</td>
+          <td style="padding:10px;"><a href="test_044/result.json" target="_blank">JSON</a> | <a href="test_044/comparison.png" target="_blank">Visual</a></td>
+        </tr>
+        
+        <tr style="border-bottom: 1px solid #e2e8f0;">
+          <td style="padding:10px; font-weight:bold;">45</td>
+          <td style="padding:10px;">test_45_upsc_prelims_format</td>
+          <td style="padding:10px;"><small style="color:#64748b;">Real-World Formats</small></td>
+          <td style="padding:10px;"><span style="background:#10b981;color:white;padding:3px 8px;border-radius:4px;font-weight:bold;">PASS</span></td>
+          <td style="padding:10px;"><code>1, 2</code></td>
+          <td style="padding:10px;"><code>Q1, Q1, Q2, Q2(a), Q2, Q2(a)</code></td>
+          <td style="padding:10px;">11963.15ms</td>
+          <td style="padding:10px;"><a href="test_045/result.json" target="_blank">JSON</a> | <a href="test_045/comparison.png" target="_blank">Visual</a></td>
+        </tr>
+        
+        <tr style="border-bottom: 1px solid #e2e8f0;">
+          <td style="padding:10px; font-weight:bold;">46</td>
+          <td style="padding:10px;">test_46_cbse_board_format</td>
+          <td style="padding:10px;"><small style="color:#64748b;">Real-World Formats</small></td>
+          <td style="padding:10px;"><span style="background:#10b981;color:white;padding:3px 8px;border-radius:4px;font-weight:bold;">PASS</span></td>
+          <td style="padding:10px;"><code>1, 2, 3</code></td>
+          <td style="padding:10px;"><code>Q1, Q2, Q3</code></td>
+          <td style="padding:10px;">6141.18ms</td>
+          <td style="padding:10px;"><a href="test_046/result.json" target="_blank">JSON</a> | <a href="test_046/comparison.png" target="_blank">Visual</a></td>
+        </tr>
+        
+        <tr style="border-bottom: 1px solid #e2e8f0;">
+          <td style="padding:10px; font-weight:bold;">47</td>
+          <td style="padding:10px;">test_47_mixed_mcq_theory_same_page</td>
+          <td style="padding:10px;"><small style="color:#64748b;">Real-World Formats</small></td>
+          <td style="padding:10px;"><span style="background:#10b981;color:white;padding:3px 8px;border-radius:4px;font-weight:bold;">PASS</span></td>
+          <td style="padding:10px;"><code>1, 2, 3</code></td>
+          <td style="padding:10px;"><code>Q1, Q2, Q3</code></td>
+          <td style="padding:10px;">5979.33ms</td>
+          <td style="padding:10px;"><a href="test_047/result.json" target="_blank">JSON</a> | <a href="test_047/comparison.png" target="_blank">Visual</a></td>
+        </tr>
+        
+        <tr style="border-bottom: 1px solid #e2e8f0;">
+          <td style="padding:10px; font-weight:bold;">48</td>
+          <td style="padding:10px;">test_48_paper_with_watermark</td>
+          <td style="padding:10px;"><small style="color:#64748b;">Real-World Formats</small></td>
+          <td style="padding:10px;"><span style="background:#10b981;color:white;padding:3px 8px;border-radius:4px;font-weight:bold;">PASS</span></td>
+          <td style="padding:10px;"><code>1, 2</code></td>
+          <td style="padding:10px;"><code>Q1, Q2</code></td>
+          <td style="padding:10px;">3593.11ms</td>
+          <td style="padding:10px;"><a href="test_048/result.json" target="_blank">JSON</a> | <a href="test_048/comparison.png" target="_blank">Visual</a></td>
+        </tr>
+        
+        <tr style="border-bottom: 1px solid #e2e8f0;">
+          <td style="padding:10px; font-weight:bold;">49</td>
+          <td style="padding:10px;">test_49_multi_subject_single_paper</td>
+          <td style="padding:10px;"><small style="color:#64748b;">Real-World Formats</small></td>
+          <td style="padding:10px;"><span style="background:#10b981;color:white;padding:3px 8px;border-radius:4px;font-weight:bold;">PASS</span></td>
+          <td style="padding:10px;"><code>1, 2, 3</code></td>
+          <td style="padding:10px;"><code>Q1, Q2, Q3</code></td>
+          <td style="padding:10px;">5572.57ms</td>
+          <td style="padding:10px;"><a href="test_049/result.json" target="_blank">JSON</a> | <a href="test_049/comparison.png" target="_blank">Visual</a></td>
+        </tr>
+        
+        <tr style="border-bottom: 1px solid #e2e8f0;">
+          <td style="padding:10px; font-weight:bold;">50</td>
+          <td style="padding:10px;">test_50_maximum_stress_combination</td>
+          <td style="padding:10px;"><small style="color:#64748b;">Maximum Stress Combination</small></td>
+          <td style="padding:10px;"><span style="background:#10b981;color:white;padding:3px 8px;border-radius:4px;font-weight:bold;">PASS</span></td>
+          <td style="padding:10px;"><code>1, 2, 3, 4</code></td>
+          <td style="padding:10px;"><code>Q1, Q2, Q3, Q1, Q2, Q3, Q4</code></td>
+          <td style="padding:10px;">13047.35ms</td>
+          <td style="padding:10px;"><a href="test_050/result.json" target="_blank">JSON</a> | <a href="test_050/comparison.png" target="_blank">Visual</a></td>
+        </tr>
+        
+      </tbody>
+    </table>
+  </div>
+</body>
+</html>

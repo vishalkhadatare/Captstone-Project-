@@ -550,6 +550,12 @@ function initializeSchema(db: Database) {
       content_text TEXT NOT NULL,
       options_json TEXT, -- JSON array of options for MCQ
       diagram_url TEXT, -- Base64 Data URL or Cloudinary URL of associated diagram/circuit/figure
+      image_url TEXT,
+      high_res_page_url TEXT,
+      crop_coordinates TEXT,
+      extraction_status TEXT,
+      options_status TEXT,
+      validation_flags TEXT,
       status TEXT NOT NULL DEFAULT 'DRAFT', -- 'DRAFT', 'UNDER_VERIFICATION', 'VERIFIED', 'ELIGIBLE_FOR_PAPER', 'QUARANTINED', 'COMPROMISED', 'CLEARED', 'RETIRED'
       created_by TEXT NOT NULL,
       created_at TEXT NOT NULL,
@@ -1240,10 +1246,29 @@ function initializeSchema(db: Database) {
     console.error('Proctor migration notice:', migErr);
   }
 
-  // Decommission SME role: Mark all existing SME user records inactive & revoked
+  // Ensure new columns exist on questions table for both SQLite and PostgreSQL
+  const questionCols = [
+    'image_url',
+    'high_res_page_url',
+    'crop_coordinates',
+    'extraction_status',
+    'options_status',
+    'validation_flags',
+  ];
+  for (const col of questionCols) {
+    try {
+      db.run(`ALTER TABLE questions ADD COLUMN ${col} TEXT`);
+    } catch {}
+  }
+
   try {
-    db.run("UPDATE users SET status = 'INACTIVE', authorization_status = 'REVOKED' WHERE role = 'SME'");
-  } catch (e) {}
+    const pgPool = getPostgresPool();
+    if (pgPool) {
+      for (const col of questionCols) {
+        pgPool.query(`ALTER TABLE questions ADD COLUMN IF NOT EXISTS ${col} TEXT`).catch(() => {});
+      }
+    }
+  } catch {}
 }
 
 // Generic SQL helper functions for clean execution
