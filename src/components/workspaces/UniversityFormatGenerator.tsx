@@ -117,6 +117,7 @@ export const UniversityFormatGenerator: React.FC<UniversityFormatGeneratorProps>
   const [cloudinaryHealth, setCloudinaryHealth] = useState<{ connected: boolean; cloud_name?: string; assets_count?: number } | null>(null);
   const [formatexHealth, setFormatexHealth] = useState<{ connected: boolean; engine?: string } | null>(null);
   const [compilingFormatex, setCompilingFormatex] = useState(false);
+  const [latestFormatexPdfUrl, setLatestFormatexPdfUrl] = useState<string | null>(null);
   const [showLatexModal, setShowLatexModal] = useState(false);
   const [latexCode, setLatexCode] = useState('');
   const [copiedLatex, setCopiedLatex] = useState(false);
@@ -178,15 +179,15 @@ export const UniversityFormatGenerator: React.FC<UniversityFormatGeneratorProps>
         // Automatically sync from Cloudinary if local bank is currently empty
         const syncRes = await api.syncCloudinaryQuestionPapers(examId);
         if (syncRes.success && Array.isArray(syncRes.papers)) {
-          res = { success: true, papers: syncRes.papers };
+          setUploadedPapers(syncRes.papers);
+          return;
         }
       }
       if (res.success && Array.isArray(res.papers)) {
         setUploadedPapers(res.papers);
-        setSelectedPaperIds(prev => (prev.length === 0 ? res.papers.map((p: any) => p.id) : prev));
       }
     } catch (e: any) {
-      console.warn('Could not load uploaded question papers:', e);
+      console.error('Failed to load uploaded question papers:', e);
     } finally {
       setLoadingPapers(false);
     }
@@ -194,20 +195,18 @@ export const UniversityFormatGenerator: React.FC<UniversityFormatGeneratorProps>
 
   const handleSyncCloudinary = async () => {
     setLoadingPapers(true);
+    setActionMessage(null);
     try {
-      const res = await api.syncCloudinaryQuestionPapers(selectedExamId || undefined);
+      const res = await api.syncCloudinaryQuestionPapers(selectedExamId);
       if (res.success && Array.isArray(res.papers)) {
         setUploadedPapers(res.papers);
-        setSelectedPaperIds(res.papers.map((p: any) => p.id));
         setActionMessage({
           type: 'success',
-          text: `Cloudinary sync successful! Total ${res.papers.length} draft question papers ready in vault.`,
+          text: `Successfully synced ${res.papers.length} source documents from Cloudinary Vault (${res.importedCount || 0} newly registered)!`,
         });
-        checkCloudinary();
       }
     } catch (e: any) {
-      console.warn('Failed to sync from Cloudinary API:', e);
-      await loadUploadedPapers(selectedExamId || undefined);
+      setActionMessage({ type: 'error', text: `Sync failed: ${e.message}` });
     } finally {
       setLoadingPapers(false);
     }
@@ -224,10 +223,14 @@ export const UniversityFormatGenerator: React.FC<UniversityFormatGeneratorProps>
           exam: res.exam || exams.find(e => e.id === examId)!,
         });
         runMasterBlueprintValidation(res.questions || [], res.exam || exams.find(e => e.id === examId)!);
+      } else {
+        setCurrentPaperData(null);
+        setValidationResult(null);
       }
     } catch (e: any) {
-      console.warn('No existing generated paper for exam:', e);
+      console.error('Failed to load current paper:', e);
       setCurrentPaperData(null);
+      setValidationResult(null);
     }
   };
 
@@ -244,8 +247,10 @@ export const UniversityFormatGenerator: React.FC<UniversityFormatGeneratorProps>
 
   const handleDeletePaper = async (e: React.MouseEvent, paperId: string) => {
     e.stopPropagation();
-    if (!confirm('Are you sure you want to remove this draft paper from the vault?')) return;
-    setDeletingId(paperId);
+    if (!confirm('Are you sure you want to permanently remove this draft paper from the repository and Cloudinary?')) {
+      return;
+    }
+    setActionMessage(null);
     try {
       const res = await api.deleteQuestionPaper(paperId);
       if (res.success) {
@@ -253,23 +258,22 @@ export const UniversityFormatGenerator: React.FC<UniversityFormatGeneratorProps>
         setSelectedPaperIds(prev => prev.filter(id => id !== paperId));
         setActionMessage({
           type: 'success',
-          text: 'Draft question paper removed from vault.',
+          text: 'Source draft document permanently removed from the repository & Cloudinary.',
         });
+      } else {
+        setActionMessage({ type: 'error', text: 'Failed to remove document.' });
       }
     } catch (err: any) {
-      setActionMessage({
-        type: 'error',
-        text: `Failed to remove paper: ${err.message}`,
-      });
-    } finally {
-      setDeletingId(null);
+      setActionMessage({ type: 'error', text: err.message || 'Error deleting document.' });
     }
   };
 
   const handleBulkDelete = async () => {
     if (selectedPaperIds.length === 0) return;
-    if (!confirm(`Are you sure you want to remove ${selectedPaperIds.length} selected draft papers from the vault?`)) return;
-    setLoadingPapers(true);
+    if (!confirm(`Are you sure you want to permanently delete all ${selectedPaperIds.length} selected draft documents?`)) {
+      return;
+    }
+    setActionMessage(null);
     try {
       const res = await api.bulkDeleteQuestionPapers(selectedPaperIds);
       if (res.success) {
@@ -277,16 +281,13 @@ export const UniversityFormatGenerator: React.FC<UniversityFormatGeneratorProps>
         setSelectedPaperIds([]);
         setActionMessage({
           type: 'success',
-          text: 'Selected draft papers successfully removed from vault.',
+          text: `Permanently removed ${selectedPaperIds.length} draft documents from vault.`,
         });
+      } else {
+        setActionMessage({ type: 'error', text: 'Failed to delete selected documents.' });
       }
     } catch (err: any) {
-      setActionMessage({
-        type: 'error',
-        text: `Failed to delete papers: ${err.message}`,
-      });
-    } finally {
-      setLoadingPapers(false);
+      setActionMessage({ type: 'error', text: err.message || 'Error deleting documents.' });
     }
   };
 
@@ -328,14 +329,24 @@ export const UniversityFormatGenerator: React.FC<UniversityFormatGeneratorProps>
           });
           runMasterBlueprintValidation(currentRes.questions || [], currentRes.exam || exams.find(e => e.id === examId)!);
         }
+
+        // Automatically compile Set P with FormaTeX in the backend
+        try {
+          const fRes = await api.compileFormatexPdf(examId, { setLetter: 'P' });
+          if (fRes.success && fRes.pdfUrl) {
+            setLatestFormatexPdfUrl(fRes.pdfUrl);
+          }
+        } catch (fErr) {
+          console.warn('FormaTeX background compile:', fErr);
+        }
       }
 
       const countMsg =
         activeIds.length > 1
-          ? `Successfully generated 4 Paper Sets (Set P, Q, R, S) by combining and permuting questions from ${activeIds.length} uploaded draft papers using Ollama AI!`
+          ? `⚡ Successfully generated 4 Paper Sets (Set P, Q, R, S) by blending & formatting questions from ${activeIds.length} uploaded drafts with FormaTeX LaTeX Engine!`
           : activeIds.length === 1
-          ? `Successfully generated 4 Paper Sets from the selected uploaded draft using Ollama AI!`
-          : `Successfully generated 4 Paper Sets using Ollama AI!`;
+          ? `⚡ Successfully generated 4 Paper Sets from selected draft with FormaTeX LaTeX Engine!`
+          : `⚡ Successfully generated 4 Paper Sets with FormaTeX LaTeX Engine!`;
 
       setActionMessage({
         type: 'success',
@@ -357,6 +368,7 @@ export const UniversityFormatGenerator: React.FC<UniversityFormatGeneratorProps>
       const letter = setLetterOverride || ['P', 'Q', 'R', 'S'][activeSetIndex] || 'P';
       const res = await api.compileFormatexPdf(selectedExamId, { setLetter: letter });
       if (res.success && res.pdfUrl) {
+        setLatestFormatexPdfUrl(res.pdfUrl);
         setActionMessage({
           type: 'success',
           text: `⚡ FormaTeX compiled official publication PDF for Set ${letter} (${Math.round((res.sizeBytes || 0) / 1024)} KB)!`,

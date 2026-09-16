@@ -21,6 +21,8 @@ export interface FormatexCompileResult {
   log?: string;
   engine?: string;
   durationMs?: number;
+  jobId?: string;
+  compilationsRemaining?: number;
 }
 
 /**
@@ -54,81 +56,67 @@ export async function getFormatexHealth(): Promise<{ connected: boolean; engine?
 
 /**
  * Intelligent sanitization and repair for LaTeX question strings.
- * Preserves math environments ($...$, $$...$$, \begin{...}) while safely escaping unescaped special characters.
+ * Preserves math environments ($...$, $$...$$, \[...\], \(...\)) while safely escaping unescaped special characters.
  */
 export function cleanAndSanitizeLatex(rawText: string): string {
   if (!rawText) return '';
   let text = String(rawText).trim();
 
-  // If text doesn't already contain full LaTeX math tags, safely escape raw characters
-  // Split by inline math segments to avoid escaping inside math formulas
-  const mathSegments = text.split(/(\$[^$]+\$|\$\$[^$]+\$\$|\\\[[\s\S]+?\\\])/g);
+  const mathSegments: string[] = [];
+  const placeholder = (i: number) => `ZZMATHBLOCK${i}ZZ`;
 
-  const sanitized = mathSegments.map((segment, idx) => {
-    // If it's a math segment, leave math symbols intact
-    if (idx % 2 === 1) {
-      return segment;
-    }
+  // Protect all LaTeX math environments
+  const mathRegex = /(\$\$[\s\S]+?\$\$|\$[^$\r\n]+?\$|\\\[[\s\S]+?\\\]|\\\([\s\S]+?\\\))/g;
+  text = text.replace(mathRegex, (match) => {
+    const idx = mathSegments.length;
+    mathSegments.push(match);
+    return placeholder(idx);
+  });
 
-    // Escape non-math special characters safely
-    return segment
-      .replace(/\\/g, '\\textbackslash{}')
-      .replace(/&/g, '\\&')
-      .replace(/%/g, '\\%')
-      .replace(/#/g, '\\#')
-      .replace(/_/g, '\\_')
-      .replace(/\{/g, '\\{')
-      .replace(/\}/g, '\\}')
-      .replace(/\^/g, '\\textasciicircum{}')
-      .replace(/~/g, '\\textasciitilde{}')
-      // Restore standard macros if mistakenly escaped
-      .replace(/\\textbackslash\{\}textbf/g, '\\textbf')
-      .replace(/\\textbackslash\{\}textit/g, '\\textit')
-      .replace(/\\textbackslash\{\}item/g, '\\item')
-      .replace(/\\textbackslash\{\}quad/g, '\\quad')
-      .replace(/\\textbackslash\{\}vspace/g, '\\vspace')
-      .replace(/\\textbackslash\{\}hfill/g, '\\hfill')
-      .replace(/\\textbackslash\{\}alpha/g, '\\alpha')
-      .replace(/\\textbackslash\{\}beta/g, '\\beta')
-      .replace(/\\textbackslash\{\}gamma/g, '\\gamma')
-      .replace(/\\textbackslash\{\}theta/g, '\\theta')
-      .replace(/\\textbackslash\{\}pi/g, '\\pi')
-      .replace(/\\textbackslash\{\}sigma/g, '\\sigma')
-      .replace(/\\textbackslash\{\}omega/g, '\\omega')
-      .replace(/\\textbackslash\{\}frac/g, '\\frac')
-      .replace(/\\textbackslash\{\}sqrt/g, '\\sqrt')
-      .replace(/\\textbackslash\{\}sum/g, '\\sum')
-      .replace(/\\textbackslash\{\}int/g, '\\int')
-      .replace(/\\textbackslash\{\}times/g, '\\times')
-      .replace(/\\textbackslash\{\}le/g, '\\le')
-      .replace(/\\textbackslash\{\}ge/g, '\\ge')
-      .replace(/\\textbackslash\{\}neq/g, '\\neq')
-      .replace(/\\textbackslash\{\}rightarrow/g, '\\rightarrow');
-  }).join('');
+  // Safely escape special LaTeX characters that are unescaped in text
+  text = text.replace(/(?<!\\)&/g, '\\&');
+  text = text.replace(/(?<!\\)%/g, '\\%');
+  text = text.replace(/(?<!\\)#/g, '\\#');
+  text = text.replace(/(?<!\\)_/g, '\\_');
+  text = text.replace(/(?<!\\)~/g, '\\textasciitilde{}');
+  text = text.replace(/(?<!\\)\^/g, '\\textasciicircum{}');
 
-  return sanitized;
+  // Restore protected math environments
+  for (let i = 0; i < mathSegments.length; i++) {
+    text = text.split(placeholder(i)).join(mathSegments[i]);
+  }
+
+  return text;
 }
 
 /**
- * Generate a complete, elegant university/board question paper in clean LaTeX
+ * Generate a complete, publication-grade university/board question paper in clean LaTeX
  */
 export function generateUniversityLatexDocument(params: {
   exam: any;
-  setLetter: string;
-  mcqs: any[];
+  setLetter?: string;
+  mcqs?: any[];
   theorySec1?: any[];
   theorySec2?: any[];
   durationMinutes?: number;
   totalMarks?: number;
 }): string {
-  const { exam, setLetter = 'P', mcqs = [], theorySec1 = [], theorySec2 = [], durationMinutes = 180, totalMarks = 70 } = params;
+  const {
+    exam = {},
+    setLetter = 'P',
+    mcqs = [],
+    theorySec1 = [],
+    theorySec2 = [],
+    durationMinutes = exam.duration_minutes || exam.time_limit_mins || 180,
+    totalMarks = exam.total_marks || exam.max_marks || 70,
+  } = params;
 
   const universityName = cleanAndSanitizeLatex(exam.university_name || 'AUTONOMOUS STATE EXAMINATION BOARD');
   const examTitle = cleanAndSanitizeLatex(exam.name || 'ANNUAL UNIVERSITY EXAMINATION 2026');
-  const subjectName = cleanAndSanitizeLatex(exam.subject || 'Core Engineering \\& Technology');
+  const subjectName = cleanAndSanitizeLatex(exam.subject || 'Core Engineering & Technology');
   const paperCode = cleanAndSanitizeLatex(exam.code || exam.paper_code || 'SLR-HL-475');
   const blueprintPattern = cleanAndSanitizeLatex(exam.blueprint_pattern || 'CBCS Pattern');
-  const markingScheme = cleanAndSanitizeLatex(exam.marking_scheme || 'Standard Marking Scheme');
+  const markingScheme = cleanAndSanitizeLatex(exam.marking_scheme || 'Standard University Marking Scheme');
 
   const todayStr = new Date().toLocaleDateString('en-US', {
     weekday: 'long',
@@ -137,6 +125,7 @@ export function generateUniversityLatexDocument(params: {
     day: 'numeric',
   });
 
+  // Prepare MCQs Section
   const mcqLines: string[] = [];
   mcqs.forEach((mcq, mIdx) => {
     const qText = cleanAndSanitizeLatex(mcq.content_text || mcq.question_text || `Question ${mIdx + 1}`);
@@ -158,6 +147,7 @@ export function generateUniversityLatexDocument(params: {
     mcqLines.push(`  \\vspace{1.5mm}`);
   });
 
+  // Prepare Theory Section I
   const theory1Lines: string[] = [];
   theorySec1.forEach((tq, tIdx) => {
     const tText = cleanAndSanitizeLatex(tq.content_text || tq.question_text || `Theory question ${tIdx + 1}`);
@@ -165,6 +155,7 @@ export function generateUniversityLatexDocument(params: {
     theory1Lines.push(`  \\item ${tText} \\hfill \\textbf{[${marks}]} \\vspace{1.5mm}`);
   });
 
+  // Prepare Theory Section II
   const theory2Lines: string[] = [];
   theorySec2.forEach((tq, tIdx) => {
     const tText = cleanAndSanitizeLatex(tq.content_text || tq.question_text || `Analytical problem ${tIdx + 1}`);
@@ -172,12 +163,79 @@ export function generateUniversityLatexDocument(params: {
     theory2Lines.push(`  \\item ${tText} \\hfill \\textbf{[${marks}]} \\vspace{1.5mm}`);
   });
 
+  const mcqSectionLatex = mcqLines.length > 0 ? `
+% --- Section: Q.1 MCQs ---
+\\noindent
+\\textbf{\\large Q.1 Choose the correct alternatives for the following questions.} \\hfill \\textbf{[${mcqs.length} Marks]}
+
+\\begin{enumerate}[label=\\textbf{\\arabic*.} , leftmargin=6mm, itemsep=2mm]
+${mcqLines.join('\n')}
+\\end{enumerate}
+\\vspace{4mm}
+\\hrule
+\\vspace{4mm}
+` : '';
+
+  const section1Latex = theory1Lines.length > 0 ? `
+% --- Section I: Theory & Concepts ---
+\\begin{center}
+  {\\large \\textbf{\\color{boardblue}SECTION -- I (Theory \\& Core Concepts)}} \\hfill \\textbf{[${Math.round(totalMarks * 0.4)} Marks]}
+\\end{center}
+\\vspace{2mm}
+
+\\noindent
+\\textbf{Q.2 Answer the following questions (Attempt Any Four):} \\hfill \\textbf{[16 Marks]}
+\\begin{enumerate}[label=\\textbf{\\alph*)} , leftmargin=6mm, itemsep=2mm]
+${(theory1Lines.slice(0, 5).length > 0 ? theory1Lines.slice(0, 5) : theory1Lines).join('\n')}
+\\end{enumerate}
+
+\\vspace{3mm}
+\\noindent
+\\textbf{Q.3 Answer the following questions in detail (Attempt Any Two):} \\hfill \\textbf{[12 Marks]}
+\\begin{enumerate}[label=\\textbf{\\alph*)} , leftmargin=6mm, itemsep=2mm]
+${(theory1Lines.slice(5).length > 0 ? theory1Lines.slice(5) : theory1Lines.slice(0, 2)).join('\n')}
+\\end{enumerate}
+\\vspace{4mm}
+\\hrule
+\\vspace{4mm}
+` : '';
+
+  const section2Latex = theory2Lines.length > 0 ? `
+% --- Section II: Analysis & Applications ---
+\\begin{center}
+  {\\large \\textbf{\\color{boardblue}SECTION -- II (Analysis, Design \\& Applications)}} \\hfill \\textbf{[${Math.round(totalMarks * 0.4)} Marks]}
+\\end{center}
+\\vspace{2mm}
+
+\\noindent
+\\textbf{Q.4 Answer the following questions (Attempt Any Four):} \\hfill \\textbf{[16 Marks]}
+\\begin{enumerate}[label=\\textbf{\\alph*)} , leftmargin=6mm, itemsep=2mm]
+${(theory2Lines.slice(0, 5).length > 0 ? theory2Lines.slice(0, 5) : theory2Lines).join('\n')}
+\\end{enumerate}
+
+\\vspace{3mm}
+\\noindent
+\\textbf{Q.5 Solve / Explain the following technical problems:} \\hfill \\textbf{[12 Marks]}
+\\begin{enumerate}[label=\\textbf{\\alph*)} , leftmargin=6mm, itemsep=2mm]
+${(theory2Lines.slice(5).length > 0 ? theory2Lines.slice(5) : theory2Lines.slice(0, 2)).join('\n')}
+\\end{enumerate}
+` : '';
+
+  // Safe fallback if no question lines exist
+  const fallbackQuestions = (!mcqSectionLatex && !section1Latex && !section2Latex) ? `
+\\noindent
+\\textbf{\\large Examination Questions}
+\\begin{enumerate}[label=\\textbf{\\arabic*.} , leftmargin=6mm, itemsep=3mm]
+  \\item Explain the fundamental concepts, system architecture, and design methodology of ${subjectName}. \\hfill \\textbf{[10]}
+  \\item Differentiate between primary algorithms and evaluate their performance characteristics. \\hfill \\textbf{[10]}
+\\end{enumerate}
+` : '';
+
   return `\\documentclass[11pt,a4paper]{article}
 \\usepackage[top=20mm,bottom=20mm,left=18mm,right=18mm]{geometry}
 \\usepackage{amsmath,amssymb,amsfonts}
 \\usepackage{enumitem}
 \\usepackage{fancyhdr}
-\\usepackage{titlesec}
 \\usepackage{booktabs}
 \\usepackage{tabularx}
 \\usepackage{microtype}
@@ -246,59 +304,10 @@ export function generateUniversityLatexDocument(params: {
 \\hrule
 \\vspace{3mm}
 
-% --- Section: Q.1 MCQs ---
-\\noindent
-\\textbf{\\large Q.1 Choose the correct alternatives for the following questions.} \\hfill \\textbf{[${mcqs.length || 14} Marks]}
-
-\\begin{enumerate}[label=\\textbf{\\arabic*.} , leftmargin=6mm, itemsep=2mm]
-${mcqLines.join('\n')}
-\\end{enumerate}
-
-\\vspace{5mm}
-\\hrule
-\\vspace{4mm}
-
-% --- Section I: Theory & Concepts ---
-\\begin{center}
-  {\\large \\textbf{\\color{boardblue}SECTION -- I (Theory \\& Core Concepts)}} \\hfill \\textbf{[28 Marks]}
-\\end{center}
-\\vspace{2mm}
-
-\\noindent
-\\textbf{Q.2 Answer the following questions (Attempt Any Four):} \\hfill \\textbf{[16 Marks]}
-\\begin{enumerate}[label=\\textbf{\\alph*)} , leftmargin=6mm, itemsep=2mm]
-${theory1Lines.slice(0, 5).join('\n')}
-\\end{enumerate}
-
-\\vspace{3mm}
-\\noindent
-\\textbf{Q.3 Answer the following questions in detail (Attempt Any Two):} \\hfill \\textbf{[12 Marks]}
-\\begin{enumerate}[label=\\textbf{\\alph*)} , leftmargin=6mm, itemsep=2mm]
-${theory1Lines.slice(5).length > 0 ? theory1Lines.slice(5).join('\n') : theory1Lines.slice(0, 2).join('\n')}
-\\end{enumerate}
-
-\\vspace{5mm}
-\\hrule
-\\vspace{4mm}
-
-% --- Section II: Analysis & Applications ---
-\\begin{center}
-  {\\large \\textbf{\\color{boardblue}SECTION -- II (Analysis, Design \\& Applications)}} \\hfill \\textbf{[28 Marks]}
-\\end{center}
-\\vspace{2mm}
-
-\\noindent
-\\textbf{Q.4 Answer the following questions (Attempt Any Four):} \\hfill \\textbf{[16 Marks]}
-\\begin{enumerate}[label=\\textbf{\\alph*)} , leftmargin=6mm, itemsep=2mm]
-${theory2Lines.slice(0, 5).join('\n')}
-\\end{enumerate}
-
-\\vspace{3mm}
-\\noindent
-\\textbf{Q.5 Solve / Explain the following technical problems:} \\hfill \\textbf{[12 Marks]}
-\\begin{enumerate}[label=\\textbf{\\alph*)} , leftmargin=6mm, itemsep=2mm]
-${theory2Lines.slice(5).length > 0 ? theory2Lines.slice(5).join('\n') : theory2Lines.slice(0, 2).join('\n')}
-\\end{enumerate}
+${mcqSectionLatex}
+${section1Latex}
+${section2Latex}
+${fallbackQuestions}
 
 \\vspace{6mm}
 \\begin{center}
@@ -335,6 +344,9 @@ export async function compileLatexWithFormatex(options: FormatexCompileOptions):
     });
 
     const durationMs = Date.now() - startTime;
+    const jobId = res.headers.get('x-job-id') || undefined;
+    const remainingHeader = res.headers.get('x-compilations-remaining') || res.headers.get('x-ratelimit-remaining');
+    const compilationsRemaining = remainingHeader ? parseInt(remainingHeader, 10) : undefined;
 
     if (res.ok) {
       const contentType = res.headers.get('content-type') || '';
@@ -346,17 +358,21 @@ export async function compileLatexWithFormatex(options: FormatexCompileOptions):
           pdfBuffer,
           engine,
           durationMs,
+          jobId,
+          compilationsRemaining,
         };
       }
 
       // JSON response
-      const jsonRes = await res.json() as any;
+      const jsonRes = (await res.json()) as any;
       if (jsonRes.pdfBase64) {
         return {
           success: true,
           pdfBuffer: Buffer.from(jsonRes.pdfBase64, 'base64'),
           engine,
           durationMs,
+          jobId,
+          compilationsRemaining,
         };
       }
     }
@@ -371,6 +387,8 @@ export async function compileLatexWithFormatex(options: FormatexCompileOptions):
       success: false,
       error: `FormaTeX compilation failed (${res.status}): ${errorBody.slice(0, 300)}`,
       durationMs,
+      jobId,
+      compilationsRemaining,
     };
   } catch (err: any) {
     const durationMs = Date.now() - startTime;
@@ -391,6 +409,7 @@ export async function generateAndUploadFormatexPdf(params: {
   mcqs: any[];
   theorySec1?: any[];
   theorySec2?: any[];
+  customLatex?: string;
 }): Promise<{
   success: boolean;
   pdfUrl?: string;
@@ -400,8 +419,8 @@ export async function generateAndUploadFormatexPdf(params: {
   checksumSha256?: string;
   error?: string;
 }> {
-  const { exam, setLetter } = params;
-  const latex = generateUniversityLatexDocument(params);
+  const { exam, setLetter, customLatex } = params;
+  const latex = customLatex && customLatex.trim() ? customLatex : generateUniversityLatexDocument(params);
 
   const compilation = await compileLatexWithFormatex({
     latex,

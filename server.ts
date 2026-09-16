@@ -4640,22 +4640,55 @@ async function startServer() {
 
       let questions: any[] = [];
       if (version) {
-        questions = executeQuery(
-          db,
-          `SELECT q.*, pq.order_index, pq.marks as question_marks
-           FROM paper_questions pq
-           JOIN questions q ON pq.question_id = q.id
-           WHERE pq.paper_version_id = ?
-           ORDER BY pq.order_index ASC`,
-          [version.id]
-        );
+        // Try decrypted payload first
+        const encryptedData = executeQuery(db, 'SELECT * FROM encrypted_papers WHERE paper_version_id = ?', [version.id])[0];
+        if (encryptedData) {
+          try {
+            const decStr = decryptExamPaper({
+              cipherText: encryptedData.aes_cipher_text,
+              iv: encryptedData.iv_hex,
+              authTag: encryptedData.auth_tag_hex,
+              encryptedKeyRSA: encryptedData.encrypted_aes_key_rsa,
+              keyFingerprint: encryptedData.key_fingerprint,
+              checksumSHA256: encryptedData.checksum_sha256,
+              timestamp: encryptedData.encrypted_at,
+            });
+            const decObj = JSON.parse(decStr);
+            if (decObj?.setQuestions && Array.isArray(decObj.setQuestions) && decObj.setQuestions.length > 0) {
+              questions = decObj.setQuestions;
+            }
+          } catch {}
+        }
+
+        if (questions.length === 0) {
+          questions = executeQuery(
+            db,
+            `SELECT q.*, pq.order_index, pq.marks as question_marks
+             FROM paper_questions pq
+             JOIN questions q ON pq.question_id = q.id
+             WHERE pq.paper_version_id = ?
+             ORDER BY pq.order_index ASC`,
+            [version.id]
+          );
+        }
       }
+
       if (questions.length === 0) {
         questions = executeQuery(db, `SELECT * FROM questions WHERE org_id = ? LIMIT 30`, [exam.org_id]);
       }
 
-      const mcqs = questions.filter(q => q.question_type === 'MCQ' || (q.options_json && q.options_json.length > 5));
-      const theory = questions.filter(q => q.question_type !== 'MCQ' && (!q.options_json || q.options_json.length <= 5));
+      const parsedQuestions = questions.map((q: any) => {
+        let opts: any[] = [];
+        try {
+          opts = q.options_json ? (typeof q.options_json === 'string' ? JSON.parse(q.options_json) : q.options_json) : (Array.isArray(q.options) ? q.options : []);
+        } catch {
+          opts = [];
+        }
+        return { ...q, options: opts };
+      });
+
+      const mcqs = parsedQuestions.filter(q => q.question_type === 'MCQ' || (Array.isArray(q.options) && q.options.length >= 2));
+      const theory = parsedQuestions.filter(q => q.question_type !== 'MCQ' && (!q.options || q.options.length < 2));
       const theorySec1 = theory.slice(0, Math.ceil(theory.length / 2));
       const theorySec2 = theory.slice(Math.ceil(theory.length / 2));
 
@@ -4676,7 +4709,7 @@ async function startServer() {
   });
 
   // Compile Official University PDF via FormaTeX Cloud Engine
-  app.post('/api/examinations/:id/compile-formatex-pdf', authenticateToken, requireApprovedDevice, async (req: Request, res: Response) => {
+  app.post('/api/examinations/:id/compile-formatex-pdf', authenticateToken, async (req: Request, res: Response) => {
     try {
       const db = await getDb();
       const exam = executeQuery(db, 'SELECT * FROM examinations WHERE id = ?', [req.params.id])[0];
@@ -4723,22 +4756,54 @@ async function startServer() {
 
         let questions: any[] = [];
         if (version) {
-          questions = executeQuery(
-            db,
-            `SELECT q.*, pq.order_index, pq.marks as question_marks
-             FROM paper_questions pq
-             JOIN questions q ON pq.question_id = q.id
-             WHERE pq.paper_version_id = ?
-             ORDER BY pq.order_index ASC`,
-            [version.id]
-          );
+          const encryptedData = executeQuery(db, 'SELECT * FROM encrypted_papers WHERE paper_version_id = ?', [version.id])[0];
+          if (encryptedData) {
+            try {
+              const decStr = decryptExamPaper({
+                cipherText: encryptedData.aes_cipher_text,
+                iv: encryptedData.iv_hex,
+                authTag: encryptedData.auth_tag_hex,
+                encryptedKeyRSA: encryptedData.encrypted_aes_key_rsa,
+                keyFingerprint: encryptedData.key_fingerprint,
+                checksumSHA256: encryptedData.checksum_sha256,
+                timestamp: encryptedData.encrypted_at,
+              });
+              const decObj = JSON.parse(decStr);
+              if (decObj?.setQuestions && Array.isArray(decObj.setQuestions) && decObj.setQuestions.length > 0) {
+                questions = decObj.setQuestions;
+              }
+            } catch {}
+          }
+
+          if (questions.length === 0) {
+            questions = executeQuery(
+              db,
+              `SELECT q.*, pq.order_index, pq.marks as question_marks
+               FROM paper_questions pq
+               JOIN questions q ON pq.question_id = q.id
+               WHERE pq.paper_version_id = ?
+               ORDER BY pq.order_index ASC`,
+              [version.id]
+            );
+          }
         }
+
         if (questions.length === 0) {
           questions = executeQuery(db, `SELECT * FROM questions WHERE org_id = ? LIMIT 30`, [exam.org_id]);
         }
 
-        const mcqs = questions.filter(q => q.question_type === 'MCQ' || (q.options_json && q.options_json.length > 5));
-        const theory = questions.filter(q => q.question_type !== 'MCQ' && (!q.options_json || q.options_json.length <= 5));
+        const parsedQuestions = questions.map((q: any) => {
+          let opts: any[] = [];
+          try {
+            opts = q.options_json ? (typeof q.options_json === 'string' ? JSON.parse(q.options_json) : q.options_json) : (Array.isArray(q.options) ? q.options : []);
+          } catch {
+            opts = [];
+          }
+          return { ...q, options: opts };
+        });
+
+        const mcqs = parsedQuestions.filter(q => q.question_type === 'MCQ' || (Array.isArray(q.options) && q.options.length >= 2));
+        const theory = parsedQuestions.filter(q => q.question_type !== 'MCQ' && (!q.options || q.options.length < 2));
         const theorySec1 = theory.slice(0, Math.ceil(theory.length / 2));
         const theorySec2 = theory.slice(Math.ceil(theory.length / 2));
 
