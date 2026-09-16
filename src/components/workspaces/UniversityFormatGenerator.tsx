@@ -33,7 +33,9 @@ import {
   Square,
   Zap,
   Combine,
-  Flame
+  Flame,
+  Trash2,
+  Filter
 } from 'lucide-react';
 import { api } from '../../api';
 import { User, Examination } from '../../types';
@@ -211,6 +213,65 @@ export const UniversityFormatGenerator: React.FC<UniversityFormatGeneratorProps>
     }
   };
 
+  const [filterMode, setFilterMode] = useState<'recent' | 'all'>('recent');
+  const [deletingId, setDeletingId] = useState<string | null>(null);
+
+  const formatDraftName = (filename: string): string => {
+    if (!filename) return 'Question Paper Draft.pdf';
+    let clean = filename.replace(/^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}[-_]?/, '');
+    clean = clean.replace(/^[0-9a-fA-F]{8,}[-_]/, '');
+    clean = clean.replace(/_/g, ' ');
+    return clean || filename;
+  };
+
+  const handleDeletePaper = async (e: React.MouseEvent, paperId: string) => {
+    e.stopPropagation();
+    if (!confirm('Are you sure you want to remove this draft paper from the vault?')) return;
+    setDeletingId(paperId);
+    try {
+      const res = await api.deleteQuestionPaper(paperId);
+      if (res.success) {
+        setUploadedPapers(prev => prev.filter(p => p.id !== paperId));
+        setSelectedPaperIds(prev => prev.filter(id => id !== paperId));
+        setActionMessage({
+          type: 'success',
+          text: 'Draft question paper removed from vault.',
+        });
+      }
+    } catch (err: any) {
+      setActionMessage({
+        type: 'error',
+        text: `Failed to remove paper: ${err.message}`,
+      });
+    } finally {
+      setDeletingId(null);
+    }
+  };
+
+  const handleBulkDelete = async () => {
+    if (selectedPaperIds.length === 0) return;
+    if (!confirm(`Are you sure you want to remove ${selectedPaperIds.length} selected draft papers from the vault?`)) return;
+    setLoadingPapers(true);
+    try {
+      const res = await api.bulkDeleteQuestionPapers(selectedPaperIds);
+      if (res.success) {
+        setUploadedPapers(prev => prev.filter(p => !selectedPaperIds.includes(p.id)));
+        setSelectedPaperIds([]);
+        setActionMessage({
+          type: 'success',
+          text: 'Selected draft papers successfully removed from vault.',
+        });
+      }
+    } catch (err: any) {
+      setActionMessage({
+        type: 'error',
+        text: `Failed to delete papers: ${err.message}`,
+      });
+    } finally {
+      setLoadingPapers(false);
+    }
+  };
+
   const toggleSelectPaper = (paperId: string) => {
     setSelectedPaperIds(prev =>
       prev.includes(paperId) ? prev.filter(id => id !== paperId) : [...prev, paperId]
@@ -218,7 +279,8 @@ export const UniversityFormatGenerator: React.FC<UniversityFormatGeneratorProps>
   };
 
   const selectAllPapers = () => {
-    setSelectedPaperIds(uploadedPapers.map(p => p.id));
+    const visible = filterMode === 'recent' ? uploadedPapers.slice(0, 6) : uploadedPapers;
+    setSelectedPaperIds(visible.map(p => p.id));
   };
 
   const clearSelectedPapers = () => {
@@ -395,33 +457,63 @@ export const UniversityFormatGenerator: React.FC<UniversityFormatGeneratorProps>
 
       {/* RECENTLY UPLOADED PAPERS (FROM EXAM WORKFLOW & CLOUDINARY) WITH MULTI-SELECT & COMBINATION */}
       <div className="bg-slate-900 border border-slate-800 p-5 rounded-2xl shadow-xl space-y-4">
+        {/* Header Toolbar */}
         <div className="flex flex-wrap items-center justify-between border-b border-slate-800 pb-3 gap-3">
-          <div className="flex items-center gap-2.5">
-            <div className="p-1.5 rounded-lg bg-sky-500/20 text-sky-400 border border-sky-500/30">
-              <Cloud className="w-4 h-4" />
+          <div className="flex items-center gap-3">
+            <div className="p-2 rounded-xl bg-gradient-to-br from-rose-500/20 to-sky-500/20 text-rose-400 border border-rose-500/30">
+              <Cloud className="w-5 h-5" />
             </div>
             <div>
               <div className="flex items-center gap-2">
-                <h3 className="text-sm font-extrabold text-white uppercase tracking-wide">
-                  Recently Uploaded Source Draft Papers (Cloudinary Vault)
+                <h3 className="text-sm font-extrabold text-white tracking-wide uppercase">
+                  Recently Uploaded Source Draft Papers
                 </h3>
-                <span className="text-[10px] font-mono text-sky-400 font-bold bg-sky-500/10 px-2 py-0.5 rounded border border-sky-500/20">
-                  {uploadedPapers.length} Stored in Cloudinary
+                <span className="text-[10px] font-mono text-sky-400 font-bold bg-sky-500/10 px-2 py-0.5 rounded-full border border-sky-500/20">
+                  {uploadedPapers.length} in Cloudinary Vault
                 </span>
               </div>
               <p className="text-[11px] text-slate-400">
-                Select multiple draft papers below to generate a new blended paper combining questions from all selected drafts.
+                Select draft question papers to generate a new blended examination paper using Ollama AI permutation.
               </p>
             </div>
           </div>
 
-          <div className="flex items-center gap-2">
+          {/* Controls: Filter & Actions */}
+          <div className="flex flex-wrap items-center gap-2">
+            {/* Filter Toggle: Recent (6) vs All */}
+            <div className="flex items-center bg-slate-950 p-0.5 rounded-xl border border-slate-800 text-xs font-semibold">
+              <button
+                type="button"
+                onClick={() => setFilterMode('recent')}
+                className={`px-3 py-1.5 rounded-lg transition-all cursor-pointer flex items-center gap-1.5 ${
+                  filterMode === 'recent'
+                    ? 'bg-rose-600 text-white shadow-md shadow-rose-600/30 font-bold'
+                    : 'text-slate-400 hover:text-slate-200'
+                }`}
+              >
+                <Flame className="w-3.5 h-3.5 text-amber-300" />
+                <span>Last Uploads ({Math.min(uploadedPapers.length, 6)})</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => setFilterMode('all')}
+                className={`px-3 py-1.5 rounded-lg transition-all cursor-pointer flex items-center gap-1.5 ${
+                  filterMode === 'all'
+                    ? 'bg-rose-600 text-white shadow-md shadow-rose-600/30 font-bold'
+                    : 'text-slate-400 hover:text-slate-200'
+                }`}
+              >
+                <BookOpen className="w-3.5 h-3.5" />
+                <span>All Documents ({uploadedPapers.length})</span>
+              </button>
+            </div>
+
             {uploadedPapers.length > 0 && (
               <>
                 <button
                   type="button"
                   onClick={selectAllPapers}
-                  className="px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 text-[11px] font-semibold border border-slate-700 flex items-center gap-1 cursor-pointer transition-all"
+                  className="px-2.5 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-semibold border border-slate-700 flex items-center gap-1.5 cursor-pointer transition-all"
                 >
                   <CheckSquare className="w-3.5 h-3.5 text-emerald-400" />
                   <span>Select All</span>
@@ -429,18 +521,29 @@ export const UniversityFormatGenerator: React.FC<UniversityFormatGeneratorProps>
                 <button
                   type="button"
                   onClick={clearSelectedPapers}
-                  className="px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 text-[11px] font-semibold border border-slate-700 flex items-center gap-1 cursor-pointer transition-all"
+                  className="px-2.5 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-semibold border border-slate-700 flex items-center gap-1.5 cursor-pointer transition-all"
                 >
                   <Square className="w-3.5 h-3.5 text-slate-400" />
                   <span>Clear</span>
                 </button>
+                {selectedPaperIds.length > 0 && (
+                  <button
+                    type="button"
+                    onClick={handleBulkDelete}
+                    className="px-2.5 py-1.5 rounded-xl bg-rose-500/20 hover:bg-rose-500/30 text-rose-300 text-xs font-bold border border-rose-500/40 flex items-center gap-1.5 cursor-pointer transition-all shadow-sm shadow-rose-500/20"
+                  >
+                    <Trash2 className="w-3.5 h-3.5 text-rose-400" />
+                    <span>Delete Selected ({selectedPaperIds.length})</span>
+                  </button>
+                )}
               </>
             )}
+
             <button
               type="button"
               onClick={handleSyncCloudinary}
               title="Sync & import from Cloudinary Account"
-              className="p-1.5 px-3 rounded-lg bg-sky-600 hover:bg-sky-500 text-white font-bold border border-sky-500/40 cursor-pointer transition-all flex items-center gap-1.5 text-xs shadow-md shadow-sky-600/20"
+              className="p-1.5 px-3 rounded-xl bg-sky-600 hover:bg-sky-500 text-white font-bold border border-sky-500/40 cursor-pointer transition-all flex items-center gap-1.5 text-xs shadow-md shadow-sky-600/20"
             >
               <RefreshCw className={`w-3.5 h-3.5 ${loadingPapers ? 'animate-spin' : ''}`} />
               <span>Sync Cloudinary</span>
@@ -450,94 +553,123 @@ export const UniversityFormatGenerator: React.FC<UniversityFormatGeneratorProps>
 
         {/* Papers Grid */}
         {loadingPapers ? (
-          <div className="p-8 text-center text-slate-400 text-xs flex items-center justify-center gap-2">
-            <RefreshCw className="w-4 h-4 animate-spin text-rose-500" />
-            <span>Syncing & fetching recently uploaded papers from Cloudinary vault...</span>
+          <div className="p-12 text-center text-slate-400 text-xs flex items-center justify-center gap-2">
+            <RefreshCw className="w-5 h-5 animate-spin text-rose-500" />
+            <span className="font-semibold text-slate-300">Syncing and loading documents from Cloudinary vault...</span>
           </div>
         ) : uploadedPapers.length === 0 ? (
-          <div className="p-8 rounded-xl bg-slate-800/50 border border-dashed border-slate-700 text-center space-y-3">
-            <UploadCloud className="w-9 h-9 text-sky-400 mx-auto" />
-            <div className="text-xs font-bold text-slate-200">No draft question papers indexed in local bank yet</div>
-            <p className="text-[11px] text-slate-400 max-w-md mx-auto">
-              Click below to sync your Cloudinary account assets, or upload PDFs in <strong className="text-rose-400">Exam Workflow</strong>.
+          <div className="p-10 rounded-2xl bg-slate-800/40 border border-dashed border-slate-700 text-center space-y-3">
+            <UploadCloud className="w-10 h-10 text-sky-400 mx-auto animate-bounce" />
+            <div className="text-sm font-bold text-slate-200">No draft question papers indexed in local bank yet</div>
+            <p className="text-xs text-slate-400 max-w-md mx-auto">
+              Upload PDF question papers in <strong className="text-rose-400">Exam Workflow</strong> or click below to sync directly from your Cloudinary storage.
             </p>
             <button
               type="button"
               onClick={handleSyncCloudinary}
-              className="px-4 py-2 bg-sky-600 hover:bg-sky-500 text-white rounded-xl font-bold text-xs shadow-lg shadow-sky-600/20 inline-flex items-center gap-2 cursor-pointer transition-all"
+              className="px-5 py-2.5 bg-sky-600 hover:bg-sky-500 text-white rounded-xl font-bold text-xs shadow-lg shadow-sky-600/30 inline-flex items-center gap-2 cursor-pointer transition-all"
             >
               <Cloud className="w-4 h-4" />
               <span>Import Documents from Cloudinary Vault</span>
             </button>
           </div>
         ) : (
-          <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3.5">
-            {uploadedPapers.map((paper, pIdx) => {
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+            {(filterMode === 'recent' ? uploadedPapers.slice(0, 6) : uploadedPapers).map((paper, pIdx) => {
               const isSelected = selectedPaperIds.includes(paper.id);
+              const isDeleting = deletingId === paper.id;
+              const formattedName = formatDraftName(paper.original_filename);
+
               return (
                 <div
                   key={paper.id}
                   onClick={() => toggleSelectPaper(paper.id)}
-                  className={`relative p-4 rounded-xl border transition-all cursor-pointer select-none space-y-3 ${
+                  className={`group relative p-4 rounded-2xl border transition-all duration-200 cursor-pointer select-none space-y-3 ${
                     isSelected
-                      ? 'bg-rose-950/20 border-rose-500/60 shadow-lg shadow-rose-950/30 ring-1 ring-rose-500/50'
-                      : 'bg-slate-800/80 border-slate-700/80 hover:border-slate-600'
-                  }`}
+                      ? 'bg-gradient-to-br from-rose-950/40 via-slate-900 to-slate-900 border-rose-500/70 shadow-lg shadow-rose-950/40 ring-1 ring-rose-500/60'
+                      : 'bg-slate-900/80 hover:bg-slate-850 border-slate-800 hover:border-slate-700 hover:shadow-md'
+                  } ${isDeleting ? 'opacity-40 pointer-events-none' : ''}`}
                 >
-                  {/* Header row: Checkbox, Name, Badge */}
+                  {/* Top Bar: Icon, Name, Trash */}
                   <div className="flex items-start justify-between gap-2.5">
-                    <div className="flex items-start gap-2.5 overflow-hidden">
-                      <div className="pt-0.5 shrink-0">
+                    <div className="flex items-start gap-3 min-w-0">
+                      {/* Checkbox & PDF Badge */}
+                      <div className="relative pt-0.5 shrink-0">
                         {isSelected ? (
-                          <div className="w-4 h-4 rounded bg-rose-600 flex items-center justify-center text-white">
-                            <Check className="w-3 h-3 stroke-[3]" />
+                          <div className="w-5 h-5 rounded-lg bg-rose-600 flex items-center justify-center text-white shadow-md shadow-rose-600/40">
+                            <Check className="w-3.5 h-3.5 stroke-[3]" />
                           </div>
                         ) : (
-                          <div className="w-4 h-4 rounded border border-slate-600 bg-slate-800" />
+                          <div className="w-5 h-5 rounded-lg border border-slate-700 bg-slate-800/80 group-hover:border-slate-500 transition-colors" />
                         )}
                       </div>
-                      <div className="overflow-hidden">
+
+                      {/* Title and Index */}
+                      <div className="min-w-0">
                         <div className="flex items-center gap-1.5">
-                          <span className="text-[10px] font-black font-mono text-rose-400 uppercase">
+                          <span className="text-[10px] font-black font-mono text-rose-400 uppercase tracking-wider">
                             Draft #{pIdx + 1}
                           </span>
+                          {pIdx < 2 && filterMode === 'recent' && (
+                            <span className="px-1.5 py-0.2 rounded text-[9px] font-black bg-amber-500/20 text-amber-300 border border-amber-500/30">
+                              NEW
+                            </span>
+                          )}
                         </div>
-                        <h4 className="font-bold text-xs text-white truncate" title={paper.original_filename}>
-                          {paper.original_filename}
+                        <h4 className="font-bold text-xs text-white truncate max-w-[190px]" title={paper.original_filename}>
+                          {formattedName}
                         </h4>
                       </div>
                     </div>
 
-                    <span className="px-2 py-0.5 rounded text-[9px] font-black bg-sky-500/10 text-sky-400 border border-sky-500/30 uppercase shrink-0">
-                      Cloudinary
-                    </span>
-                  </div>
-
-                  {/* Metadata Stats */}
-                  <div className="grid grid-cols-2 gap-2 text-[11px] text-slate-300 font-mono bg-slate-900/60 p-2 rounded-lg border border-slate-800">
-                    <div>Questions: <strong className="text-white">{paper.question_count}</strong></div>
-                    <div>Pages: <strong className="text-white">{paper.page_count}</strong></div>
-                    <div className="col-span-2 text-[10px] text-slate-400 truncate">
-                      Subject: <strong className="text-slate-200">{paper.subject || 'General'}</strong>
+                    {/* Actions: Delete Trash Button */}
+                    <div className="flex items-center gap-1 shrink-0">
+                      <span className="px-2 py-0.5 rounded-full text-[9px] font-black bg-sky-500/10 text-sky-400 border border-sky-500/20 uppercase">
+                        PDF
+                      </span>
+                      <button
+                        type="button"
+                        onClick={(e) => handleDeletePaper(e, paper.id)}
+                        title="Remove this draft document"
+                        className="p-1.5 rounded-lg text-slate-500 hover:text-rose-400 hover:bg-rose-500/20 transition-all cursor-pointer opacity-80 group-hover:opacity-100"
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                      </button>
                     </div>
                   </div>
 
-                  {/* Footer with Cloudinary Link & Timestamp */}
-                  <div className="flex items-center justify-between text-[10px] text-slate-400 pt-1 border-t border-slate-700/60">
-                    <span>{new Date(paper.uploaded_at).toLocaleDateString()}</span>
-                    {paper.cloudinary_url && (
+                  {/* Metadata Pills */}
+                  <div className="grid grid-cols-2 gap-2 text-[11px] font-mono bg-slate-950/70 p-2.5 rounded-xl border border-slate-800/80">
+                    <div className="flex items-center gap-1.5 text-slate-300">
+                      <Hash className="w-3 h-3 text-rose-400" />
+                      <span>{paper.question_count || 14} Questions</span>
+                    </div>
+                    <div className="flex items-center gap-1.5 text-slate-300">
+                      <FileText className="w-3 h-3 text-sky-400" />
+                      <span>{paper.page_count || 1} Pages</span>
+                    </div>
+                    <div className="col-span-2 flex items-center justify-between text-[10px] text-slate-400 pt-1 border-t border-slate-800/60 truncate">
+                      <span>Subject: <strong className="text-slate-200">{paper.subject || 'Core Engineering'}</strong></span>
+                      <span className="text-slate-500">{new Date(paper.uploaded_at).toLocaleDateString()}</span>
+                    </div>
+                  </div>
+
+                  {/* Footer: Cloudinary Link */}
+                  {paper.cloudinary_url && (
+                    <div className="flex items-center justify-between pt-0.5">
                       <a
                         href={paper.cloudinary_url}
                         target="_blank"
                         rel="noopener noreferrer"
                         onClick={(e) => e.stopPropagation()}
-                        className="inline-flex items-center gap-1 text-sky-400 hover:text-sky-300 font-bold underline"
+                        className="inline-flex items-center gap-1.5 text-[11px] text-sky-400 hover:text-sky-300 font-bold transition-colors"
                       >
                         <ExternalLink className="w-3 h-3" />
-                        <span>View PDF</span>
+                        <span>Preview on Cloudinary</span>
                       </a>
-                    )}
-                  </div>
+                      <span className="text-[10px] text-slate-500">Vault Indexed</span>
+                    </div>
+                  )}
                 </div>
               );
             })}

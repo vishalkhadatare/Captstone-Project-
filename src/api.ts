@@ -433,6 +433,13 @@ export const api = {
       method: 'POST',
       body: JSON.stringify({ exam_id }),
     }),
+  deleteQuestionPaper: (paperId: string) =>
+    request<{ success: boolean; message: string }>(`/api/question-papers/${paperId}`, { method: 'DELETE' }),
+  bulkDeleteQuestionPapers: (paperIds: string[]) =>
+    request<{ success: boolean; message: string }>('/api/question-papers/bulk-delete', {
+      method: 'POST',
+      body: JSON.stringify({ ids: paperIds }),
+    }),
   extractThreeStandardPapers: () =>
     request<{ message: string; extractedQuestions: any[]; papers: any[]; totalExtracted: number }>('/api/question-papers/extract-three-standard-papers', { method: 'POST' }),
   getExtractionProgress: (jobId: string) =>
