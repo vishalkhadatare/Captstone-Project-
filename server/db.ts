@@ -481,6 +481,8 @@ function initializeSchema(db: Database) {
     CREATE TABLE IF NOT EXISTS examinations (
       id TEXT PRIMARY KEY,
       org_id TEXT NOT NULL,
+      university_name TEXT,
+      blueprint_pattern TEXT,
       name TEXT NOT NULL,
       subject TEXT NOT NULL,
       category TEXT NOT NULL, -- 'NEET', 'JEE', 'Competitive Exam', 'TCET / CET-type Exam', 'University Exam', 'Custom Exam'
@@ -491,6 +493,12 @@ function initializeSchema(db: Database) {
       total_marks INTEGER NOT NULL DEFAULT 100,
       total_questions INTEGER NOT NULL DEFAULT 0,
       duration_minutes INTEGER NOT NULL DEFAULT 180,
+      mcq_count INTEGER DEFAULT 0,
+      theory_count INTEGER DEFAULT 0,
+      mcq_marks REAL DEFAULT 1.0,
+      theory_marks REAL DEFAULT 10.0,
+      negative_marks REAL DEFAULT 0.0,
+      marking_scheme TEXT,
       status TEXT NOT NULL DEFAULT 'CONFIGURING', -- 'CONFIGURING', 'VERIFYING_POOL', 'READY_FOR_GENERATION', 'GENERATED_ENCRYPTED', 'RELEASED', 'COMPROMISED', 'REGENERATED'
       created_by TEXT NOT NULL,
       created_at TEXT NOT NULL,
@@ -534,6 +542,7 @@ function initializeSchema(db: Database) {
     CREATE TABLE IF NOT EXISTS questions (
       id TEXT PRIMARY KEY,
       org_id TEXT NOT NULL,
+      exam_id TEXT,
       question_paper_id TEXT,
       source_file TEXT,
       source_page INTEGER,
@@ -565,6 +574,7 @@ function initializeSchema(db: Database) {
     CREATE TABLE IF NOT EXISTS question_papers (
       id TEXT PRIMARY KEY,
       org_id TEXT NOT NULL,
+      exam_id TEXT,
       original_filename TEXT NOT NULL,
       subject TEXT NOT NULL,
       examination_category TEXT NOT NULL,
@@ -1254,6 +1264,7 @@ function initializeSchema(db: Database) {
     'extraction_status',
     'options_status',
     'validation_flags',
+    'exam_id',
   ];
   for (const col of questionCols) {
     try {
@@ -1262,10 +1273,38 @@ function initializeSchema(db: Database) {
   }
 
   try {
+    db.run(`ALTER TABLE question_papers ADD COLUMN exam_id TEXT`);
+  } catch {}
+
+  try {
     const pgPool = getPostgresPool();
     if (pgPool) {
       for (const col of questionCols) {
         pgPool.query(`ALTER TABLE questions ADD COLUMN IF NOT EXISTS ${col} TEXT`).catch(() => {});
+      }
+    }
+  } catch {}
+
+  const examCols = [
+    'university_name',
+    'blueprint_pattern',
+    'mcq_count',
+    'theory_count',
+    'mcq_marks',
+    'theory_marks',
+    'negative_marks',
+    'marking_scheme',
+  ];
+  for (const col of examCols) {
+    try {
+      db.run(`ALTER TABLE examinations ADD COLUMN ${col} TEXT`);
+    } catch {}
+  }
+  try {
+    const pgPool = getPostgresPool();
+    if (pgPool) {
+      for (const col of examCols) {
+        pgPool.query(`ALTER TABLE examinations ADD COLUMN IF NOT EXISTS ${col} TEXT`).catch(() => {});
       }
     }
   } catch {}

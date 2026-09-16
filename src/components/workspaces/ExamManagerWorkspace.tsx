@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import {
   FolderLock,
   PlusCircle,
+  Plus,
   HelpCircle,
   Cpu,
   Layers,
@@ -326,14 +327,26 @@ export const ExamManagerWorkspace: React.FC<ExamManagerWorkspaceProps> = ({
   const [examCategoryFilter, setExamCategoryFilter] = useState('ALL');
   const [examName, setExamName] = useState('');
   const [subject, setSubject] = useState('');
-  const [category, setCategory] = useState('Competitive Exam');
-  const [examType, setExamType] = useState<ExamType>('MCQ');
+  const [category, setCategory] = useState('University Exam');
+  const [examType, setExamType] = useState<ExamType>('THEORY');
   const [examDate, setExamDate] = useState('');
   const [examTime, setExamTime] = useState('');
   const [unlockTime, setUnlockTime] = useState('');
-  const [totalMarks, setTotalMarks] = useState(100);
-  const [totalQuestions, setTotalQuestions] = useState(25);
+  const [totalMarks, setTotalMarks] = useState(70);
+  const [totalQuestions, setTotalQuestions] = useState(20);
   const [durationMins, setDurationMins] = useState(180);
+  const [mcqCount, setMcqCount] = useState(14);
+  const [theoryCount, setTheoryCount] = useState(6);
+  const [mcqMarks, setMcqMarks] = useState(1);
+  const [theoryMarks, setTheoryMarks] = useState(14);
+  const [negativeMarks, setNegativeMarks] = useState(0);
+  const [markingScheme, setMarkingScheme] = useState('Part A: 14 MCQs (1 Mark each, no negative). Part B: 6 Theory Questions (14 Marks each, answer any 4). Total: 70 Marks.');
+  const [blueprintPattern, setBlueprintPattern] = useState('Section A: 14 Compulsory Objective MCQs (1 Mark each). Section B: 6 Descriptive Theory Questions (14 Marks each, answer any 4).');
+  const [universityName, setUniversityName] = useState('Solapur University');
+  const [workflowExamType, setWorkflowExamType] = useState<'University Exam' | 'Competitive Exam'>('University Exam');
+  const [workflowUniversity, setWorkflowUniversity] = useState<string>('');
+  const [workflowSubject, setWorkflowSubject] = useState<string>('');
+  const [workflowCategoryFilter, setWorkflowCategoryFilter] = useState<'ALL' | 'University Exam' | 'Competitive Exam'>('ALL');
   const [generationExamTypeFilter, setGenerationExamTypeFilter] = useState<'ALL' | 'MCQ' | 'THEORY' | 'MIXED' | 'PRACTICAL_CODING'>('ALL');
   const [selectedGenExamId, setSelectedGenExamId] = useState<string>('');
 
@@ -394,8 +407,19 @@ export const ExamManagerWorkspace: React.FC<ExamManagerWorkspaceProps> = ({
       setOrg(orgRes.organization);
       const exams = examRes.examinations || [];
       setExaminations(exams);
-      if (exams.length > 0 && !selectedExamId) {
-        setSelectedExamId(exams[0].id);
+      if (exams.length > 0) {
+        const targetExam = (selectedExamId && exams.find(x => x.id === selectedExamId)) || exams[0];
+        setSelectedExamId(targetExam.id);
+        const isUni = targetExam.category === 'University Exam' || targetExam.category?.toLowerCase().includes('university');
+        setWorkflowExamType(isUni ? 'University Exam' : 'Competitive Exam');
+        if (targetExam.university_name) {
+          setWorkflowUniversity(targetExam.university_name);
+        }
+        if (targetExam.subject) {
+          setWorkflowSubject(targetExam.subject);
+          setPaperSubject(targetExam.subject);
+          setQSubject(targetExam.subject);
+        }
       }
       setQuestions(qRes.questions || []);
       const members = membersRes.members || [];
@@ -662,6 +686,7 @@ export const ExamManagerWorkspace: React.FC<ExamManagerWorkspaceProps> = ({
 
     try {
       const res = await api.createExamination({
+        university_name: universityName,
         name: examName,
         subject,
         category,
@@ -672,13 +697,30 @@ export const ExamManagerWorkspace: React.FC<ExamManagerWorkspaceProps> = ({
         total_marks: totalMarks,
         total_questions: totalQuestions,
         duration_minutes: durationMins,
+        mcq_count: mcqCount,
+        theory_count: theoryCount,
+        mcq_marks: mcqMarks,
+        theory_marks: theoryMarks,
+        negative_marks: negativeMarks,
+        marking_scheme: markingScheme,
+        blueprint_pattern: blueprintPattern,
       });
 
-      setStatusMessage({ type: 'success', text: res.message });
+      setStatusMessage({ type: 'success', text: `Examination created successfully! Activated in Question Workflow.` });
+      if (res.examId) {
+        setSelectedExamId(res.examId);
+        setWorkflowExamType(category === 'University Exam' ? 'University Exam' : 'Competitive Exam');
+        setWorkflowUniversity(universityName || examName);
+        setWorkflowSubject(subject);
+        setPaperSubject(subject);
+        setQSubject(subject);
+      }
       setExamName('');
-      setSubject('');
       setSelectedPresetId(null);
-      loadData();
+      await loadData();
+      if (onSelectSubTab) {
+        onSelectSubTab('question_workflow');
+      }
     } catch (err: any) {
       setStatusMessage({ type: 'error', text: err.message });
     }
@@ -700,6 +742,7 @@ export const ExamManagerWorkspace: React.FC<ExamManagerWorkspaceProps> = ({
         question_type: examType,
         content_text: qContent,
         options: examType === 'MCQ' ? qOptions : null,
+        exam_id: selectedExamId || undefined,
       });
 
       setStatusMessage({ type: 'success', text: 'Question added to secure repository successfully.' });
@@ -1081,40 +1124,51 @@ export const ExamManagerWorkspace: React.FC<ExamManagerWorkspaceProps> = ({
 
       {/* ALL EXAMINATIONS */}
       {activeSubTab === 'all_examinations' && (
-        <div className="space-y-5">
+        <div className="space-y-6">
           {/* Header & Control Bar */}
           <div className="p-6 rounded-2xl bg-white border border-slate-200/90 shadow-sm space-y-4">
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-100 pb-4">
               <div>
                 <div className="flex items-center gap-2">
                   <span className="text-[10px] font-black uppercase tracking-wider text-emerald-800 bg-emerald-50 px-2.5 py-0.5 rounded-full border border-emerald-200">
-                    Active Vault Catalog
+                    Official Examination Catalog
                   </span>
                   <span className="text-[10px] font-bold text-slate-500 font-mono">
-                    {examinations.length} Sealed Enclaves
+                    {examinations.length} Registered Examination{examinations.length === 1 ? '' : 's'}
                   </span>
                 </div>
                 <h3 className="text-xl font-black text-slate-900 tracking-tight mt-1">
-                  All Scheduled Examinations
+                  Examination Enclaves & Blueprints
                 </h3>
                 <p className="text-xs text-slate-500">
-                  Cryptographically secured test papers, Shamir threshold unlock schedules, and centre delivery vaults.
+                  Detailed view of created university and competitive examinations, question counts, marks patterns, and marking schemes.
                 </p>
               </div>
 
-              <div className="flex items-center gap-2">
+              <div className="flex flex-wrap items-center gap-2.5">
+                {onSelectSubTab && (
+                  <button
+                    type="button"
+                    onClick={() => onSelectSubTab('create_examination')}
+                    className="px-4 py-2 rounded-xl bg-emerald-700 hover:bg-emerald-600 text-white text-xs font-bold flex items-center gap-1.5 shadow-sm cursor-pointer transition-all"
+                  >
+                    <Plus className="w-4 h-4" />
+                    <span>Create New Examination</span>
+                  </button>
+                )}
+
                 <button
                   type="button"
                   onClick={onRefresh}
-                  className="px-3 py-1.5 rounded-xl border border-slate-200 hover:bg-slate-50 text-slate-700 text-xs font-bold flex items-center gap-1.5 cursor-pointer"
+                  className="px-3 py-2 rounded-xl border border-slate-200 hover:bg-slate-50 text-slate-700 text-xs font-bold flex items-center gap-1.5 cursor-pointer transition-colors"
                 >
                   <RotateCcw className="w-3.5 h-3.5 text-slate-500" />
-                  <span>Refresh Vaults</span>
+                  <span>Refresh</span>
                 </button>
               </div>
             </div>
 
-            {/* Search & Filter Bar */}
+            {/* Search & Category Filter Tabs */}
             <div className="flex flex-col sm:flex-row items-center justify-between gap-3">
               <div className="relative w-full sm:w-80">
                 <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
@@ -1122,480 +1176,738 @@ export const ExamManagerWorkspace: React.FC<ExamManagerWorkspaceProps> = ({
                   type="text"
                   value={examSearchQuery}
                   onChange={e => setExamSearchQuery(e.target.value)}
-                  placeholder="Search examination or subject..."
+                  placeholder="Search examination name or subject..."
                   className="w-full pl-9 pr-3 py-2 text-xs rounded-xl input-luxury text-slate-900 font-medium"
                 />
               </div>
 
               <div className="flex flex-wrap items-center gap-1.5 w-full sm:w-auto">
-                {['ALL', 'Competitive Exam', 'NEET', 'JEE', 'TCET / CET-type Exam', 'University Exam'].map(cat => (
-                  <button
-                    key={cat}
-                    type="button"
-                    onClick={() => setExamCategoryFilter(cat)}
-                    className={`px-3 py-1.5 rounded-full text-xs font-bold transition-all cursor-pointer ${
-                      examCategoryFilter === cat
-                        ? 'bg-[#00cc5f] text-black shadow-[0_2px_10px_rgba(0,204,95,0.35)]'
-                        : 'bg-white/70 dark:bg-white/[0.04] hover:bg-slate-100 dark:hover:bg-white/[0.08] text-slate-700 dark:text-slate-300 border border-slate-200/80 dark:border-white/10'
-                    }`}
-                  >
-                    {cat === 'ALL' ? 'All Categories' : cat.replace(' / CET-type Exam', '')}
-                  </button>
-                ))}
+                <button
+                  type="button"
+                  onClick={() => setExamCategoryFilter('ALL')}
+                  className={`px-3.5 py-1.5 rounded-full text-xs font-bold transition-all cursor-pointer flex items-center gap-1.5 ${
+                    examCategoryFilter === 'ALL'
+                      ? 'bg-slate-950 text-white shadow-sm'
+                      : 'bg-slate-100 hover:bg-slate-200 text-slate-700 border border-slate-200'
+                  }`}
+                >
+                  <span>All Examinations</span>
+                  <span className="text-[10px] px-1.5 py-0.2 rounded-full bg-white/20">
+                    {examinations.length}
+                  </span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => setExamCategoryFilter('University Exam')}
+                  className={`px-3.5 py-1.5 rounded-full text-xs font-bold transition-all cursor-pointer flex items-center gap-1.5 ${
+                    examCategoryFilter === 'University Exam'
+                      ? 'bg-emerald-800 text-white shadow-sm ring-2 ring-emerald-500/30'
+                      : 'bg-emerald-50/80 hover:bg-emerald-100 text-emerald-900 border border-emerald-200'
+                  }`}
+                >
+                  <span>🎓 University Examinations</span>
+                  <span className="text-[10px] px-1.5 py-0.2 rounded-full bg-emerald-900/20">
+                    {examinations.filter(e => e.category === 'University Exam' || e.category?.toLowerCase().includes('university')).length}
+                  </span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => setExamCategoryFilter('Competitive Exam')}
+                  className={`px-3.5 py-1.5 rounded-full text-xs font-bold transition-all cursor-pointer flex items-center gap-1.5 ${
+                    examCategoryFilter === 'Competitive Exam'
+                      ? 'bg-indigo-800 text-white shadow-sm ring-2 ring-indigo-500/30'
+                      : 'bg-indigo-50/80 hover:bg-indigo-100 text-indigo-900 border border-indigo-200'
+                  }`}
+                >
+                  <span>⚡ Competitive Examinations</span>
+                  <span className="text-[10px] px-1.5 py-0.2 rounded-full bg-indigo-900/20">
+                    {examinations.filter(e => e.category !== 'University Exam' && !e.category?.toLowerCase().includes('university')).length}
+                  </span>
+                </button>
               </div>
             </div>
           </div>
 
-          {/* Examinations Grid / Cards */}
-          <div className="grid grid-cols-1 gap-4">
-            {examinations
-              .filter(ex => {
+          {/* Examinations List */}
+          <div className="grid grid-cols-1 gap-5">
+            {(() => {
+              const filteredExams = examinations.filter(ex => {
                 const matchesSearch =
                   !examSearchQuery ||
                   ex.name.toLowerCase().includes(examSearchQuery.toLowerCase()) ||
                   ex.subject.toLowerCase().includes(examSearchQuery.toLowerCase());
-                const matchesCat = examCategoryFilter === 'ALL' || ex.category === examCategoryFilter;
-                return matchesSearch && matchesCat;
-              })
-              .map(ex => {
-                const type = (ex as any).exam_type || 'MCQ';
-                const typeBadgeClass =
-                  type === 'MCQ'
-                    ? 'bg-blue-100 text-blue-950 border-blue-200'
-                    : type === 'THEORY'
-                    ? 'bg-amber-100 text-amber-950 border-amber-200'
-                    : type === 'MIXED'
-                    ? 'bg-teal-100 text-teal-950 border-teal-200'
-                    : 'bg-indigo-100 text-indigo-950 border-indigo-200';
+                if (!matchesSearch) return false;
+
+                if (examCategoryFilter === 'ALL') return true;
+                if (examCategoryFilter === 'University Exam') {
+                  return ex.category === 'University Exam' || ex.category?.toLowerCase().includes('university');
+                }
+                if (examCategoryFilter === 'Competitive Exam') {
+                  return ex.category !== 'University Exam' && !ex.category?.toLowerCase().includes('university');
+                }
+                return ex.category === examCategoryFilter;
+              });
+
+              if (filteredExams.length === 0) {
+                return (
+                  <div className="p-12 rounded-2xl bg-white border border-slate-200 text-center space-y-3">
+                    <div className="w-12 h-12 rounded-2xl bg-emerald-50 text-emerald-800 flex items-center justify-center mx-auto">
+                      <GraduationCap className="w-6 h-6" />
+                    </div>
+                    <h4 className="text-base font-bold text-slate-900">No Examinations Found</h4>
+                    <p className="text-xs text-slate-500 max-w-md mx-auto">
+                      {examSearchQuery
+                        ? `No examination matches "${examSearchQuery}". Try changing your search or filter.`
+                        : `No examination has been created in this category yet. Click "Create New Examination" to configure a blueprint.`}
+                    </p>
+                    {onSelectSubTab && (
+                      <button
+                        type="button"
+                        onClick={() => onSelectSubTab('create_examination')}
+                        className="px-4 py-2 rounded-xl bg-emerald-700 hover:bg-emerald-600 text-white text-xs font-bold inline-flex items-center gap-2 cursor-pointer shadow-sm mt-2"
+                      >
+                        <Plus className="w-4 h-4" />
+                        <span>Create Examination Now</span>
+                      </button>
+                    )}
+                  </div>
+                );
+              }
+
+              return filteredExams.map(ex => {
+                const isUni = ex.category === 'University Exam' || ex.category?.toLowerCase().includes('university');
+                const type = (ex as any).exam_type || 'THEORY';
+                const mcqNum = ex.mcq_count ?? (type === 'MCQ' ? ex.total_questions : 0);
+                const mcqScore = ex.mcq_marks ?? 1;
+                const theoryNum = ex.theory_count ?? (type === 'THEORY' ? ex.total_questions : 0);
+                const theoryScore = ex.theory_marks ?? 14;
 
                 return (
                   <div
                     key={ex.id}
-                    className="p-5 rounded-2xl bg-white border border-slate-200/90 shadow-sm hover:shadow-md hover:border-slate-300 transition-all space-y-4 relative overflow-hidden"
+                    className="p-6 rounded-2xl bg-white border border-slate-200 shadow-sm hover:shadow-md hover:border-emerald-500/40 transition-all space-y-5"
                   >
-                    <div className="flex flex-wrap items-start justify-between gap-3">
-                      <div className="space-y-1">
-                        <div className="flex flex-wrap items-center gap-2">
-                          <span className="font-mono font-black text-[11px] text-slate-500 bg-slate-100 px-2.5 py-0.5 rounded-md">
-                            {ex.id}
-                          </span>
-                          <span className={`px-2 py-0.5 rounded text-[10px] font-black border ${typeBadgeClass}`}>
-                            {type === 'MCQ' ? '⚡ MCQ (OMR/CBT)' : type === 'THEORY' ? '📝 THEORY (Descriptive)' : type === 'MIXED' ? '🔀 MIXED (Hybrid)' : '💻 PRACTICAL'}
-                          </span>
-                          <span className="text-[10px] font-bold text-slate-600 bg-slate-100 px-2 py-0.5 rounded-md">
-                            {ex.category}
-                          </span>
-                        </div>
-                        <h4 className="text-base font-black text-slate-900 leading-snug">
-                          {ex.name}
-                        </h4>
-                        <div className="flex items-center gap-1.5 text-xs text-slate-600 font-medium">
-                          <GraduationCap className="w-4 h-4 text-emerald-700 shrink-0" />
-                          <span>{ex.subject}</span>
-                        </div>
-                      </div>
-
-                      <div className="flex items-center gap-2">
+                    {/* Top Metadata & Navigation Header */}
+                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-slate-100">
+                      <div className="flex flex-wrap items-center gap-2">
                         <span
-                          className={`px-3 py-1 rounded-full text-[10px] font-black tracking-wider uppercase border flex items-center gap-1.5 ${
-                            ex.status === 'GENERATED' || ex.status === 'READY'
-                              ? 'bg-emerald-50 text-emerald-950 border-emerald-300'
-                              : ex.status === 'UNLOCKED'
-                              ? 'bg-purple-50 text-purple-950 border-purple-300'
-                              : 'bg-amber-50 text-amber-950 border-amber-300'
+                          className={`px-3 py-1 rounded-full text-xs font-black flex items-center gap-1.5 border ${
+                            isUni
+                              ? 'bg-emerald-50 text-emerald-900 border-emerald-300'
+                              : 'bg-indigo-50 text-indigo-900 border-indigo-300'
                           }`}
                         >
-                          <span className={`w-2 h-2 rounded-full ${
-                            ex.status === 'GENERATED' || ex.status === 'READY' ? 'bg-emerald-600 animate-pulse' : 'bg-amber-600'
-                          }`} />
-                          {ex.status}
+                          <span>{isUni ? '🎓' : '⚡'}</span>
+                          <span>{isUni ? 'University Examination' : 'Competitive Entrance Examination'}</span>
                         </span>
+
+                        <span className="font-mono text-xs font-bold text-slate-500 bg-slate-100 px-2.5 py-1 rounded-lg">
+                          ID: {ex.id}
+                        </span>
+
+                        <span className="px-2.5 py-1 rounded-lg text-xs font-bold bg-slate-100 text-slate-700 border border-slate-200">
+                          {type === 'MCQ' ? '🔘 MCQ Format' : type === 'THEORY' ? '📝 Theory Format' : '🔀 Mixed Format'}
+                        </span>
+                      </div>
+
+                      <div className="flex items-center gap-3">
+                        <span
+                          className={`px-3 py-1 rounded-full text-[11px] font-black tracking-wider uppercase border flex items-center gap-1.5 ${
+                            ex.status === 'GENERATED' || ex.status === 'READY'
+                              ? 'bg-emerald-50 text-emerald-950 border-emerald-300'
+                              : 'bg-blue-50 text-blue-950 border-blue-200'
+                          }`}
+                        >
+                          <span className="w-2 h-2 rounded-full bg-emerald-600 animate-pulse" />
+                          <span>{ex.status}</span>
+                        </span>
+
+                        {onSelectSubTab && (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setSelectedExamId(ex.id);
+                              const isUni = ex.category === 'University Exam' || ex.category?.toLowerCase().includes('university');
+                              setWorkflowExamType(isUni ? 'University Exam' : 'Competitive Exam');
+                              if (ex.university_name) setWorkflowUniversity(ex.university_name);
+                              if (ex.subject) setWorkflowSubject(ex.subject);
+                              setPaperSubject(ex.subject || ex.name);
+                              setQSubject(ex.subject || ex.name);
+                              onSelectSubTab('question_workflow');
+                            }}
+                            className="px-4 py-2 rounded-xl bg-gradient-to-r from-emerald-950 via-emerald-900 to-teal-900 hover:from-emerald-900 hover:to-teal-800 text-white font-bold text-xs flex items-center gap-2 shadow-xs hover:shadow-md transition-all cursor-pointer"
+                          >
+                            <span>Open in Exam Workflow</span>
+                            <ArrowRight className="w-3.5 h-3.5" />
+                          </button>
+                        )}
                       </div>
                     </div>
 
-                    {/* Metadata Grid */}
-                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-xs bg-slate-50/80 p-3.5 rounded-xl border border-slate-100">
-                      <div className="space-y-0.5">
-                        <span className="text-[10px] font-bold text-slate-400 block uppercase">Structure</span>
-                        <div className="font-black text-slate-900 flex items-center gap-1.5">
-                          <Award className="w-3.5 h-3.5 text-amber-700 shrink-0" />
+                    {/* Examination Title, University & Subject */}
+                    <div className="space-y-2">
+                      <h4 className="text-xl font-black text-slate-900 tracking-tight">
+                        {ex.name}
+                      </h4>
+                      <div className="flex flex-wrap items-center gap-3 text-xs font-semibold text-slate-700">
+                        {ex.university_name && (
+                          <div className="flex items-center gap-1.5">
+                            <Building2 className="w-4 h-4 text-emerald-700 shrink-0" />
+                            <span className="text-slate-500">Institution / Authority:</span>
+                            <span className="px-2.5 py-0.5 rounded-md bg-slate-100 text-slate-900 font-bold border border-slate-200">
+                              {ex.university_name}
+                            </span>
+                          </div>
+                        )}
+
+                        <div className="flex items-center gap-1.5">
+                          <GraduationCap className="w-4 h-4 text-emerald-700 shrink-0" />
+                          <span className="text-slate-500">Official Subject:</span>
+                          <span className="px-2.5 py-0.5 rounded-md bg-emerald-50 text-emerald-900 font-black border border-emerald-200">
+                            {ex.subject}
+                          </span>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* 4-Tile Blueprint Specification Grid */}
+                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-xs">
+                      <div className="p-3.5 rounded-xl bg-slate-50 border border-slate-200/80 space-y-1">
+                        <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wider block">Total Marks</span>
+                        <div className="text-base font-black text-slate-900 flex items-center gap-1.5">
+                          <Award className="w-4 h-4 text-amber-600 shrink-0" />
                           <span>{ex.total_marks} Marks</span>
-                          <span className="text-slate-400 font-normal">({ex.total_questions} Qs)</span>
                         </div>
                       </div>
 
-                      <div className="space-y-0.5">
-                        <span className="text-[10px] font-bold text-slate-400 block uppercase">Duration</span>
-                        <div className="font-black text-slate-900 flex items-center gap-1.5">
-                          <Clock className="w-3.5 h-3.5 text-blue-700 shrink-0" />
+                      <div className="p-3.5 rounded-xl bg-slate-50 border border-slate-200/80 space-y-1">
+                        <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wider block">Total Questions</span>
+                        <div className="text-base font-black text-slate-900 flex items-center gap-1.5">
+                          <FileText className="w-4 h-4 text-emerald-600 shrink-0" />
+                          <span>{ex.total_questions} Questions</span>
+                        </div>
+                      </div>
+
+                      <div className="p-3.5 rounded-xl bg-slate-50 border border-slate-200/80 space-y-1">
+                        <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wider block">Duration</span>
+                        <div className="text-base font-black text-slate-900 flex items-center gap-1.5">
+                          <Clock className="w-4 h-4 text-blue-600 shrink-0" />
                           <span>{ex.duration_minutes} Minutes</span>
                         </div>
                       </div>
 
-                      <div className="space-y-0.5">
-                        <span className="text-[10px] font-bold text-slate-400 block uppercase">Scheduled Test</span>
-                        <div className="font-mono text-slate-900 font-bold flex items-center gap-1.5">
-                          <Calendar className="w-3.5 h-3.5 text-teal-700 shrink-0" />
+                      <div className="p-3.5 rounded-xl bg-slate-50 border border-slate-200/80 space-y-1">
+                        <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wider block">Scheduled Date</span>
+                        <div className="text-sm font-black text-slate-900 flex items-center gap-1.5 font-mono">
+                          <Calendar className="w-4 h-4 text-teal-600 shrink-0" />
                           <span>{ex.exam_date} @ {ex.exam_time}</span>
                         </div>
                       </div>
-
-                      <div className="space-y-0.5">
-                        <span className="text-[10px] font-bold text-slate-400 block uppercase">Time-Lock Unlock</span>
-                        <div className="font-mono text-emerald-950 font-black flex items-center gap-1.5">
-                          <Lock className="w-3.5 h-3.5 text-emerald-700 shrink-0" />
-                          <span>{ex.unlock_time}</span>
-                          <span className="text-[9px] text-emerald-800 font-sans font-bold">(Shamir 3-Key)</span>
-                        </div>
-                      </div>
                     </div>
 
-                    {/* Delivery Centres & Copy Control Summary */}
-                    {(() => {
-                      const examCentres = allCentresList.filter(c => c.exam_id === ex.id);
-                      const hasAnyMismatch = examCentres.some(c => c.hasMismatch);
-                      const managerCap = ex.max_copies || 500;
-
-                      return (
-                        <div className="flex flex-wrap items-center justify-between gap-2 py-2 px-3 rounded-xl bg-slate-50 border border-slate-200/80 text-xs">
-                          <div className="flex items-center gap-2">
-                            <Building2 className="w-3.5 h-3.5 text-slate-500" />
-                            <span className="font-semibold text-slate-700">
-                              {examCentres.length === 0
-                                ? 'No delivery centres assigned'
-                                : `${examCentres.length} Centre${examCentres.length > 1 ? 's' : ''} Assigned`}
-                            </span>
-                            <span className="text-slate-400 font-mono text-[11px]">
-                              • Manager Cap: <strong className="text-slate-800">{managerCap}</strong>
-                            </span>
-                          </div>
-
-                          <div className="flex items-center gap-2">
-                            {hasAnyMismatch && (
-                              <span
-                                className="px-2 py-0.5 rounded-md bg-amber-100 text-amber-900 border border-amber-300 font-bold text-[10px] flex items-center gap-1"
-                                title="Quota Mismatch: A centre requested more copies than the Manager Authorized Cap. Final copies are restricted."
-                              >
-                                <AlertTriangle className="w-3 h-3 text-amber-600" />
-                                <span>Quota Mismatch</span>
-                              </span>
-                            )}
-                            {examCentres.length > 0 && (
-                              <span className="text-[11px] font-mono text-slate-600 font-medium">
-                                Enforced Copies:{' '}
-                                <strong className="text-emerald-800">
-                                  {Math.min(...examCentres.map(c => c.finalAllowed ?? Math.min(managerCap, c.max_copies)))}
-                                </strong>
-                              </span>
-                            )}
-                          </div>
+                    {/* Blueprint & Pattern Architecture Showcase */}
+                    {ex.blueprint_pattern && (
+                      <div className="p-4 rounded-xl bg-indigo-50/70 border border-indigo-200 space-y-1 text-xs">
+                        <div className="flex items-center gap-2 text-indigo-950 font-bold">
+                          <Layers className="w-4 h-4 text-indigo-700" />
+                          <span>Blueprint & Exam Pattern Architecture</span>
                         </div>
-                      );
-                    })()}
+                        <p className="text-slate-700 leading-relaxed pl-6 font-medium">
+                          {ex.blueprint_pattern}
+                        </p>
+                      </div>
+                    )}
 
-                    {/* Action Bar */}
-                    <div className="flex flex-wrap items-center justify-between gap-2 pt-1 border-t border-slate-100">
-                      <div className="flex items-center gap-2">
-                        {ex.simulation_status === 'COMPLETED' ? (
-                          <span
-                            className="px-3.5 py-1.5 rounded-xl bg-emerald-50 text-emerald-800 border border-emerald-300 font-bold text-xs flex items-center gap-1.5 shadow-2xs"
-                            title="Simulation already completed. The final question paper cannot be viewed again in simulation mode."
-                          >
-                            <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
-                            <span>Simulation Completed ✓</span>
+                    {/* Question Pattern Breakdown Panel */}
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-xs">
+                      {/* MCQ Section Card */}
+                      <div className="p-4 rounded-xl bg-slate-50/90 border border-slate-200 space-y-2">
+                        <div className="flex items-center justify-between">
+                          <span className="font-black text-slate-900 flex items-center gap-1.5">
+                            <span className="text-sm">🔘</span>
+                            <span>Multiple Choice Questions (MCQ)</span>
                           </span>
-                        ) : (
-                          <button
-                            type="button"
-                            onClick={() => handleSimulateExam(ex)}
-                            className="px-3.5 py-1.5 rounded-xl bg-emerald-700 hover:bg-emerald-600 text-white font-bold text-xs flex items-center gap-1.5 shadow-xs cursor-pointer transition-all"
-                            title="Start Proctored Final Paper Simulation"
-                          >
-                            <Camera className="w-3.5 h-3.5" />
-                            <span>Simulate Exam</span>
-                          </button>
-                        )}
-
-                        <button
-                          type="button"
-                          onClick={() => handleGeneratePaper(ex.id)}
-                          disabled={generating || org?.status !== 'VERIFIED'}
-                          className={`px-3.5 py-1.5 rounded-xl font-bold text-xs flex items-center gap-1.5 shadow-xs disabled:opacity-50 cursor-pointer ${
-                            ex.simulation_status === 'COMPLETED'
-                              ? 'bg-slate-900 hover:bg-slate-800 text-white ring-2 ring-emerald-500/30'
-                              : 'bg-slate-900 hover:bg-slate-800 text-white'
-                          }`}
-                        >
-                          <Sparkles className="w-3.5 h-3.5 text-amber-400" />
-                          <span>{ex.status === 'GENERATED' ? 'Re-Generate & Encrypt' : 'Generate Encrypted Paper'}</span>
-                        </button>
-
-                        {ex.status === 'CONFIGURING' && onSelectSubTab && (
-                          <button
-                            type="button"
-                            onClick={() => onSelectSubTab('blueprint_pattern')}
-                            className="px-3 py-1.5 rounded-xl bg-amber-50 hover:bg-amber-100 text-amber-800 border border-amber-200 font-bold text-xs flex items-center gap-1.5 cursor-pointer"
-                            title="Configure the examination blueprint and marks pattern"
-                          >
-                            <FileCheck className="w-3.5 h-3.5 text-amber-600" />
-                            <span>Configure Blueprint</span>
-                          </button>
-                        )}
-
-                        {onLaunchCandidateSimulator && (
-                          <button
-                            type="button"
-                            onClick={() => onLaunchCandidateSimulator(ex.id)}
-                            className="px-3 py-1.5 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 border border-slate-200 font-medium text-xs flex items-center gap-1.5 cursor-pointer"
-                            title="Open candidate portal testing simulator"
-                          >
-                            <Play className="w-3 h-3 text-slate-500 fill-current" />
-                            <span>Candidate Simulator</span>
-                          </button>
-                        )}
+                          <span className="px-2 py-0.5 rounded text-[11px] font-mono font-bold bg-white border border-slate-200 text-slate-800">
+                            {mcqNum * mcqScore} Marks
+                          </span>
+                        </div>
+                        <div className="grid grid-cols-3 gap-2 text-[11px] pt-1 border-t border-slate-200/70">
+                          <div>
+                            <span className="text-slate-500 block">Question Count:</span>
+                            <strong className="text-slate-900 text-xs">{mcqNum} Qs</strong>
+                          </div>
+                          <div>
+                            <span className="text-slate-500 block">Marks / MCQ:</span>
+                            <strong className="text-emerald-700 text-xs">+{mcqScore} M</strong>
+                          </div>
+                          <div>
+                            <span className="text-slate-500 block">Negative Marking:</span>
+                            <strong className="text-rose-700 text-xs">
+                              {ex.negative_marks ? `-${ex.negative_marks} M` : 'None'}
+                            </strong>
+                          </div>
+                        </div>
                       </div>
 
-                      <div className="flex items-center gap-2">
-                        <button
-                          type="button"
-                          onClick={() => setAddCentreModalExam(ex)}
-                          className="text-slate-600 hover:text-slate-900 text-xs font-semibold px-2 py-1 rounded hover:bg-slate-100 cursor-pointer flex items-center gap-1"
-                        >
-                          <Building2 className="w-3 h-3 text-slate-500" />
-                          <span>Add Centre</span>
-                        </button>
-
-                        {(ex.status === 'GENERATED' || ex.status === 'GENERATED_ENCRYPTED') && (
-                          <button
-                            type="button"
-                            onClick={() => setEmergencyRegenModalExam(ex)}
-                            className="text-rose-600 hover:text-rose-800 text-xs font-semibold px-2 py-1 rounded hover:bg-rose-50 cursor-pointer flex items-center gap-1"
-                          >
-                            <RotateCcw className="w-3 h-3 text-rose-500" />
-                            <span>Emergency Re-Gen</span>
-                          </button>
-                        )}
+                      {/* Theory Section Card */}
+                      <div className="p-4 rounded-xl bg-slate-50/90 border border-slate-200 space-y-2">
+                        <div className="flex items-center justify-between">
+                          <span className="font-black text-slate-900 flex items-center gap-1.5">
+                            <span className="text-sm">📝</span>
+                            <span>Theory / Descriptive Questions</span>
+                          </span>
+                          <span className="px-2 py-0.5 rounded text-[11px] font-mono font-bold bg-white border border-slate-200 text-slate-800">
+                            {theoryNum * theoryScore} Marks
+                          </span>
+                        </div>
+                        <div className="grid grid-cols-2 gap-2 text-[11px] pt-1 border-t border-slate-200/70">
+                          <div>
+                            <span className="text-slate-500 block">Question Count:</span>
+                            <strong className="text-slate-900 text-xs">{theoryNum} Qs</strong>
+                          </div>
+                          <div>
+                            <span className="text-slate-500 block">Marks / Theory Question:</span>
+                            <strong className="text-emerald-700 text-xs">{theoryScore} M</strong>
+                          </div>
+                        </div>
                       </div>
                     </div>
+
+                    {/* Marking Scheme Rules Callout */}
+                    {ex.marking_scheme && (
+                      <div className="p-4 rounded-xl bg-emerald-50/60 border border-emerald-200 space-y-1 text-xs">
+                        <div className="flex items-center gap-2 text-emerald-950 font-bold">
+                          <FileText className="w-4 h-4 text-emerald-700" />
+                          <span>Marking Scheme & Section Instructions</span>
+                        </div>
+                        <p className="text-slate-700 leading-relaxed pl-6">
+                          {ex.marking_scheme}
+                        </p>
+                      </div>
+                    )}
                   </div>
                 );
-              })}
+              });
+            })()}
           </div>
         </div>
       )}
 
       {/* CREATE EXAMINATION */}
       {activeSubTab === 'create_examination' && (
-        <div className="p-6 rounded-2xl bg-white border border-slate-200/90 shadow-sm space-y-6">
-          <div className="border-b border-slate-100 pb-4">
-            <span className="text-[10px] font-black uppercase tracking-wider text-emerald-800 bg-emerald-50 px-2.5 py-0.5 rounded-full border border-emerald-200">
-              Cryptographic Enclave Setup
-            </span>
-            <h3 className="text-xl font-black text-slate-900 mt-1">
-              Create New Examination Enclave
-            </h3>
-            <p className="text-xs text-slate-500">
-              Establish a tamper-proof examination vault with automated question bank pooling, Shamir key-sharing, and verifiable time-locks.
-            </p>
-          </div>
-
-          {/* Quick Real Exam Presets */}
-          <div className="p-5 rounded-2xl bg-gradient-to-r from-slate-950 via-slate-900 to-indigo-950 text-white shadow-md space-y-3 relative overflow-hidden">
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
-              <div className="flex items-center gap-2">
-                <Sparkles className="w-4 h-4 text-amber-400" />
-                <span className="font-bold text-xs uppercase tracking-wider text-amber-300">
-                  Quick Real Exam Presets (1-Click Real Blueprint Auto Fill)
-                </span>
-              </div>
-              <span className="text-[11px] text-slate-300 font-medium">
-                Authentic AICTE, NTA & University configurations
+        <div className="p-8 rounded-3xl bg-white border border-slate-200/90 shadow-sm space-y-6 max-w-5xl mx-auto">
+          {/* Header */}
+          <div className="border-b border-slate-100 pb-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+            <div>
+              <span className="text-[10px] font-black uppercase tracking-wider text-emerald-800 bg-emerald-50 px-2.5 py-0.5 rounded-full border border-emerald-200">
+                Examination Architecture & Blueprint Setup
               </span>
-            </div>
-
-            <div className="flex flex-wrap gap-2">
-              {REAL_EXAM_PRESETS.map(preset => {
-                const isSelected = selectedPresetId === preset.id;
-                return (
-                  <button
-                    key={preset.id}
-                    type="button"
-                    onClick={() => handleApplyPreset(preset)}
-                    className={`px-3 py-2 rounded-xl text-xs font-bold transition-all flex items-center gap-2 cursor-pointer ${
-                      isSelected
-                        ? 'bg-amber-400 text-slate-950 ring-2 ring-white shadow-md scale-105'
-                        : 'bg-white/10 hover:bg-white/20 text-white border border-white/10'
-                    }`}
-                  >
-                    <span>{preset.shortTag}</span>
-                    <span className="text-[10px] opacity-80 font-normal">
-                      ({preset.totalMarks}M • {preset.totalQuestions}Q)
-                    </span>
-                  </button>
-                );
-              })}
-            </div>
-
-            {selectedPresetId && (
-              <div className="text-[11px] text-amber-200 bg-white/10 p-2.5 rounded-xl border border-white/15 flex items-center justify-between">
-                <span>
-                  Preset Applied: <strong className="text-white">{REAL_EXAM_PRESETS.find(p => p.id === selectedPresetId)?.name}</strong> — {REAL_EXAM_PRESETS.find(p => p.id === selectedPresetId)?.description}
-                </span>
-                <button
-                  type="button"
-                  onClick={() => setSelectedPresetId(null)}
-                  className="text-[10px] text-slate-300 hover:text-white underline cursor-pointer"
-                >
-                  Clear Preset
-                </button>
-              </div>
-            )}
-          </div>
-
-          <form onSubmit={handleCreateExam} className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-xs">
-            <div className="sm:col-span-2">
-              <label className="block text-slate-700 font-bold mb-1">Official Examination Name *</label>
-              <input
-                type="text"
-                value={examName}
-                onChange={e => setExamName(e.target.value)}
-                placeholder="e.g. National Computer Science & Security Entrance Exam 2026"
-                required
-                className="w-full px-3.5 py-2.5 rounded-xl input-luxury text-slate-900 font-medium"
-              />
-            </div>
-
-            <div>
-              <label className="block text-slate-700 font-bold mb-1">Subject / Domain *</label>
-              <input
-                type="text"
-                value={subject}
-                onChange={e => setSubject(e.target.value)}
-                placeholder="e.g. Computer Science & Applied Cryptography"
-                required
-                className="w-full px-3.5 py-2.5 rounded-xl input-luxury text-slate-900 font-medium"
-              />
-            </div>
-
-            <div>
-              <label className="block text-slate-700 font-bold mb-1">Examination Category</label>
-              <select
-                value={category}
-                onChange={e => setCategory(e.target.value)}
-                className="w-full px-3.5 py-2.5 rounded-xl input-luxury text-slate-900 font-semibold"
-              >
-                <option value="Competitive Exam">Competitive Exam (GATE / CAT / UPSC)</option>
-                <option value="JEE">JEE (Joint Entrance Examination - Main & Advanced)</option>
-                <option value="NEET">NEET (National Eligibility Entrance Test - UG & PG)</option>
-                <option value="TCET / CET-type Exam">TCET / CET-type Exam (State Entrance)</option>
-                <option value="University Exam">University Exam (AICTE Semester Theory & Lab)</option>
-                <option value="Custom Exam">Custom Institutional Enclave</option>
-              </select>
-            </div>
-
-            <div>
-              <label className="block text-slate-700 font-bold mb-1">Examination Paper Type *</label>
-              <select
-                value={examType}
-                onChange={e => setExamType(e.target.value as any)}
-                className="w-full px-3.5 py-2.5 rounded-xl input-luxury text-slate-900 font-semibold"
-              >
-                <option value="MCQ">MCQ (Multiple Choice Questions - OMR / CBT)</option>
-                <option value="THEORY">THEORY (Subjective / Descriptive Pattern)</option>
-                <option value="MIXED">MIXED / HYBRID (MCQ + Descriptive Sections)</option>
-                <option value="PRACTICAL_CODING">PRACTICAL / CODING (Lab & Assessment)</option>
-              </select>
-              <p className="text-[10px] text-slate-500 mt-1">
-                {examType === 'MCQ' && '⚡ MCQ Engine: Generates OMR answer sheets, option shuffling, and randomized question sets A/B/C/D.'}
-                {examType === 'THEORY' && '📝 Theory Engine: Sectional Blueprint architecture (Short, Medium, Long), marks distribution, and scoring rubric guide.'}
-                {examType === 'MIXED' && '🔀 Mixed Engine: Dual-tier assembly with separate objective OMR and subjective answer booklets.'}
-                {examType === 'PRACTICAL_CODING' && '💻 Practical Engine: Problem statements, I/O constraints, and automated sandbox test suites.'}
+              <h3 className="text-xl font-black text-slate-900 tracking-tight mt-1">
+                Create Examination Blueprint
+              </h3>
+              <p className="text-xs text-slate-500 mt-0.5">
+                Configure official university or competitive examination specifications, pattern, questions breakdown, and marking scheme.
               </p>
             </div>
 
-            <div>
-              <label className="block text-slate-700 font-bold mb-1">Scheduled Examination Date *</label>
-              <input
-                type="date"
-                value={examDate}
-                onChange={e => setExamDate(e.target.value)}
-                required
-                className="w-full px-3.5 py-2.5 rounded-xl input-luxury text-slate-900 font-medium"
-              />
-            </div>
-
-            <div>
-              <label className="block text-slate-700 font-bold mb-1">Examination Start Time *</label>
-              <input
-                type="time"
-                value={examTime}
-                onChange={e => setExamTime(e.target.value)}
-                required
-                className="w-full px-3.5 py-2.5 rounded-xl input-luxury text-slate-900 font-medium"
-              />
-            </div>
-
-            <div>
-              <label className="block text-slate-700 font-bold mb-1">
-                Authorized Shamir Unlock Time *
-              </label>
-              <input
-                type="time"
-                value={unlockTime}
-                onChange={e => setUnlockTime(e.target.value)}
-                required
-                className="w-full px-3.5 py-2.5 rounded-xl input-luxury text-slate-900 font-medium font-mono"
-              />
-              <span className="text-[10px] text-slate-500 block mt-1">
-                Paper decrypts strictly at this minute via 3-party threshold keys.
+            <div className="flex items-center gap-2">
+              <span className="px-3 py-1 rounded-full text-xs font-bold bg-emerald-50 text-emerald-900 border border-emerald-200">
+                {category === 'University Exam' ? '🎓 University Governance' : '⚡ Competitive Governance'}
               </span>
             </div>
+          </div>
 
-            <div>
-              <label className="block text-slate-700 font-bold mb-1">Total Marks *</label>
-              <input
-                type="number"
-                value={totalMarks}
-                onChange={e => setTotalMarks(Number(e.target.value))}
-                required
-                className="w-full px-3.5 py-2.5 rounded-xl input-luxury text-slate-900 font-medium"
-              />
+          <form onSubmit={handleCreateExam} className="space-y-6 text-xs">
+            {/* 1. Category Switcher (Sleek Segmented Pill, No Cards) */}
+            <div className="space-y-1.5">
+              <label className="block text-slate-800 font-black uppercase tracking-wider text-[11px]">
+                1. Examination Governance Model *
+              </label>
+              <div className="flex items-center p-1.5 rounded-2xl bg-slate-100 border border-slate-200/80 max-w-lg">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setCategory('University Exam');
+                    setExamType('THEORY');
+                    setTotalMarks(70);
+                    setTotalQuestions(20);
+                    setMcqCount(14);
+                    setMcqMarks(1);
+                    setNegativeMarks(0);
+                    setTheoryCount(6);
+                    setTheoryMarks(14);
+                    setBlueprintPattern('Part A: 14 Compulsory MCQs (1 Mark each). Part B: 6 Long Theory Questions (14 Marks each, answer any 4).');
+                    setMarkingScheme('University Board Scheme: Part A 14 MCQs (1 Mark each, no negative). Part B 6 Theory Questions (14 Marks each, answer any 4). Total: 70 Marks.');
+                    if (!universityName || universityName === 'National Testing Agency (NTA)') {
+                      setUniversityName('Solapur University');
+                    }
+                  }}
+                  className={`flex-1 py-2.5 px-4 rounded-xl font-black text-xs flex items-center justify-center gap-2 transition-all cursor-pointer ${
+                    category === 'University Exam'
+                      ? 'bg-emerald-800 text-white shadow-sm ring-2 ring-emerald-600/30'
+                      : 'text-slate-600 hover:text-slate-900'
+                  }`}
+                >
+                  <span className="text-sm">🎓</span>
+                  <span>University Examination</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => {
+                    setCategory('Competitive Exam');
+                    setExamType('MCQ');
+                    setTotalMarks(100);
+                    setTotalQuestions(25);
+                    setMcqCount(25);
+                    setMcqMarks(4);
+                    setNegativeMarks(1.0);
+                    setTheoryCount(0);
+                    setTheoryMarks(0);
+                    setBlueprintPattern('Section 1: 25 Objective MCQs (+4 for correct, -1.0 for wrong). Single Correct Answer.');
+                    setMarkingScheme('Competitive Standard: 25 MCQs (+4 for correct, -1.0 negative mark for incorrect options, 0 for unattempted). Total: 100 Marks.');
+                    if (!universityName || universityName === 'Solapur University') {
+                      setUniversityName('National Testing Agency (NTA)');
+                    }
+                  }}
+                  className={`flex-1 py-2.5 px-4 rounded-xl font-black text-xs flex items-center justify-center gap-2 transition-all cursor-pointer ${
+                    category !== 'University Exam'
+                      ? 'bg-indigo-800 text-white shadow-sm ring-2 ring-indigo-600/30'
+                      : 'text-slate-600 hover:text-slate-900'
+                  }`}
+                >
+                  <span className="text-sm">⚡</span>
+                  <span>Competitive Examination</span>
+                </button>
+              </div>
             </div>
 
-            <div>
-              <label className="block text-slate-700 font-bold mb-1">Target Question Count *</label>
+            {/* 2. University / Authority Name */}
+            <div className="space-y-1.5">
+              <label className="block text-slate-800 font-bold">
+                {category === 'University Exam' ? 'University / Institution Name *' : 'Conducting Authority / Board Name *'}
+              </label>
               <input
-                type="number"
-                value={totalQuestions}
-                onChange={e => setTotalQuestions(Number(e.target.value))}
+                type="text"
+                value={universityName}
+                onChange={e => setUniversityName(e.target.value)}
+                placeholder={category === 'University Exam' ? 'e.g. Solapur University / Savitribai Phule Pune University / Mumbai University' : 'e.g. National Testing Agency (NTA) / IIT Bombay (GATE) / UPSC'}
                 required
-                className="w-full px-3.5 py-2.5 rounded-xl input-luxury text-slate-900 font-medium"
+                className="w-full px-4 py-2.5 rounded-xl border border-slate-300 text-slate-900 font-bold text-xs focus:border-emerald-700 focus:ring-2 focus:ring-emerald-400/20 focus:outline-none shadow-2xs"
               />
+              {category === 'University Exam' ? (
+                <div className="flex flex-wrap gap-1.5 pt-1">
+                  {['Solapur University', 'Pune University (SPPU)', 'Mumbai University', 'Shivaji University', 'VTU', 'Anna University'].map(u => (
+                    <button
+                      key={u}
+                      type="button"
+                      onClick={() => setUniversityName(u)}
+                      className={`px-2.5 py-1 rounded-lg text-[11px] font-semibold border transition-all cursor-pointer ${
+                        universityName === u
+                          ? 'bg-emerald-800 text-white border-emerald-800 shadow-2xs'
+                          : 'bg-slate-50 hover:bg-emerald-50 text-slate-700 hover:text-emerald-900 border-slate-200'
+                      }`}
+                    >
+                      {u}
+                    </button>
+                  ))}
+                </div>
+              ) : (
+                <div className="flex flex-wrap gap-1.5 pt-1">
+                  {['National Testing Agency (NTA)', 'GATE Committee (IIT)', 'UPSC', 'State CET Cell'].map(a => (
+                    <button
+                      key={a}
+                      type="button"
+                      onClick={() => setUniversityName(a)}
+                      className={`px-2.5 py-1 rounded-lg text-[11px] font-semibold border transition-all cursor-pointer ${
+                        universityName === a
+                          ? 'bg-indigo-800 text-white border-indigo-800 shadow-2xs'
+                          : 'bg-slate-50 hover:bg-indigo-50 text-slate-700 hover:text-indigo-900 border-slate-200'
+                      }`}
+                    >
+                      {a}
+                    </button>
+                  ))}
+                </div>
+              )}
             </div>
 
-            <div>
-              <label className="block text-slate-700 font-bold mb-1">Examination Duration (Minutes) *</label>
-              <input
-                type="number"
-                value={durationMins}
-                onChange={e => setDurationMins(Number(e.target.value))}
-                required
-                className="w-full px-3.5 py-2.5 rounded-xl input-luxury text-slate-900 font-medium"
-              />
+            {/* 3. Examination Name & Subject Name */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <div>
+                <label className="block text-slate-800 font-bold mb-1">Official Examination Session / Title *</label>
+                <input
+                  type="text"
+                  value={examName}
+                  onChange={e => setExamName(e.target.value)}
+                  placeholder={category === 'University Exam' ? 'e.g. B.Tech Computer Engineering End-Sem 2026' : 'e.g. GATE Computer Science 2026'}
+                  required
+                  className="w-full px-4 py-2.5 rounded-xl border border-slate-300 text-slate-900 font-bold text-xs focus:border-emerald-700 focus:ring-2 focus:ring-emerald-400/20 focus:outline-none"
+                />
+              </div>
+
+              <div>
+                <label className="block text-slate-800 font-bold mb-1">Examination Subject / Discipline *</label>
+                <input
+                  type="text"
+                  value={subject}
+                  onChange={e => setSubject(e.target.value)}
+                  placeholder="e.g. Computer Network / Operating Systems / Data Structures"
+                  required
+                  className="w-full px-4 py-2.5 rounded-xl border border-slate-300 text-slate-900 font-bold text-xs focus:border-emerald-700 focus:ring-2 focus:ring-emerald-400/20 focus:outline-none"
+                />
+                <div className="flex flex-wrap gap-1.5 mt-1.5">
+                  {['Computer Network', 'Database Systems', 'Operating Systems', 'Data Structures', 'Applied Cryptography'].map(s => (
+                    <button
+                      key={s}
+                      type="button"
+                      onClick={() => setSubject(s)}
+                      className={`px-2 py-0.5 rounded text-[10px] font-semibold border transition-all cursor-pointer ${
+                        subject === s
+                          ? 'bg-emerald-800 text-white border-emerald-800'
+                          : 'bg-slate-50 hover:bg-emerald-100 text-slate-600 hover:text-emerald-900 border-slate-200'
+                      }`}
+                    >
+                      {s}
+                    </button>
+                  ))}
+                </div>
+              </div>
             </div>
 
-            <div className="sm:col-span-2 pt-3 border-t border-slate-100 flex items-center justify-between">
+            {/* 4. Blueprint & Pattern Configuration (Clean Horizontal Grid, No Bulky Cards) */}
+            <div className="p-5 rounded-2xl bg-slate-50/80 border border-slate-200/90 space-y-4">
+              <div className="flex items-center justify-between border-b border-slate-200 pb-2">
+                <span className="font-black text-slate-900 text-xs uppercase tracking-wider flex items-center gap-1.5">
+                  <Sparkles className="w-4 h-4 text-emerald-700" />
+                  <span>Examination Blueprint & Pattern Details *</span>
+                </span>
+                <span className="text-[11px] font-mono font-bold text-emerald-800 bg-emerald-50 px-2.5 py-0.5 rounded-full border border-emerald-200">
+                  {totalMarks} Marks • {totalQuestions} Questions • {durationMins} Mins
+                </span>
+              </div>
+
+              {/* Blueprint & Pattern Description */}
+              <div>
+                <label className="block text-slate-700 font-bold mb-1">
+                  Blueprint & Pattern Specification *
+                </label>
+                <textarea
+                  rows={2}
+                  value={blueprintPattern}
+                  onChange={e => setBlueprintPattern(e.target.value)}
+                  placeholder="e.g. Section A: 14 MCQs (1 Mark each, no negative). Section B: 6 Long Theory Questions (14 Marks each, answer any 4)."
+                  required
+                  className="w-full px-3.5 py-2 rounded-xl bg-white border border-slate-300 text-slate-900 font-medium text-xs focus:border-emerald-700 focus:outline-none"
+                />
+              </div>
+
+              {/* Format, Marks, Questions, Duration Row */}
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                <div>
+                  <label className="block text-slate-700 font-bold mb-1">Format</label>
+                  <select
+                    value={examType}
+                    onChange={e => setExamType(e.target.value as any)}
+                    className="w-full px-3 py-2 rounded-xl bg-white border border-slate-300 text-slate-900 font-bold text-xs cursor-pointer focus:border-emerald-700 focus:outline-none"
+                  >
+                    <option value="THEORY">THEORY (Descriptive)</option>
+                    <option value="MCQ">MCQ (Objective)</option>
+                    <option value="MIXED">MIXED (Hybrid)</option>
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block text-slate-700 font-bold mb-1">Total Marks</label>
+                  <input
+                    type="number"
+                    value={totalMarks}
+                    onChange={e => setTotalMarks(Number(e.target.value))}
+                    required
+                    className="w-full px-3 py-2 rounded-xl bg-white border border-slate-300 text-slate-900 font-bold text-xs text-center focus:border-emerald-700 focus:outline-none"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-slate-700 font-bold mb-1">Total Questions</label>
+                  <input
+                    type="number"
+                    value={totalQuestions}
+                    onChange={e => setTotalQuestions(Number(e.target.value))}
+                    required
+                    className="w-full px-3 py-2 rounded-xl bg-white border border-slate-300 text-slate-900 font-bold text-xs text-center focus:border-emerald-700 focus:outline-none"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-slate-700 font-bold mb-1">Duration (Mins)</label>
+                  <input
+                    type="number"
+                    value={durationMins}
+                    onChange={e => setDurationMins(Number(e.target.value))}
+                    required
+                    className="w-full px-3 py-2 rounded-xl bg-white border border-slate-300 text-slate-900 font-bold text-xs text-center focus:border-emerald-700 focus:outline-none"
+                  />
+                </div>
+              </div>
+
+              {/* 2-Column MCQ vs Theory Question Distribution */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-2">
+                {/* MCQ Section */}
+                <div className="p-3.5 rounded-xl bg-white border border-slate-200 space-y-2">
+                  <span className="font-bold text-slate-800 text-xs flex items-center justify-between">
+                    <span>🔘 Objective Section (MCQ)</span>
+                    <span className="text-[10px] text-slate-500 font-mono font-bold">
+                      Subtotal: {mcqCount * mcqMarks} Marks
+                    </span>
+                  </span>
+
+                  <div className="grid grid-cols-3 gap-2">
+                    <div>
+                      <label className="block text-[10px] text-slate-500 font-semibold mb-0.5">MCQ Count</label>
+                      <input
+                        type="number"
+                        min="0"
+                        value={mcqCount}
+                        onChange={e => {
+                          const v = Math.max(0, Number(e.target.value));
+                          setMcqCount(v);
+                          setTotalQuestions(v + theoryCount);
+                        }}
+                        className="w-full px-2 py-1.5 rounded-lg bg-slate-50 border border-slate-300 font-bold text-slate-900 text-xs text-center"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-[10px] text-slate-500 font-semibold mb-0.5">Marks / MCQ</label>
+                      <input
+                        type="number"
+                        step="0.5"
+                        min="0.5"
+                        value={mcqMarks}
+                        onChange={e => setMcqMarks(Number(e.target.value))}
+                        className="w-full px-2 py-1.5 rounded-lg bg-slate-50 border border-slate-300 font-bold text-slate-900 text-xs text-center"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-[10px] text-slate-500 font-semibold mb-0.5">Negative</label>
+                      <input
+                        type="number"
+                        step="0.25"
+                        min="0"
+                        value={negativeMarks}
+                        onChange={e => setNegativeMarks(Number(e.target.value))}
+                        className="w-full px-2 py-1.5 rounded-lg bg-slate-50 border border-slate-300 font-bold text-rose-700 text-xs text-center"
+                      />
+                    </div>
+                  </div>
+                </div>
+
+                {/* Theory Section */}
+                <div className="p-3.5 rounded-xl bg-white border border-slate-200 space-y-2">
+                  <span className="font-bold text-slate-800 text-xs flex items-center justify-between">
+                    <span>📝 Descriptive Section (Theory)</span>
+                    <span className="text-[10px] text-slate-500 font-mono font-bold">
+                      Subtotal: {theoryCount * theoryMarks} Marks
+                    </span>
+                  </span>
+
+                  <div className="grid grid-cols-2 gap-2">
+                    <div>
+                      <label className="block text-[10px] text-slate-500 font-semibold mb-0.5">Theory Qs Count</label>
+                      <input
+                        type="number"
+                        min="0"
+                        value={theoryCount}
+                        onChange={e => {
+                          const v = Math.max(0, Number(e.target.value));
+                          setTheoryCount(v);
+                          setTotalQuestions(mcqCount + v);
+                        }}
+                        className="w-full px-2 py-1.5 rounded-lg bg-slate-50 border border-slate-300 font-bold text-slate-900 text-xs text-center"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-[10px] text-slate-500 font-semibold mb-0.5">Marks / Theory Q</label>
+                      <input
+                        type="number"
+                        step="1"
+                        min="1"
+                        value={theoryMarks}
+                        onChange={e => setTheoryMarks(Number(e.target.value))}
+                        className="w-full px-2 py-1.5 rounded-lg bg-slate-50 border border-slate-300 font-bold text-slate-900 text-xs text-center"
+                      />
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              {/* Marking Scheme Rules Textarea */}
+              <div>
+                <label className="block text-slate-700 font-bold mb-1">
+                  Marking Scheme Rules & Evaluation Instructions *
+                </label>
+                <textarea
+                  rows={2}
+                  value={markingScheme}
+                  onChange={e => setMarkingScheme(e.target.value)}
+                  placeholder="e.g. Part A has 14 compulsory MCQs of 1 mark each. Part B contains 6 questions of 14 marks each. Candidates must answer any 4 questions."
+                  className="w-full px-3.5 py-2 rounded-xl bg-white border border-slate-300 text-slate-900 font-medium text-xs focus:border-emerald-700 focus:outline-none"
+                />
+              </div>
+            </div>
+
+            {/* 5. Schedule & Timelocks */}
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+              <div>
+                <label className="block text-slate-700 font-bold mb-1">Scheduled Examination Date *</label>
+                <input
+                  type="date"
+                  value={examDate}
+                  onChange={e => setExamDate(e.target.value)}
+                  required
+                  className="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 text-slate-900 font-medium text-xs"
+                />
+              </div>
+
+              <div>
+                <label className="block text-slate-700 font-bold mb-1">Start Time *</label>
+                <input
+                  type="time"
+                  value={examTime}
+                  onChange={e => setExamTime(e.target.value)}
+                  required
+                  className="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 text-slate-900 font-medium text-xs"
+                />
+              </div>
+
+              <div>
+                <label className="block text-slate-700 font-bold mb-1">Authorized Shamir Unlock Time *</label>
+                <input
+                  type="time"
+                  value={unlockTime}
+                  onChange={e => setUnlockTime(e.target.value)}
+                  required
+                  className="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 text-slate-900 font-mono font-medium text-xs"
+                />
+              </div>
+            </div>
+
+            {/* Submit & Action */}
+            <div className="pt-4 border-t border-slate-100 flex flex-col sm:flex-row items-center justify-between gap-3">
               <button
                 type="submit"
                 disabled={org?.status !== 'VERIFIED'}
-                className="px-8 py-3 bg-emerald-900 hover:bg-emerald-800 disabled:opacity-40 text-white rounded-xl font-bold text-xs shadow-md cursor-pointer transition-all flex items-center gap-2"
+                className="w-full sm:w-auto px-8 py-3.5 bg-gradient-to-r from-emerald-950 via-emerald-900 to-teal-900 hover:from-emerald-900 hover:to-teal-800 disabled:opacity-40 text-white rounded-xl font-bold text-xs shadow-md cursor-pointer transition-all flex items-center justify-center gap-2"
               >
                 <Sparkles className="w-4 h-4 text-amber-300" />
-                <span>Create Examination Record</span>
+                <span>Create Examination & Activate in Workflow</span>
+                <ArrowRight className="w-4 h-4" />
               </button>
 
               <span className="text-[11px] text-slate-500">
-                {org?.status === 'VERIFIED' ? '✅ Organization Verified' : '⚠️ Accreditation required'}
+                {org?.status === 'VERIFIED' ? '✅ Organization Verified • Instant Dropdown Access in Workflow' : '⚠️ Accreditation required'}
               </span>
             </div>
           </form>
@@ -1605,8 +1917,258 @@ export const ExamManagerWorkspace: React.FC<ExamManagerWorkspaceProps> = ({
       {/* ============================================================ */}
       {/* QUESTION WORKFLOW SECTION (HIGH-ASSURANCE QUESTION MANAGEMENT) */}
       {/* ============================================================ */}
-      {activeSubTab === 'question_workflow' && (
+      {activeSubTab === 'question_workflow' && (() => {
+        // 1. Filter examinations by selected governance type
+        const typeFilteredWorkflowExams = (examinations || []).filter(ex => {
+          const isUni = ex.category === 'University Exam' || ex.category?.toLowerCase().includes('university');
+          return workflowExamType === 'University Exam' ? isUni : !isUni;
+        });
+
+        // 2. Distinct Universities / Authorities for this type
+        const availableWorkflowUniversities = Array.from(
+          new Set(
+            typeFilteredWorkflowExams
+              .map(ex => ex.university_name || (workflowExamType === 'University Exam' ? ex.name : 'National Testing Authority'))
+              .filter(Boolean)
+          )
+        );
+
+        // Effective university
+        const activeWorkflowUni = (workflowUniversity && availableWorkflowUniversities.includes(workflowUniversity))
+          ? workflowUniversity
+          : (availableWorkflowUniversities[0] || '');
+
+        // 3. Exams for this university/authority (subject options)
+        const universityFilteredWorkflowExams = typeFilteredWorkflowExams.filter(ex => {
+          const uName = ex.university_name || (workflowExamType === 'University Exam' ? ex.name : 'National Testing Authority');
+          return !activeWorkflowUni || uName === activeWorkflowUni;
+        });
+
+        // Active selected examination
+        const activeWorkflowExam = (selectedExamId && (examinations || []).find(e => e.id === selectedExamId))
+          || universityFilteredWorkflowExams[0]
+          || typeFilteredWorkflowExams[0]
+          || (examinations && examinations[0])
+          || null;
+
+        return (
         <div className="space-y-6">
+          {/* 3-DROPDOWN CASCADING EXAM CONTEXT SELECTOR BAR */}
+          <div className="p-5 rounded-2xl bg-white border-2 border-emerald-600 shadow-sm space-y-4">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-100 pb-3">
+              <div className="flex items-center gap-2.5">
+                <div className="p-2 rounded-xl bg-emerald-800 text-white shadow-xs">
+                  <Award className="w-5 h-5 text-emerald-200" />
+                </div>
+                <div>
+                  <h3 className="text-sm font-black text-slate-900 tracking-tight flex items-center gap-2">
+                    <span>Examination Workflow Context</span>
+                    {activeWorkflowExam && (
+                      <span className="px-2.5 py-0.5 rounded-full text-[10px] font-mono font-black bg-emerald-100 text-emerald-900 border border-emerald-300">
+                        {activeWorkflowExam.id}
+                      </span>
+                    )}
+                  </h3>
+                  <p className="text-[11px] text-slate-500">
+                    Select governance, institution, and examination subject. Automatically syncs blueprints, question pools, and authoring studios.
+                  </p>
+                </div>
+              </div>
+
+              {onSelectSubTab && (
+                <button
+                  type="button"
+                  onClick={() => onSelectSubTab('create_examination')}
+                  className="px-3.5 py-2 rounded-xl bg-slate-100 hover:bg-emerald-50 hover:text-emerald-900 text-slate-700 border border-slate-200 hover:border-emerald-300 text-xs font-bold flex items-center gap-1.5 transition-all cursor-pointer self-start sm:self-auto"
+                >
+                  <Plus className="w-3.5 h-3.5 text-emerald-700" />
+                  <span>Configure New Examination</span>
+                </button>
+              )}
+            </div>
+
+            {/* 3 Cascading Dropdowns */}
+            <div className="grid grid-cols-1 md:grid-cols-12 gap-3 text-xs">
+              {/* Dropdown 1: Examination Governance */}
+              <div className="md:col-span-3 space-y-1">
+                <label className="block text-slate-800 font-black uppercase tracking-wider text-[10px]">
+                  1. Examination Type *
+                </label>
+                <select
+                  value={workflowExamType}
+                  onChange={e => {
+                    const newType = e.target.value as 'University Exam' | 'Competitive Exam';
+                    setWorkflowExamType(newType);
+                    const filtered = (examinations || []).filter(ex => {
+                      const isUni = ex.category === 'University Exam' || ex.category?.toLowerCase().includes('university');
+                      return newType === 'University Exam' ? isUni : !isUni;
+                    });
+                    if (filtered.length > 0) {
+                      const firstU = filtered[0].university_name || (newType === 'University Exam' ? filtered[0].name : 'National Testing Authority');
+                      setWorkflowUniversity(firstU);
+                      setSelectedExamId(filtered[0].id);
+                      if (filtered[0].subject) {
+                        setWorkflowSubject(filtered[0].subject);
+                        setPaperSubject(filtered[0].subject);
+                        setQSubject(filtered[0].subject);
+                      }
+                    } else {
+                      setWorkflowUniversity('');
+                      setWorkflowSubject('');
+                    }
+                  }}
+                  className="w-full px-3.5 py-2.5 rounded-xl bg-white border-2 border-emerald-600 text-slate-900 font-bold text-xs focus:ring-2 focus:ring-emerald-400 focus:outline-none cursor-pointer shadow-2xs"
+                >
+                  <option value="University Exam">🎓 University Examination</option>
+                  <option value="Competitive Exam">⚡ Competitive Examination</option>
+                </select>
+              </div>
+
+              {/* Dropdown 2: University / Authority Name */}
+              <div className="md:col-span-4 space-y-1">
+                <label className="block text-slate-800 font-black uppercase tracking-wider text-[10px]">
+                  2. {workflowExamType === 'University Exam' ? 'University Name *' : 'Authority / Exam Body *'}
+                </label>
+                <select
+                  value={activeWorkflowUni}
+                  onChange={e => {
+                    const val = e.target.value;
+                    setWorkflowUniversity(val);
+                    const matching = typeFilteredWorkflowExams.filter(ex => {
+                      const uName = ex.university_name || (workflowExamType === 'University Exam' ? ex.name : 'National Testing Authority');
+                      return uName === val;
+                    });
+                    if (matching.length > 0) {
+                      setSelectedExamId(matching[0].id);
+                      if (matching[0].subject) {
+                        setWorkflowSubject(matching[0].subject);
+                        setPaperSubject(matching[0].subject);
+                        setQSubject(matching[0].subject);
+                      }
+                    }
+                  }}
+                  className="w-full px-3.5 py-2.5 rounded-xl bg-white border-2 border-emerald-600 text-slate-900 font-bold text-xs focus:ring-2 focus:ring-emerald-400 focus:outline-none cursor-pointer shadow-2xs"
+                >
+                  {availableWorkflowUniversities.length === 0 ? (
+                    <option value="">No {workflowExamType === 'University Exam' ? 'universities' : 'authorities'} found — Create Examination</option>
+                  ) : (
+                    availableWorkflowUniversities.map(u => (
+                      <option key={u} value={u}>
+                        {u}
+                      </option>
+                    ))
+                  )}
+                </select>
+              </div>
+
+              {/* Dropdown 3: Subject Name (Supports Multiple Subjects under that University) */}
+              <div className="md:col-span-5 space-y-1">
+                <label className="block text-slate-800 font-black uppercase tracking-wider text-[10px]">
+                  3. Examination Subject *
+                </label>
+                <select
+                  value={activeWorkflowExam?.id || ''}
+                  onChange={e => {
+                    const val = e.target.value;
+                    setSelectedExamId(val);
+                    const chosen = (examinations || []).find(x => x.id === val);
+                    if (chosen) {
+                      if (chosen.subject) {
+                        setWorkflowSubject(chosen.subject);
+                        setPaperSubject(chosen.subject);
+                        setQSubject(chosen.subject);
+                      }
+                    }
+                  }}
+                  className="w-full px-3.5 py-2.5 rounded-xl bg-white border-2 border-emerald-600 text-slate-900 font-bold text-xs focus:ring-2 focus:ring-emerald-400 focus:outline-none cursor-pointer shadow-2xs"
+                >
+                  {universityFilteredWorkflowExams.length === 0 ? (
+                    <option value="">No subjects found for this selection</option>
+                  ) : (
+                    universityFilteredWorkflowExams.map(ex => (
+                      <option key={ex.id} value={ex.id}>
+                        {ex.subject} — {ex.name} ({ex.total_marks}M | {ex.total_questions} Qs - {ex.exam_type})
+                      </option>
+                    ))
+                  )}
+                </select>
+              </div>
+            </div>
+
+            {/* Active Exam Blueprint & Pattern Specification Showcase */}
+            {activeWorkflowExam ? (
+              <div className="p-4 rounded-xl bg-slate-50 border border-slate-200/80 space-y-3 text-xs">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                  <div>
+                    <div className="flex items-center gap-2">
+                      <span className="font-black text-sm text-slate-900">
+                        {activeWorkflowExam.name}
+                      </span>
+                      <span className="px-2.5 py-0.5 rounded text-[11px] font-black bg-emerald-100 text-emerald-900">
+                        {activeWorkflowExam.subject}
+                      </span>
+                    </div>
+                    <div className="text-[11px] text-slate-500 mt-0.5">
+                      {activeWorkflowExam.university_name || 'Solapur University'} • Scheduled: {activeWorkflowExam.exam_date} @ {activeWorkflowExam.exam_time} • Unlock: {activeWorkflowExam.unlock_time}
+                    </div>
+                  </div>
+
+                  <div className="flex items-center gap-2">
+                    <span className="px-2.5 py-1 rounded-lg text-xs font-mono font-bold bg-white border border-slate-200 text-slate-800">
+                      {activeWorkflowExam.total_marks} Marks
+                    </span>
+                    <span className="px-2.5 py-1 rounded-lg text-xs font-mono font-bold bg-white border border-slate-200 text-slate-800">
+                      {activeWorkflowExam.total_questions} Questions
+                    </span>
+                    <span className="px-2.5 py-1 rounded-lg text-xs font-mono font-bold bg-white border border-slate-200 text-slate-800">
+                      {activeWorkflowExam.duration_minutes} Mins
+                    </span>
+                  </div>
+                </div>
+
+                {activeWorkflowExam.blueprint_pattern && (
+                  <div className="p-3 rounded-lg bg-indigo-50/70 border border-indigo-200 text-[11px] space-y-1">
+                    <div className="font-bold text-indigo-950 flex items-center gap-1.5">
+                      <Layers className="w-3.5 h-3.5 text-indigo-700" />
+                      <span>Blueprint & Pattern Specification:</span>
+                    </div>
+                    <p className="text-slate-700 font-medium pl-5">
+                      {activeWorkflowExam.blueprint_pattern}
+                    </p>
+                  </div>
+                )}
+
+                {activeWorkflowExam.marking_scheme && (
+                  <div className="p-3 rounded-lg bg-emerald-50/70 border border-emerald-200 text-[11px] space-y-1">
+                    <div className="font-bold text-emerald-950 flex items-center gap-1.5">
+                      <FileText className="w-3.5 h-3.5 text-emerald-700" />
+                      <span>Marking Scheme Instructions:</span>
+                    </div>
+                    <p className="text-slate-700 pl-5">
+                      {activeWorkflowExam.marking_scheme}
+                    </p>
+                  </div>
+                )}
+              </div>
+            ) : (
+              <div className="p-4 rounded-xl bg-amber-50/80 border border-amber-200 text-xs text-amber-900 flex items-center justify-between gap-3">
+                <div className="flex items-center gap-2">
+                  <AlertTriangle className="w-4 h-4 text-amber-700 shrink-0" />
+                  <span>No examinations created yet. Please create an examination to populate the workflow dropdowns.</span>
+                </div>
+                {onSelectSubTab && (
+                  <button
+                    type="button"
+                    onClick={() => onSelectSubTab('create_examination')}
+                    className="px-3 py-1.5 rounded-lg bg-amber-800 hover:bg-amber-700 text-white font-bold text-xs cursor-pointer shrink-0"
+                  >
+                    Create Examination
+                  </button>
+                )}
+              </div>
+            )}
+          </div>
+
           {/* Executive Header & Navigation Bar */}
           <div className="p-4 rounded-2xl bg-white border border-slate-200/80 shadow-xs flex flex-wrap items-center justify-between gap-4">
             <div className="flex flex-wrap items-center gap-2">
@@ -1680,6 +2242,25 @@ export const ExamManagerWorkspace: React.FC<ExamManagerWorkspaceProps> = ({
               org={org}
               currentUser={currentUser}
               onAssignmentsUpdated={loadData}
+              onNavigateSubTab={onSelectSubTab}
+              examinations={examinations}
+              selectedExamId={activeWorkflowExam?.id || selectedExamId}
+              onSelectExamId={id => {
+                setSelectedExamId(id);
+                const chosen = (examinations || []).find(x => x.id === id);
+                if (chosen) {
+                  if (chosen.subject) {
+                    setWorkflowSubject(chosen.subject);
+                    setPaperSubject(chosen.subject);
+                    setQSubject(chosen.subject);
+                  }
+                  if (chosen.university_name) {
+                    setWorkflowUniversity(chosen.university_name);
+                  }
+                  const isUni = chosen.category === 'University Exam' || chosen.category?.toLowerCase().includes('university');
+                  setWorkflowExamType(isUni ? 'University Exam' : 'Competitive Exam');
+                }
+              }}
             />
           )}
 
@@ -1717,18 +2298,46 @@ export const ExamManagerWorkspace: React.FC<ExamManagerWorkspaceProps> = ({
                         Academic Domain & Taxonomy
                       </h4>
 
+                      {activeWorkflowExam && (
+                        <div className="p-2.5 rounded-lg bg-emerald-50 border border-emerald-200 flex items-center justify-between text-xs">
+                          <div className="flex items-center gap-1.5">
+                            <Award className="w-3.5 h-3.5 text-emerald-700 shrink-0" />
+                            <span className="font-bold text-emerald-950">Linked to:</span>
+                            <span className="text-slate-800 font-semibold truncate max-w-[180px]">{activeWorkflowExam.name}</span>
+                          </div>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              if (activeWorkflowExam.subject) setQSubject(activeWorkflowExam.subject);
+                            }}
+                            className="px-2 py-0.5 rounded text-[10px] font-bold bg-emerald-700 text-white hover:bg-emerald-600 transition-colors cursor-pointer"
+                          >
+                            Auto-Fill: {activeWorkflowExam.subject}
+                          </button>
+                        </div>
+                      )}
+
                       <div>
                         <label className="block text-slate-700 font-bold mb-1">Subject / Discipline *</label>
                         <input
                           type="text"
-                          value={qSubject}
+                          value={qSubject || (activeWorkflowExam?.subject || '')}
                           onChange={e => setQSubject(e.target.value)}
                           placeholder="e.g. Physics / Mathematics / Computer Science"
                           required
-                          className="w-full px-3 py-2 rounded-lg bg-white border border-slate-300 text-slate-900 focus:border-emerald-800 focus:outline-hidden"
+                          className="w-full px-3 py-2 rounded-lg bg-white border border-slate-300 text-slate-900 focus:border-emerald-800 focus:outline-hidden font-bold"
                         />
                         {/* Quick Subject Chips */}
                         <div className="flex flex-wrap gap-1.5 mt-1.5">
+                          {activeWorkflowExam?.subject && (
+                            <button
+                              type="button"
+                              onClick={() => setQSubject(activeWorkflowExam.subject)}
+                              className="px-2 py-0.5 rounded text-[10px] bg-emerald-100 border border-emerald-300 text-emerald-900 font-bold hover:bg-emerald-200 transition-colors"
+                            >
+                              ⭐ {activeWorkflowExam.subject} (From Active Exam)
+                            </button>
+                          )}
                           {['Physics', 'Chemistry', 'Mathematics', 'Computer Science', 'Biology'].map(subj => (
                             <button
                               key={subj}
@@ -2227,7 +2836,8 @@ export const ExamManagerWorkspace: React.FC<ExamManagerWorkspaceProps> = ({
             </div>
           )}
         </div>
-      )}
+        );
+      })()}
 
       {/* QUESTION POOLS */}
       {activeSubTab === 'question_pools' && (

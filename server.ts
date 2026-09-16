@@ -3212,7 +3212,26 @@ async function startServer() {
         });
       }
 
-      const { name, subject, category, exam_type, exam_date, exam_time, unlock_time, total_marks, duration_minutes, total_questions } = req.body;
+      const {
+        university_name,
+        name,
+        subject,
+        category,
+        exam_type,
+        exam_date,
+        exam_time,
+        unlock_time,
+        total_marks,
+        duration_minutes,
+        total_questions,
+        mcq_count,
+        theory_count,
+        mcq_marks,
+        theory_marks,
+        negative_marks,
+        marking_scheme,
+        blueprint_pattern,
+      } = req.body;
       if (!name || !subject || !category || !exam_type || !exam_date || !exam_time || !unlock_time) {
         return res.status(400).json({ error: 'Please provide complete examination scheduling parameters.' });
       }
@@ -3220,13 +3239,27 @@ async function startServer() {
       const examId = `EXAM-${uuidv4().substring(0, 8).toUpperCase()}`;
       const now = new Date().toISOString();
 
+      const parsedMcqCount = mcq_count !== undefined ? Number(mcq_count) : (exam_type === 'MCQ' ? 25 : (exam_type === 'MIXED' ? 14 : 0));
+      const parsedTheoryCount = theory_count !== undefined ? Number(theory_count) : (exam_type === 'THEORY' ? 10 : (exam_type === 'MIXED' ? 6 : 0));
+      const parsedMcqMarks = mcq_marks !== undefined ? Number(mcq_marks) : (category === 'Competitive Exam' ? 4 : 1);
+      const parsedTheoryMarks = theory_marks !== undefined ? Number(theory_marks) : 10;
+      const parsedNegativeMarks = negative_marks !== undefined ? Number(negative_marks) : (category === 'Competitive Exam' ? 1.0 : 0.0);
+      const parsedMarkingScheme = marking_scheme || `Section A: ${parsedMcqCount} MCQs (${parsedMcqMarks}M each, -${parsedNegativeMarks} neg). Section B: ${parsedTheoryCount} Theory questions (${parsedTheoryMarks}M each).`;
+      const parsedBlueprintPattern = blueprint_pattern || `Pattern: Part A (${parsedMcqCount} MCQs × ${parsedMcqMarks}M) + Part B (${parsedTheoryCount} Theory Qs × ${parsedTheoryMarks}M). Total Marks: ${total_marks || 100}.`;
+
       executeRun(
         db,
-        `INSERT INTO examinations (id, org_id, name, subject, category, exam_type, exam_date, exam_time, unlock_time, total_marks, total_questions, duration_minutes, status, created_by, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'CONFIGURING', ?, ?, ?)`,
+        `INSERT INTO examinations (
+          id, org_id, university_name, blueprint_pattern, name, subject, category, exam_type, exam_date, exam_time, unlock_time,
+          total_marks, total_questions, duration_minutes,
+          mcq_count, theory_count, mcq_marks, theory_marks, negative_marks, marking_scheme,
+          status, created_by, created_at, updated_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'CONFIGURING', ?, ?, ?)`,
         [
           examId,
           req.user!.org_id,
+          university_name || (category === 'University Exam' ? name : 'National Board / NTA'),
+          parsedBlueprintPattern,
           name,
           subject,
           category,
@@ -3235,8 +3268,14 @@ async function startServer() {
           exam_time,
           unlock_time,
           total_marks || 100,
-          total_questions || (exam_type === 'MCQ' ? 25 : 10),
+          total_questions || (parsedMcqCount + parsedTheoryCount) || (exam_type === 'MCQ' ? 25 : 10),
           duration_minutes || 180,
+          parsedMcqCount,
+          parsedTheoryCount,
+          parsedMcqMarks,
+          parsedTheoryMarks,
+          parsedNegativeMarks,
+          parsedMarkingScheme,
           req.user!.id,
           now,
           now,
@@ -3244,11 +3283,19 @@ async function startServer() {
       );
 
       // Create default configuration row
+      const blueprintData = {
+        mcq_count: parsedMcqCount,
+        theory_count: parsedTheoryCount,
+        mcq_marks: parsedMcqMarks,
+        theory_marks: parsedTheoryMarks,
+        negative_marks: parsedNegativeMarks,
+        marking_scheme: parsedMarkingScheme,
+      };
       executeRun(
         db,
         `INSERT INTO examination_configurations (id, exam_id, blueprint_json, theory_pattern_json, pattern_confirmed, created_at, updated_at)
          VALUES (?, ?, ?, ?, 0, ?, ?)`,
-        [uuidv4(), examId, null, null, now, now]
+        [uuidv4(), examId, JSON.stringify(blueprintData), null, now, now]
       );
 
       await logAuditEvent({
@@ -4890,7 +4937,7 @@ async function startServer() {
   // Bulk Create Extracted Questions into Secure Question Bank
   app.post('/api/questions/bulk-create', authenticateToken, requireRole(['EXAM_MANAGER', 'ORG_OWNER']), async (req: Request, res: Response) => {
     try {
-      const { questions, auto_assign_sme_id, auto_assign_translator_id, target_language, assignment_notes, initial_status } = req.body;
+      const { questions, auto_assign_sme_id, auto_assign_translator_id, target_language, assignment_notes, initial_status, exam_id } = req.body;
       if (auto_assign_sme_id) {
         return res.status(400).json({ error: 'The SME role has been decommissioned. Questions cannot be assigned to an SME.' });
       }
@@ -4917,14 +4964,16 @@ async function startServer() {
       for (const q of questions) {
         const questionId = `Q-${uuidv4().substring(0, 8).toUpperCase()}`;
         const initialStatus = initial_status || 'VERIFIED';
+        const targetExamId = q.exam_id || exam_id || null;
 
         executeRun(
           db,
-          `INSERT INTO questions (id, org_id, question_paper_id, source_file, source_page, question_number, subject, topic, difficulty, marks, negative_marks, correct_answer, language, syllabus, question_type, content_text, options_json, diagram_url, status, created_by, created_at, updated_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          `INSERT INTO questions (id, org_id, exam_id, question_paper_id, source_file, source_page, question_number, subject, topic, difficulty, marks, negative_marks, correct_answer, language, syllabus, question_type, content_text, options_json, diagram_url, status, created_by, created_at, updated_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
           [
             questionId,
             req.user!.org_id,
+            targetExamId,
             q.source_paper_id || q.sourcePaperId || null,
             q.source_file || q.sourceFile || null,
             q.source_page || q.page_number || null,
@@ -5159,7 +5208,7 @@ async function startServer() {
   // Add Single Question
   app.post('/api/questions', authenticateToken, requireRole(['EXAM_MANAGER', 'ORG_OWNER']), async (req: Request, res: Response) => {
     try {
-      const { subject, topic, difficulty, marks, negative_marks, correct_answer, language, syllabus, question_type, content_text, options } = req.body;
+      const { subject, topic, difficulty, marks, negative_marks, correct_answer, language, syllabus, question_type, content_text, options, exam_id } = req.body;
       if (!subject || !topic || !content_text || !correct_answer) {
         return res.status(400).json({ error: 'Missing mandatory question parameters.' });
       }
@@ -5170,11 +5219,12 @@ async function startServer() {
 
       executeRun(
         db,
-        `INSERT INTO questions (id, org_id, subject, topic, difficulty, marks, negative_marks, correct_answer, language, syllabus, question_type, content_text, options_json, status, created_by, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'DRAFT', ?, ?, ?)`,
+        `INSERT INTO questions (id, org_id, exam_id, subject, topic, difficulty, marks, negative_marks, correct_answer, language, syllabus, question_type, content_text, options_json, status, created_by, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'DRAFT', ?, ?, ?)`,
         [
           questionId,
           req.user!.org_id,
+          exam_id || null,
           subject,
           topic,
           difficulty || 'MEDIUM',
