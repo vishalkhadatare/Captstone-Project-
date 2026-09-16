@@ -37,11 +37,15 @@ if hasattr(sys.stdin, "reconfigure"):
 
 # -- PyMuPDF & Pillow & RapidOCR ---------------------------------------------
 try:
-    import fitz
+    import pymupdf as fitz
     FITZ_AVAILABLE = True
 except ImportError:
-    fitz = None
-    FITZ_AVAILABLE = False
+    try:
+        import fitz
+        FITZ_AVAILABLE = True
+    except ImportError:
+        fitz = None
+        FITZ_AVAILABLE = False
 
 try:
     from PIL import Image as PILImage, ImageDraw, ImageFont
@@ -54,7 +58,10 @@ except ImportError:
 
 try:
     import numpy as np
-    from rapidocr import RapidOCR
+    try:
+        from rapidocr_onnxruntime import RapidOCR
+    except ImportError:
+        from rapidocr import RapidOCR
     RAPID_OCR_AVAILABLE = True
 except ImportError:
     np = None
