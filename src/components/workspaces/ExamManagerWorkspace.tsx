@@ -56,6 +56,7 @@ import { EmergencyRegenModal } from './EmergencyRegenModal';
 import { BlueprintPatternModule } from './BlueprintPatternModule';
 import { QuestionPaperPdfModal } from './QuestionPaperPdfModal';
 import { UniversityFormatGenerator } from './UniversityFormatGenerator';
+import { PaperGenerationModule } from '../PaperGenerationModule';
 
 interface ExamManagerWorkspaceProps {
   currentUser: User | null;
@@ -228,7 +229,6 @@ export const ExamManagerWorkspace: React.FC<ExamManagerWorkspaceProps> = ({
   const [org, setOrg] = useState<Organization | null>(null);
   const [examinations, setExaminations] = useState<Examination[]>([]);
   const [questions, setQuestions] = useState<Question[]>([]);
-  const [smes, setSmes] = useState<User[]>([]);
   const [translators, setTranslators] = useState<User[]>([]);
   const [assignments, setAssignments] = useState<QuestionAssignment[]>([]);
   const [selectedExamId, setSelectedExamId] = useState<string>('');
@@ -307,7 +307,6 @@ export const ExamManagerWorkspace: React.FC<ExamManagerWorkspaceProps> = ({
   const [isFileDragOver, setIsFileDragOver] = useState(false);
 
   // Extraction Assignment Form State
-  const [extractAssignSmeId, setExtractAssignSmeId] = useState('');
   const [extractAssignTranslatorId, setExtractAssignTranslatorId] = useState('');
   const [extractAssignTargetLanguage, setExtractAssignTargetLanguage] = useState('Hindi');
   const [extractAssignNotes, setExtractAssignNotes] = useState('');
@@ -315,7 +314,7 @@ export const ExamManagerWorkspace: React.FC<ExamManagerWorkspaceProps> = ({
   // Question Pool Bulk Assignment Modal State
   const [poolSelectedIds, setPoolSelectedIds] = useState<Set<string>>(new Set());
   const [poolBulkModalOpen, setPoolBulkModalOpen] = useState(false);
-  const [poolAssignType, setPoolAssignType] = useState<'SME_REVIEW' | 'LINGUISTIC_TRANSLATION'>('SME_REVIEW');
+  const [poolAssignType, setPoolAssignType] = useState<'LINGUISTIC_TRANSLATION'>('LINGUISTIC_TRANSLATION');
   const [poolAssignUserId, setPoolAssignUserId] = useState('');
   const [poolAssignTargetLanguage, setPoolAssignTargetLanguage] = useState('Hindi');
   const [poolAssignNotes, setPoolAssignNotes] = useState('');
@@ -400,7 +399,6 @@ export const ExamManagerWorkspace: React.FC<ExamManagerWorkspaceProps> = ({
       }
       setQuestions(qRes.questions || []);
       const members = membersRes.members || [];
-      setSmes(members.filter(m => m.role === 'SME'));
       setTranslators(members.filter(m => m.role === 'TRANSLATOR'));
       setAssignments(assignRes.assignments || []);
       setAllCentresList(centresRes.centres || []);
@@ -573,17 +571,17 @@ export const ExamManagerWorkspace: React.FC<ExamManagerWorkspaceProps> = ({
     try {
       const res = await api.bulkCreateQuestions({
         questions: selected,
-        auto_assign_sme_id: extractAssignSmeId || undefined,
         auto_assign_translator_id: extractAssignTranslatorId || undefined,
         target_language: extractAssignTranslatorId ? extractAssignTargetLanguage : undefined,
         assignment_notes: extractAssignNotes || undefined,
+        initial_status: 'VERIFIED',
       });
 
       setStatusMessage({
         type: 'success',
         text: `Successfully imported ${res.createdCount} questions into the secure question bank${
-          extractAssignSmeId ? ' and assigned to SME' : ''
-        }${extractAssignTranslatorId ? ` and assigned for ${extractAssignTargetLanguage} translation` : ''}.`,
+          extractAssignTranslatorId ? ` and assigned for ${extractAssignTargetLanguage} translation` : ''
+        }.`,
       });
 
       // Clear extracted list on success
@@ -704,11 +702,7 @@ export const ExamManagerWorkspace: React.FC<ExamManagerWorkspaceProps> = ({
         options: examType === 'MCQ' ? qOptions : null,
       });
 
-      if (assignedSmeId) {
-        await api.assignQuestion(res.questionId, assignedSmeId);
-      }
-
-      setStatusMessage({ type: 'success', text: 'Question added to secure repository and assigned to SME.' });
+      setStatusMessage({ type: 'success', text: 'Question added to secure repository successfully.' });
       setQContent('');
       loadData();
     } catch (err: any) {
@@ -1046,9 +1040,8 @@ export const ExamManagerWorkspace: React.FC<ExamManagerWorkspaceProps> = ({
                 </div>
               )
             ) : (
-              // Questions List View for Metric Card Filter
               <div className="space-y-2 max-h-[500px] overflow-y-auto">
-                {questions
+                {(questions || [])
                   .filter(q => {
                     if (dashboardCardFilter === 'VERIFIED') return q.status === 'VERIFIED' || q.status === 'ELIGIBLE_FOR_PAPER';
                     if (dashboardCardFilter === 'QUARANTINED') return q.status === 'QUARANTINED' || q.status === 'COMPROMISED';
@@ -1514,7 +1507,7 @@ export const ExamManagerWorkspace: React.FC<ExamManagerWorkspaceProps> = ({
               </select>
               <p className="text-[10px] text-slate-500 mt-1">
                 {examType === 'MCQ' && '⚡ MCQ Engine: Generates OMR answer sheets, option shuffling, and randomized question sets A/B/C/D.'}
-                {examType === 'THEORY' && '📝 Theory Engine: Sectional Blueprint architecture (Short, Medium, Long), marks distribution, and SME rubric guide.'}
+                {examType === 'THEORY' && '📝 Theory Engine: Sectional Blueprint architecture (Short, Medium, Long), marks distribution, and scoring rubric guide.'}
                 {examType === 'MIXED' && '🔀 Mixed Engine: Dual-tier assembly with separate objective OMR and subjective answer booklets.'}
                 {examType === 'PRACTICAL_CODING' && '💻 Practical Engine: Problem statements, I/O constraints, and automated sandbox test suites.'}
               </p>
@@ -1673,11 +1666,6 @@ export const ExamManagerWorkspace: React.FC<ExamManagerWorkspaceProps> = ({
             {/* Team Capacity Indicator Chips */}
             <div className="flex items-center gap-3 text-xs">
               <div className="flex items-center gap-2 px-3 py-1.5 rounded-xl bg-slate-50 border border-slate-200/80 text-slate-700">
-                <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
-                <span className="font-semibold text-slate-600">SMEs:</span>
-                <span className="font-bold text-slate-900 font-mono">{smes.length} Active</span>
-              </div>
-              <div className="flex items-center gap-2 px-3 py-1.5 rounded-xl bg-slate-50 border border-slate-200/80 text-slate-700">
                 <span className="w-2 h-2 rounded-full bg-purple-500 animate-pulse"></span>
                 <span className="font-semibold text-slate-600">Translators:</span>
                 <span className="font-bold text-slate-900 font-mono">{translators.length} Active</span>
@@ -1688,7 +1676,6 @@ export const ExamManagerWorkspace: React.FC<ExamManagerWorkspaceProps> = ({
           {/* TAB 1: HIGH-RES PDF QUESTION EXTRACTION STUDIO */}
           {questionWorkflowTab === 'extraction' && (
             <ExamManagerQuestionExtractor
-              smes={smes}
               translators={translators}
               org={org}
               currentUser={currentUser}
@@ -1850,23 +1837,6 @@ export const ExamManagerWorkspace: React.FC<ExamManagerWorkspaceProps> = ({
                           />
                         </div>
                       </div>
-
-                      {/* SME Verifier Assignment */}
-                      <div className="pt-2 border-t border-slate-200/80">
-                        <label className="block text-slate-700 font-bold mb-1">Assign to SME Verifier</label>
-                        <select
-                          value={assignedSmeId}
-                          onChange={e => setAssignedSmeId(e.target.value)}
-                          className="w-full px-3 py-2 rounded-lg bg-white border border-slate-300 text-slate-900 focus:border-emerald-800 focus:outline-hidden text-xs"
-                        >
-                          <option value="">-- No Assignment (Direct Pool Draft) --</option>
-                          {smes.map(s => (
-                            <option key={s.id} value={s.id}>
-                              {s.full_name} ({s.email})
-                            </option>
-                          ))}
-                        </select>
-                      </div>
                     </div>
                   </div>
 
@@ -2025,9 +1995,9 @@ export const ExamManagerWorkspace: React.FC<ExamManagerWorkspaceProps> = ({
                     <UserCheck className="w-5 h-5" />
                   </div>
                   <div>
-                    <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400 block">SME Reviews</span>
+                    <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400 block">Pending Tasks</span>
                     <span className="text-xl font-black text-blue-900 font-mono">
-                      {assignments.filter(a => a.assignment_type === 'SME_REVIEW').length}
+                      {assignments.filter(a => a.status === 'PENDING').length}
                     </span>
                   </div>
                 </div>
@@ -2069,7 +2039,7 @@ export const ExamManagerWorkspace: React.FC<ExamManagerWorkspaceProps> = ({
                       </span>
                     </h3>
                     <p className="text-xs text-slate-500 mt-0.5">
-                      Cryptographic tracking across all assigned Subject Matter Experts and Linguistic Translators.
+                      Cryptographic tracking across all assigned Linguistic Translators and verified assets.
                     </p>
                   </div>
 
@@ -2102,14 +2072,14 @@ export const ExamManagerWorkspace: React.FC<ExamManagerWorkspaceProps> = ({
                   </button>
                   <button
                     type="button"
-                    onClick={() => setMatrixFilter('SME_REVIEW')}
+                    onClick={() => setMatrixFilter('PENDING')}
                     className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${
-                      matrixFilter === 'SME_REVIEW'
+                      matrixFilter === 'PENDING'
                         ? 'bg-blue-600 text-white shadow-xs'
                         : 'bg-blue-50 text-blue-700 hover:bg-blue-100 border border-blue-200/50'
                     }`}
                   >
-                    SME Reviews ({assignments.filter(a => a.assignment_type === 'SME_REVIEW').length})
+                    Pending ({assignments.filter(a => a.status === 'PENDING').length})
                   </button>
                   <button
                     type="button"
@@ -2138,7 +2108,7 @@ export const ExamManagerWorkspace: React.FC<ExamManagerWorkspaceProps> = ({
                 {/* Verification Matrix Table */}
                 {(() => {
                   const filteredAssignments = assignments.filter(a => {
-                    if (matrixFilter === 'SME_REVIEW' && a.assignment_type !== 'SME_REVIEW') return false;
+                    if (matrixFilter === 'PENDING' && a.status !== 'PENDING') return false;
                     if (matrixFilter === 'TRANSLATION' && a.assignment_type !== 'LINGUISTIC_TRANSLATION') return false;
                     if (matrixFilter === 'COMPLETED' && a.status !== 'COMPLETED') return false;
                     if (matrixSearch.trim()) {
@@ -2267,7 +2237,7 @@ export const ExamManagerWorkspace: React.FC<ExamManagerWorkspaceProps> = ({
               <div>
                 <h3 className="text-base font-bold text-slate-900">Secure Question Pool Repository</h3>
                 <p className="text-xs text-slate-500 mt-0.5">
-                  Cryptographically secured question repository. Multi-select questions to assign in bulk to SMEs or Translators.
+                  Cryptographically secured question repository. Multi-select questions to assign in bulk to Linguistic Translators.
                 </p>
               </div>
 
@@ -2315,33 +2285,18 @@ export const ExamManagerWorkspace: React.FC<ExamManagerWorkspaceProps> = ({
                   </button>
                 </div>
 
-                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                  <div>
-                    <label className="block text-slate-300 font-bold mb-1">Assignment Task Type</label>
-                    <select
-                      value={poolAssignType}
-                      onChange={e => {
-                        setPoolAssignType(e.target.value as any);
-                        setPoolAssignUserId('');
-                      }}
-                      className="w-full px-3 py-2 rounded-lg bg-slate-800 border border-slate-700 text-white"
-                    >
-                      <option value="SME_REVIEW">SME Expert Review</option>
-                      <option value="LINGUISTIC_TRANSLATION">Linguistic Translation</option>
-                    </select>
-                  </div>
-
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                   <div>
                     <label className="block text-slate-300 font-bold mb-1">
-                      {poolAssignType === 'SME_REVIEW' ? 'Target SME Expert' : 'Target Linguistic Translator'}
+                      Target Linguistic Translator
                     </label>
                     <select
                       value={poolAssignUserId}
                       onChange={e => setPoolAssignUserId(e.target.value)}
                       className="w-full px-3 py-2 rounded-lg bg-slate-800 border border-slate-700 text-white"
                     >
-                      <option value="">-- Select Member --</option>
-                      {(poolAssignType === 'SME_REVIEW' ? smes : translators).map(u => (
+                      <option value="">-- Select Linguistic Translator --</option>
+                      {translators.map(u => (
                         <option key={u.id} value={u.id}>
                           {u.full_name} ({u.email})
                         </option>
@@ -2349,22 +2304,20 @@ export const ExamManagerWorkspace: React.FC<ExamManagerWorkspaceProps> = ({
                     </select>
                   </div>
 
-                  {poolAssignType === 'LINGUISTIC_TRANSLATION' && (
-                    <div>
-                      <label className="block text-slate-300 font-bold mb-1">Target Language</label>
-                      <select
-                        value={poolAssignTargetLanguage}
-                        onChange={e => setPoolAssignTargetLanguage(e.target.value)}
-                        className="w-full px-3 py-2 rounded-lg bg-slate-800 border border-slate-700 text-white"
-                      >
-                        {SUPPORTED_TRANSLATION_LANGUAGES.map(l => (
-                          <option key={l.code} value={l.code}>
-                            {l.label}
-                          </option>
-                        ))}
-                      </select>
-                    </div>
-                  )}
+                  <div>
+                    <label className="block text-slate-300 font-bold mb-1">Target Language</label>
+                    <select
+                      value={poolAssignTargetLanguage}
+                      onChange={e => setPoolAssignTargetLanguage(e.target.value)}
+                      className="w-full px-3 py-2 rounded-lg bg-slate-800 border border-slate-700 text-white"
+                    >
+                      {SUPPORTED_TRANSLATION_LANGUAGES.map(l => (
+                        <option key={l.code} value={l.code}>
+                          {l.label}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
                 </div>
 
                 <div>
@@ -2459,434 +2412,7 @@ export const ExamManagerWorkspace: React.FC<ExamManagerWorkspaceProps> = ({
 
       {/* PAPER GENERATION */}
       {activeSubTab === 'paper_generation' && (
-        <div className="space-y-6">
-          <div className="p-6 rounded-xl bg-white border border-slate-200 shadow-xs space-y-4">
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b pb-3">
-              <div>
-                <h3 className="text-base font-bold text-slate-900">
-                  Cryptographic Paper Generation Engine
-                </h3>
-                <p className="text-xs text-slate-500 mt-0.5">
-                  Context-aware paper generation strictly adapted to target Examination Type.
-                </p>
-              </div>
-
-              {/* Action Controls & Exam Type Filter Pills */}
-              <div className="flex flex-wrap items-center gap-2 text-xs">
-                {examinations.length > 0 && (
-                  <button
-                    type="button"
-                    onClick={handlePurgeAllMockExams}
-                    className="px-3 py-1.5 rounded-lg bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 font-bold text-xs flex items-center gap-1.5 transition-all cursor-pointer shadow-2xs"
-                    title="Remove all pre-seeded dummy/mock examinations"
-                  >
-                    <Trash2 className="w-3.5 h-3.5" />
-                    <span>Purge Mock Papers</span>
-                  </button>
-                )}
-
-                <div className="flex flex-wrap items-center gap-1.5">
-                  {(['ALL', 'MCQ', 'THEORY', 'MIXED', 'PRACTICAL_CODING'] as const).map(t => {
-                    const count = t === 'ALL' ? examinations.length : examinations.filter(e => ((e as any).exam_type || 'MCQ') === t).length;
-                    return (
-                      <button
-                        key={t}
-                        onClick={() => setGenerationExamTypeFilter(t)}
-                        className={`px-3 py-1.5 rounded-lg font-bold text-xs transition-all ${
-                          generationExamTypeFilter === t
-                            ? 'bg-emerald-900 text-white shadow-xs'
-                            : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
-                        }`}
-                      >
-                        {t === 'ALL' ? 'All Types' : t} ({count})
-                      </button>
-                    );
-                  })}
-                </div>
-              </div>
-            </div>
-
-            {/* Filtered Examinations List with Type Indicators */}
-            <div className="space-y-3">
-              {examinations.length === 0 ? (
-                <div className="p-8 text-center bg-slate-50/80 rounded-2xl border border-dashed border-slate-300 space-y-3">
-                  <div className="w-12 h-12 rounded-full bg-emerald-100 text-emerald-700 flex items-center justify-center mx-auto">
-                    <CheckCircle2 className="w-6 h-6" />
-                  </div>
-                  <div>
-                    <h4 className="font-bold text-slate-800 text-sm">All Mock Examination Papers Cleared</h4>
-                    <p className="text-xs text-slate-500 max-w-md mx-auto mt-1">
-                      No dummy examinations are present. Upload your real question paper or create a new examination to generate authentic encrypted paper sets.
-                    </p>
-                  </div>
-                  <div className="flex items-center justify-center gap-3 pt-2">
-                    <button
-                      type="button"
-                      onClick={() => onSelectSubTab && onSelectSubTab('question_workflow' as any)}
-                      className="px-4 py-2 bg-emerald-700 hover:bg-emerald-800 text-white rounded-xl text-xs font-bold transition-all shadow-xs flex items-center gap-1.5"
-                    >
-                      <Upload className="w-3.5 h-3.5" />
-                      Upload Question Paper
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => onSelectSubTab && onSelectSubTab('create_examination' as any)}
-                      className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-800 rounded-xl text-xs font-bold transition-all border border-slate-300 flex items-center gap-1.5"
-                    >
-                      <PlusCircle className="w-3.5 h-3.5" />
-                      Create New Exam
-                    </button>
-                  </div>
-                </div>
-              ) : (
-                examinations
-                  .filter(ex => generationExamTypeFilter === 'ALL' || ((ex as any).exam_type || 'MCQ') === generationExamTypeFilter)
-                  .map(ex => {
-                    const type: ExamType = (ex as any).exam_type || 'MCQ';
-                    const isSelected = selectedGenExamId === ex.id || (!selectedGenExamId && examinations[0]?.id === ex.id);
-
-                    return (
-                      <div
-                        key={ex.id}
-                        onClick={() => setSelectedGenExamId(ex.id)}
-                        className={`p-4 rounded-xl border cursor-pointer transition-all ${
-                          isSelected
-                            ? 'bg-emerald-50/50 border-emerald-500 ring-2 ring-emerald-500/20'
-                            : 'bg-slate-50 border-slate-200 hover:bg-slate-100/70'
-                        }`}
-                      >
-                        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs">
-                          <div className="space-y-1">
-                            <div className="flex items-center gap-2">
-                              <span className="font-bold text-sm text-slate-900">{ex.name}</span>
-                              <span
-                                className={`px-2 py-0.5 rounded text-[10px] font-bold border ${
-                                  type === 'MCQ'
-                                    ? 'bg-blue-100 text-blue-900 border-blue-200'
-                                    : type === 'THEORY'
-                                    ? 'bg-amber-100 text-amber-900 border-amber-200'
-                                    : type === 'MIXED'
-                                    ? 'bg-teal-100 text-teal-900 border-teal-200'
-                                    : 'bg-indigo-100 text-indigo-900 border-indigo-200'
-                                }`}
-                              >
-                                {type === 'MCQ' ? '⚡ MCQ PATTERN' : type === 'THEORY' ? '📝 THEORY PATTERN' : type === 'MIXED' ? '🔀 HYBRID PATTERN' : '💻 PRACTICAL PATTERN'}
-                              </span>
-                            </div>
-                            <div className="text-[11px] text-slate-500 font-mono">
-                              Subject: {ex.subject} • Qs: {ex.total_questions} • Marks: {ex.total_marks} • Unlock: {ex.unlock_time}
-                            </div>
-                          </div>
-
-                          <div className="flex items-center gap-2">
-                            {ex.simulation_status === 'COMPLETED' ? (
-                              <span
-                                className="px-3 py-2 bg-emerald-50 text-emerald-800 border border-emerald-300 rounded-lg font-bold text-xs flex items-center gap-1.5 shadow-2xs"
-                                title="Simulation already completed. The final question paper cannot be viewed again in simulation mode."
-                              >
-                                <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
-                                <span>Simulation Completed ✓</span>
-                              </span>
-                            ) : (
-                              <button
-                                type="button"
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  handleSimulateExam(ex);
-                                }}
-                                className="px-3.5 py-2 bg-emerald-700 hover:bg-emerald-600 text-white rounded-lg font-bold text-xs shadow-xs flex items-center gap-1.5 cursor-pointer transition-all"
-                                title="Start Proctored Final Paper Simulation"
-                              >
-                                <Camera className="w-3.5 h-3.5" />
-                                <span>Simulate Exam</span>
-                              </button>
-                            )}
-
-                            <button
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                handleGeneratePaper(ex.id);
-                              }}
-                              disabled={generating || org?.status !== 'VERIFIED'}
-                              className={`px-4 py-2 rounded-lg font-bold text-xs shadow-xs flex items-center gap-1.5 ${
-                                ex.simulation_status === 'COMPLETED'
-                                  ? 'bg-emerald-900 hover:bg-emerald-800 text-white ring-2 ring-emerald-500/30'
-                                  : 'bg-slate-900 hover:bg-slate-800 text-white disabled:opacity-40'
-                              }`}
-                            >
-                              <Lock className="w-3.5 h-3.5" />
-                              <span>{generating ? 'Encrypting...' : `Generate ${type} Paper`}</span>
-                            </button>
-
-                            <button
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                handleEmergencyRegenerate(ex.id);
-                              }}
-                              className="px-3 py-2 bg-rose-50 hover:bg-rose-100 text-rose-800 border border-rose-200 rounded-lg font-bold text-xs flex items-center gap-1.5 cursor-pointer"
-                              title="Emergency Question Paper Regeneration"
-                            >
-                              <RotateCcw className="w-3.5 h-3.5" />
-                              <span>Emergency Re-Gen</span>
-                            </button>
-
-                            <button
-                              type="button"
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                setSelectedGenExamId(ex.id);
-                                if (onSelectSubTab) {
-                                  onSelectSubTab('multi_paper_generator');
-                                } else {
-                                  window.location.hash = 'multi-paper-generator';
-                                }
-                              }}
-                              className="px-3 py-2 bg-indigo-50 hover:bg-indigo-100 text-indigo-900 border border-indigo-200 rounded-lg font-bold text-xs flex items-center gap-1.5 cursor-pointer transition-all"
-                              title="Generate Sets A, B, C, D with balanced candidate pool quotas"
-                            >
-                              <Sparkles className="w-3.5 h-3.5 text-indigo-600" />
-                              <span>Multi-Sets</span>
-                            </button>
-
-                            <button
-                              type="button"
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                setSelectedGenExamId(ex.id);
-                                if (onSelectSubTab) {
-                                  onSelectSubTab('paper_versions');
-                                } else {
-                                  window.location.hash = 'paper-versions';
-                                }
-                              }}
-                              className="px-3 py-2 bg-slate-100 hover:bg-slate-200 text-slate-800 border border-slate-300 rounded-lg font-bold text-xs flex items-center gap-1.5 cursor-pointer transition-all"
-                              title="View encrypted paper versions and release sets"
-                            >
-                              <Layers className="w-3.5 h-3.5 text-slate-600" />
-                              <span>Versions</span>
-                            </button>
-
-                            <button
-                              type="button"
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                setPdfViewExam(ex);
-                              }}
-                              className="px-3.5 py-2 bg-rose-50 hover:bg-rose-100 text-rose-800 border border-rose-200 rounded-lg font-bold text-xs flex items-center gap-1.5 cursor-pointer transition-all shadow-2xs"
-                              title="View & Print Official Generated Question Paper PDF"
-                            >
-                              <FileText className="w-3.5 h-3.5 text-rose-600" />
-                              <span>View PDF</span>
-                            </button>
-
-                            <button
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                handleEmergencyRegenerate(ex.id);
-                              }}
-                              className="px-3 py-2 bg-rose-50 hover:bg-rose-100 text-rose-800 border border-rose-200 rounded-lg font-bold text-xs flex items-center gap-1.5 cursor-pointer"
-                              title="Emergency Question Paper Regeneration"
-                            >
-                              <RotateCcw className="w-3.5 h-3.5" />
-                              <span>Emergency Re-Gen</span>
-                            </button>
-
-                            <button
-                              type="button"
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                handleDeleteExam(ex.id, ex.name);
-                              }}
-                              className="p-2 bg-slate-100 hover:bg-rose-100 text-slate-500 hover:text-rose-700 border border-slate-200 hover:border-rose-300 rounded-lg font-bold text-xs flex items-center justify-center transition-all cursor-pointer"
-                              title="Delete Examination"
-                            >
-                              <Trash2 className="w-3.5 h-3.5" />
-                            </button>
-                          </div>
-                        </div>
-                      </div>
-                    );
-                  })
-              )}
-            </div>
-          </div>
-
-          {/* DEDICATED EXAM TYPE GENERATION SYSTEM WORKBENCH */}
-          {(() => {
-            const currentExam = examinations.find(e => e.id === (selectedGenExamId || examinations[0]?.id)) || examinations[0];
-            if (!currentExam) return null;
-            const currentType: ExamType = (currentExam as any).exam_type || 'MCQ';
-
-            return (
-              <div className="p-6 rounded-xl bg-slate-900 text-slate-100 border border-slate-800 shadow-md space-y-5 text-xs">
-                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-800 pb-4">
-                  <div>
-                    <div className="flex items-center gap-2">
-                      <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-emerald-500/20 text-emerald-400 border border-emerald-500/30">
-                        ACTIVE GENERATION SYSTEM
-                      </span>
-                      <h4 className="text-sm font-bold text-white">
-                        {currentType === 'MCQ' && '⚡ MCQ OMR & Option Permutation System'}
-                        {currentType === 'THEORY' && '📝 Theory Sectional Blueprint & Rubrics Compiler'}
-                        {currentType === 'MIXED' && '🔀 Hybrid Dual-Tier (Objective + Subjective) System'}
-                        {currentType === 'PRACTICAL_CODING' && '💻 Practical Lab & Automated Test Sandbox System'}
-                      </h4>
-                    </div>
-                    <p className="text-[11px] text-slate-400 mt-1">
-                      Enforcing strict validation constraints for target examination: <span className="text-white font-bold">{currentExam.name}</span>
-                    </p>
-                  </div>
-
-                  <div className="flex items-center gap-2">
-                    {currentExam.simulation_status === 'COMPLETED' ? (
-                      <span
-                        className="px-4 py-2.5 bg-emerald-500/20 text-emerald-400 border border-emerald-500/40 rounded-lg font-bold text-xs flex items-center gap-1.5"
-                        title="Simulation already completed. The final question paper cannot be viewed again in simulation mode."
-                      >
-                        <CheckCircle2 className="w-4 h-4 text-emerald-400" />
-                        <span>Simulation Completed ✓</span>
-                      </span>
-                    ) : (
-                      <button
-                        type="button"
-                        onClick={() => handleSimulateExam(currentExam)}
-                        className="px-4 py-2.5 bg-emerald-700 hover:bg-emerald-600 text-white rounded-lg font-bold text-xs shadow-md transition-all flex items-center gap-2 cursor-pointer"
-                        title="Start Proctored Final Paper Simulation"
-                      >
-                        <Camera className="w-4 h-4" />
-                        <span>Simulate Exam</span>
-                      </button>
-                    )}
-
-                    <button
-                      onClick={() => handleGeneratePaper(currentExam.id)}
-                      disabled={generating || org?.status !== 'VERIFIED'}
-                      className="px-5 py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg font-bold text-xs shadow-md transition-all flex items-center gap-2 disabled:opacity-40"
-                    >
-                      <Lock className="w-4 h-4" />
-                      <span>{generating ? 'Processing Cryptographic Pipeline...' : `Execute ${currentType} Paper Generation`}</span>
-                    </button>
-                  </div>
-                </div>
-
-                {/* TYPE-SPECIFIC ENGINE ARCHITECTURE */}
-                {currentType === 'MCQ' && (
-                  <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                    <div className="p-4 rounded-xl bg-slate-800/80 border border-slate-700 space-y-2">
-                      <div className="font-bold text-white flex items-center gap-2 text-xs">
-                        <span>1. OMR Matrix & Option Shuffling</span>
-                      </div>
-                      <p className="text-[11px] text-slate-400 leading-relaxed">
-                        Deterministic PRNG shuffles 4 candidate options (A, B, C, D) per question across 4 distinct paper versions (Sets A, B, C, D) with distinct answer key matrices.
-                      </p>
-                      <div className="pt-2 text-[10px] font-mono text-emerald-400">
-                        ✓ 4 Sets (A/B/C/D) Permutations Ready
-                      </div>
-                    </div>
-
-                    <div className="p-4 rounded-xl bg-slate-800/80 border border-slate-700 space-y-2">
-                      <div className="font-bold text-white flex items-center gap-2 text-xs">
-                        <span>2. Negative Marking Scheme</span>
-                      </div>
-                      <p className="text-[11px] text-slate-400 leading-relaxed">
-                        Enforces +4.0 Marks per correct response and -1.0 Negative mark penalty. OMR bubble coordinates encoded directly into encrypted question metadata.
-                      </p>
-                      <div className="pt-2 text-[10px] font-mono text-emerald-400">
-                        ✓ Negative Scoring Penalty: Configured
-                      </div>
-                    </div>
-
-                    <div className="p-4 rounded-xl bg-slate-800/80 border border-slate-700 space-y-2">
-                      <div className="font-bold text-white flex items-center gap-2 text-xs">
-                        <span>3. Cryptographic Answer Vault</span>
-                      </div>
-                      <p className="text-[11px] text-slate-400 leading-relaxed">
-                        Answer keys are decoupled from examination ciphertext and encrypted under an isolated Shamir 3-of-5 threshold custody key.
-                      </p>
-                      <div className="pt-2 text-[10px] font-mono text-emerald-400">
-                        ✓ Isolated Answer Key Enclave: Armed
-                      </div>
-                    </div>
-                  </div>
-                )}
-
-                {currentType === 'THEORY' && (
-                  <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                    <div className="p-4 rounded-xl bg-slate-800/80 border border-slate-700 space-y-2">
-                      <div className="font-bold text-white flex items-center gap-2 text-xs">
-                        <span>1. Sectional Blueprint Architecture</span>
-                      </div>
-                      <p className="text-[11px] text-slate-400 leading-relaxed">
-                        Structures paper into Section A (Short compulsory: 2 marks), Section B (Medium analytical: 5 marks), and Section C (Long subjective with choice: 10 marks).
-                      </p>
-                      <div className="pt-2 text-[10px] font-mono text-amber-400">
-                        ✓ 3-Tier Sectional Distribution Active
-                      </div>
-                    </div>
-
-                    <div className="p-4 rounded-xl bg-slate-800/80 border border-slate-700 space-y-2">
-                      <div className="font-bold text-white flex items-center gap-2 text-xs">
-                        <span>2. Descriptive Marking Rubric</span>
-                      </div>
-                      <p className="text-[11px] text-slate-400 leading-relaxed">
-                        Compiles step-by-step evaluator guidelines, key conceptual bullet points, and word limits for subjective grading consistency.
-                      </p>
-                      <div className="pt-2 text-[10px] font-mono text-amber-400">
-                        ✓ Evaluator Model Solutions: Linked
-                      </div>
-                    </div>
-
-                    <div className="p-4 rounded-xl bg-slate-800/80 border border-slate-700 space-y-2">
-                      <div className="font-bold text-white flex items-center gap-2 text-xs">
-                        <span>3. Choice Matrix & Word Counts</span>
-                      </div>
-                      <p className="text-[11px] text-slate-400 leading-relaxed">
-                        Calculates internal choice constraints (e.g. Attempt any 3 of 5) and validates total attainable marks against exam total ({currentExam.total_marks} Marks).
-                      </p>
-                      <div className="pt-2 text-[10px] font-mono text-amber-400">
-                        ✓ Internal Choice Logic: Balanced
-                      </div>
-                    </div>
-                  </div>
-                )}
-
-                {currentType === 'MIXED' && (
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    <div className="p-4 rounded-xl bg-slate-800/80 border border-slate-700 space-y-2">
-                      <div className="font-bold text-white text-xs">Part I: Objective OMR Matrix (40% Weight)</div>
-                      <p className="text-[11px] text-slate-400">
-                        Generates timed objective section with automated OMR barcode headers and randomized question orders.
-                      </p>
-                    </div>
-                    <div className="p-4 rounded-xl bg-slate-800/80 border border-slate-700 space-y-2">
-                      <div className="font-bold text-white text-xs">Part II: Subjective Answer Booklet (60% Weight)</div>
-                      <p className="text-[11px] text-slate-400">
-                        Generates long-form theory questions with step-wise marks distribution and evaluator rubrics.
-                      </p>
-                    </div>
-                  </div>
-                )}
-
-                {currentType === 'PRACTICAL_CODING' && (
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    <div className="p-4 rounded-xl bg-slate-800/80 border border-slate-700 space-y-2">
-                      <div className="font-bold text-white text-xs">Lab Sandbox Test Suite</div>
-                      <p className="text-[11px] text-slate-400">
-                        Encapsulates hidden & public test vectors, memory limits, and CPU time constraints for automated evaluation.
-                      </p>
-                    </div>
-                    <div className="p-4 rounded-xl bg-slate-800/80 border border-slate-700 space-y-2">
-                      <div className="font-bold text-white text-xs">Candidate Problem Statement Encryption</div>
-                      <p className="text-[11px] text-slate-400">
-                        FIPS 140-2 AES-256-GCM encryption packaged with runtime environment specifications.
-                      </p>
-                    </div>
-                  </div>
-                )}
-              </div>
-            );
-          })()}
-        </div>
+        <PaperGenerationModule currentUser={currentUser} onRefresh={onRefresh} />
       )}
 
       {/* DYNAMIC MULTI-PAPER GENERATOR */}

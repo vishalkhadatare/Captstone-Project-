@@ -46,7 +46,10 @@ if hasattr(sys.stdin, "reconfigure"):
 
 # Dependencies
 try:
-    import fitz  # PyMuPDF
+    try:
+        import fitz  # PyMuPDF
+    except ImportError:
+        import pymupdf as fitz
     FITZ_AVAILABLE = True
 except ImportError:
     fitz = None
@@ -63,7 +66,10 @@ except ImportError:
 
 try:
     import numpy as np
-    from rapidocr import RapidOCR
+    try:
+        from rapidocr_onnxruntime import RapidOCR
+    except ImportError:
+        from rapidocr import RapidOCR
     RAPID_OCR_AVAILABLE = True
 except ImportError:
     np = None

@@ -2789,7 +2789,7 @@ export const ExamManagerQuestionExtractor: React.FC<ExamManagerQuestionExtractor
       )}
 
       {/* ========================================================================= */}
-      {/* SECTION 3: QUESTION ASSIGNMENT MODAL (Select SME / Translator & Number/Specific Qs) */}
+      {/* SECTION 3: QUESTION ASSIGNMENT MODAL (Select Translator & Number/Specific Qs) */}
       {/* ========================================================================= */}
       {assignModalOpen && (
         <div className="fixed inset-0 z-50 bg-slate-950/70 backdrop-blur-xs flex items-center justify-center p-4">
