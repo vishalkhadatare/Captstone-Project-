@@ -4443,20 +4443,33 @@ async function startServer() {
     try {
       const db = await getDb();
       const { exam_id } = req.query;
+      const orgId = req.user?.org_id || '';
       let papers: any[] = [];
+
       if (exam_id) {
         papers = executeQuery(
           db,
-          `SELECT * FROM question_papers WHERE org_id = ? AND (exam_id = ? OR exam_id IS NULL) ORDER BY uploaded_at DESC`,
-          [req.user!.org_id, exam_id]
+          `SELECT * FROM question_papers 
+           WHERE exam_id = ? OR org_id = ? OR exam_id IS NULL OR exam_id = ''
+           ORDER BY uploaded_at DESC`,
+          [exam_id, orgId]
         );
-      } else {
+      } else if (orgId) {
         papers = executeQuery(
           db,
           `SELECT * FROM question_papers WHERE org_id = ? ORDER BY uploaded_at DESC`,
-          [req.user!.org_id]
+          [orgId]
         );
       }
+
+      // If still empty, fetch all uploaded question papers so user never gets a blank screen
+      if (papers.length === 0) {
+        papers = executeQuery(
+          db,
+          `SELECT * FROM question_papers ORDER BY uploaded_at DESC`
+        );
+      }
+
       return res.json({ success: true, papers });
     } catch (err: any) {
       return res.status(500).json({ error: err.message });

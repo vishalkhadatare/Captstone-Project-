@@ -131,12 +131,12 @@ export const UniversityFormatGenerator: React.FC<UniversityFormatGeneratorProps>
     }
   };
 
-  const loadUploadedPapers = async (examId: string) => {
+  const loadUploadedPapers = async (examId?: string) => {
     setLoadingPapers(true);
     try {
       const res = await api.getUploadedQuestionPapers(examId);
-      if (res.success) {
-        setUploadedPapers(res.papers || []);
+      if (res.success && Array.isArray(res.papers)) {
+        setUploadedPapers(res.papers);
       }
     } catch (e: any) {
       console.warn('Could not load uploaded question papers:', e);
@@ -332,10 +332,20 @@ export const UniversityFormatGenerator: React.FC<UniversityFormatGeneratorProps>
                 Uploaded Source Draft Papers (Cloudinary Vault)
               </span>
             </div>
-            <span className="text-[11px] font-mono text-sky-400 font-bold bg-sky-500/10 px-2.5 py-0.5 rounded border border-sky-500/20 flex items-center gap-1.5">
-              <Cloud className="w-3 h-3" />
-              {uploadedPapers.length} Draft Papers Stored
-            </span>
+            <div className="flex items-center gap-2">
+              <span className="text-[11px] font-mono text-sky-400 font-bold bg-sky-500/10 px-2.5 py-0.5 rounded border border-sky-500/20 flex items-center gap-1.5">
+                <Cloud className="w-3 h-3" />
+                {uploadedPapers.length} Draft Papers Stored
+              </span>
+              <button
+                type="button"
+                onClick={() => loadUploadedPapers(selectedExamId)}
+                title="Refresh uploaded drafts"
+                className="p-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white border border-slate-700 cursor-pointer transition-all"
+              >
+                <RefreshCw className={`w-3.5 h-3.5 ${loadingPapers ? 'animate-spin' : ''}`} />
+              </button>
+            </div>
           </div>
 
           {loadingPapers ? (
