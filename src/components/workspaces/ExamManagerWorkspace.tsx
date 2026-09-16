@@ -1040,9 +1040,8 @@ export const ExamManagerWorkspace: React.FC<ExamManagerWorkspaceProps> = ({
                 </div>
               )
             ) : (
-              // Questions List View for Metric Card Filter
               <div className="space-y-2 max-h-[500px] overflow-y-auto">
-                {questions
+                {(questions || [])
                   .filter(q => {
                     if (dashboardCardFilter === 'VERIFIED') return q.status === 'VERIFIED' || q.status === 'ELIGIBLE_FOR_PAPER';
                     if (dashboardCardFilter === 'QUARANTINED') return q.status === 'QUARANTINED' || q.status === 'COMPROMISED';
