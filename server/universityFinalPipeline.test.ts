@@ -99,3 +99,4 @@ test('2. pdf-lib protects, encrypts, and computes SHA-256 fingerprint for genera
   assert.ok(protection.filename.includes('SLR-TEST-501_Set_P'));
   assert.ok(protection.fileSize > 0);
 });
+
