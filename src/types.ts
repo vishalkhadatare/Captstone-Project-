@@ -952,6 +952,56 @@ export interface IngestDraftPapersResponse {
   questions: UniversityDraftQuestion[];
 }
 
+export interface UniversityRagPipelineRequest {
+  exam_id?: string;
+  target_mcq_count?: number;
+  target_total_marks?: number;
+}
+
+export interface UniversityRagPipelineResponse {
+  success: boolean;
+  message: string;
+  chromaStats: {
+    totalIndexed: number;
+    embeddingModel: string;
+    retrievedMcqCount: number;
+    retrievedTheoryCount: number;
+    duplicatesDetected: number;
+    duplicates: Array<{
+      questionAId: string;
+      questionBId: string;
+      similarityScore: number;
+      reason: string;
+    }>;
+  };
+  selectionResult: {
+    mcqs: UniversityDraftQuestion[];
+    section1Theory: UniversityDraftQuestion[];
+    section2Theory: UniversityDraftQuestion[];
+    totalQuestions: number;
+    totalMarks: number;
+    duplicatesRemoved: number;
+    paperDistribution: {
+      paper1: number;
+      paper2: number;
+      paper3: number;
+    };
+  };
+  validationReport: {
+    isValid: boolean;
+    expectedMcqCount: number;
+    selectedMcqCount: number;
+    expectedTotalMarks: number;
+    selectedTotalMarks: number;
+    section1TheoryCount: number;
+    section2TheoryCount: number;
+    duplicatesDetectedCount: number;
+    errors: string[];
+    checklist: Array<{ rule: string; passed: boolean; details: string }>;
+  };
+}
+
+
 
 
 

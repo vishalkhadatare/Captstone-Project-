@@ -104,6 +104,7 @@ import {
   QuestionItem,
 } from './server/multiPaperGenerator.ts';
 import { uploadDraftPapersMulter, handleUploadUniversityDrafts } from './server/universityIngestion.ts';
+import { handleUniversityRagPipeline } from './server/universityRagPipeline.ts';
 
 const configuredJwtSecret = process.env.JWT_SECRET;
 if (process.env.NODE_ENV === 'production' && (!configuredJwtSecret || configuredJwtSecret.length < 32)) {
@@ -9838,6 +9839,40 @@ async function startServer() {
       console.error('[ZeroLeak Org Sync] Error ensuring organizations exist:', err);
     }
   }
+
+
+  // ==========================================
+  // UNIVERSITY EXAM RAG PIPELINE & INGESTION ROUTES
+  // ==========================================
+  app.post('/api/university/upload-drafts', uploadDraftPapersMulter.array('files', 3), handleUploadUniversityDrafts);
+  app.post('/api/university/rag-pipeline', handleUniversityRagPipeline);
+
+  app.get('/api/university/draft-questions', async (req: Request, res: Response) => {
+    try {
+      const exam_id = ((req.query.exam_id as string) || 'EXAM-UNIV-MASTER-2026').trim();
+      const db = await getDb();
+      const questions = executeQuery(
+        db,
+        'SELECT * FROM draft_questions WHERE exam_id = ? ORDER BY paper_index ASC, id ASC',
+        [exam_id]
+      );
+      const paper1Count = questions.filter((q: any) => q.paper_index === 1).length;
+      const paper2Count = questions.filter((q: any) => q.paper_index === 2).length;
+      const paper3Count = questions.filter((q: any) => q.paper_index === 3).length;
+      return res.json({
+        success: true,
+        questions,
+        paperCounts: {
+          paper1: paper1Count,
+          paper2: paper2Count,
+          paper3: paper3Count,
+          totalQuestions: questions.length,
+        },
+      });
+    } catch (err: any) {
+      return res.status(500).json({ success: false, error: err.message });
+    }
+  });
 
   app.post('/api/system/repair-database', async (_req: Request, res: Response) => {
     if (process.env.NODE_ENV === 'production') {

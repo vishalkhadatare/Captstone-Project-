@@ -302,6 +302,17 @@ export const api = {
   getUniversityDraftQuestions: (examId?: string) =>
     request<IngestDraftPapersResponse>(`/api/university/draft-questions${examId ? `?exam_id=${encodeURIComponent(examId)}` : ''}`),
 
+  processUniversityRagPipeline: (examId?: string, targetMcqCount: number = 14, targetTotalMarks: number = 70) =>
+    request<import('./types').UniversityRagPipelineResponse>('/api/university/rag-pipeline', {
+      method: 'POST',
+      body: JSON.stringify({
+        exam_id: examId,
+        target_mcq_count: targetMcqCount,
+        target_total_marks: targetTotalMarks,
+      }),
+    }),
+
+
   // Auth
   register: (payload: any) => request<{ message: string; token: string; user: User }>('/api/auth/register', { method: 'POST', body: JSON.stringify(payload) }),
   registerPersonnel: (payload: any) => request<{ message: string; token?: string; user?: User; requiresDeviceBinding?: boolean; nextStep?: string; challengeId?: string; challenge?: string; expiresAt?: string }>('/api/auth/register-personnel', { method: 'POST', body: JSON.stringify(payload) }),

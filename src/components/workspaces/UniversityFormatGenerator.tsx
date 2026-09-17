@@ -94,6 +94,10 @@ export const UniversityFormatGenerator: React.FC<UniversityFormatGeneratorProps>
   const [showPdfModal, setShowPdfModal] = useState(false);
   const [actionMessage, setActionMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
 
+  // LangChain RAG Pipeline State
+  const [runningRag, setRunningRag] = useState<boolean>(false);
+  const [ragResponse, setRagResponse] = useState<import('../../types').UniversityRagPipelineResponse | null>(null);
+
   // 3 Draft Papers Ingestion State (SQLite Ingestion)
   const [selectedFiles, setSelectedFiles] = useState<File[]>([]);
   const [uploadingDrafts, setUploadingDrafts] = useState<boolean>(false);
@@ -147,6 +151,33 @@ export const UniversityFormatGenerator: React.FC<UniversityFormatGeneratorProps>
       loadCurrentPaper(selectedExamId);
     }
   }, [selectedExamId]);
+
+  const handleRunRagPipeline = async () => {
+    setRunningRag(true);
+    setActionMessage(null);
+    try {
+      const res = await api.processUniversityRagPipeline(selectedExamId || 'EXAM-UNIV-MASTER-2026', 14, 70);
+      if (res && res.success) {
+        setRagResponse(res);
+        setActionMessage({
+          type: 'success',
+          text: `LangChain RAG Pipeline execution complete! Indexed ${res.chromaStats?.totalIndexed || 0} vectors in ChromaDB, removed ${res.chromaStats?.duplicatesDetected || 0} duplicates, and selected EXACTLY ${res.selectionResult?.mcqs?.length || 14} MCQs!`,
+        });
+      } else {
+        setActionMessage({
+          type: 'error',
+          text: (res as any)?.error || 'RAG Pipeline execution failed.',
+        });
+      }
+    } catch (err: any) {
+      setActionMessage({
+        type: 'error',
+        text: err.message || 'Error executing LangChain RAG pipeline.',
+      });
+    } finally {
+      setRunningRag(false);
+    }
+  };
 
   const loadIngestedDraftQuestions = async (examId: string) => {
     try {
@@ -772,6 +803,97 @@ export const UniversityFormatGenerator: React.FC<UniversityFormatGeneratorProps>
               <div className="text-[11px] font-bold text-rose-400 uppercase">Paper 3 Questions</div>
               <div className="text-xl font-black text-white">{ingestedData.paperCounts?.paper3 || 0} Extracted</div>
               <div className="text-[10px] text-slate-400 font-mono">Status: Processed</div>
+            </div>
+          </div>
+        )}
+      </div>
+
+
+      {/* LangChain RAG Pipeline & Deterministic Exact-Count Selection Card */}
+      <div className="bg-slate-900 border border-slate-800 p-5 rounded-2xl shadow-xl space-y-4">
+        <div className="flex flex-wrap items-center justify-between border-b border-slate-800 pb-3 gap-3">
+          <div className="flex items-center gap-3">
+            <div className="p-2.5 rounded-xl bg-indigo-500/20 text-indigo-400 border border-indigo-500/30">
+              <Cpu className="w-5 h-5" />
+            </div>
+            <div>
+              <div className="flex items-center gap-2">
+                <h3 className="text-sm font-extrabold text-white tracking-wide uppercase">
+                  LangChain RAG Pipeline & Deterministic Selection Engine
+                </h3>
+                <span className="px-2.5 py-0.5 rounded-full text-[10px] font-black bg-indigo-500/20 text-indigo-300 border border-indigo-500/30 uppercase tracking-wide flex items-center gap-1">
+                  <Sparkles className="w-3 h-3 text-indigo-400" />
+                  <span>TEXT-EMBEDDING-3-SMALL &bull; CHROMADB</span>
+                </span>
+              </div>
+              <p className="text-[11px] text-slate-400">
+                Embed questions into ChromaDB vector store, run LangChain retrieval by section &amp; type, eliminate duplicates (&gt;0.85 similarity), and enforce EXACTLY 14 MCQs.
+              </p>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={handleRunRagPipeline}
+              disabled={runningRag}
+              className="px-5 py-2.5 bg-gradient-to-r from-indigo-600 to-indigo-500 hover:from-indigo-500 hover:to-indigo-400 text-white font-black text-xs rounded-xl shadow-lg flex items-center gap-2 cursor-pointer transition-all disabled:opacity-50"
+            >
+              <Zap className={`w-4 h-4 ${runningRag ? 'animate-spin' : ''}`} />
+              <span>{runningRag ? 'Processing RAG & Vector Store...' : 'Run LangChain RAG & Exact-Count Selection'}</span>
+            </button>
+          </div>
+        </div>
+
+        {/* RAG Pipeline Status & Report */}
+        {ragResponse && (
+          <div className="space-y-4 pt-1">
+            <div className="grid grid-cols-1 sm:grid-cols-4 gap-3">
+              <div className="p-3 bg-slate-800/90 border border-slate-700 rounded-xl space-y-1">
+                <div className="text-[10px] font-bold text-indigo-400 uppercase tracking-wider">ChromaDB Indexed</div>
+                <div className="text-lg font-black text-white">{ragResponse.chromaStats?.totalIndexed || 0} Vectors</div>
+                <div className="text-[10px] text-slate-400 font-mono">Model: text-embedding-3-small</div>
+              </div>
+              <div className="p-3 bg-slate-800/90 border border-slate-700 rounded-xl space-y-1">
+                <div className="text-[10px] font-bold text-amber-400 uppercase tracking-wider">Duplicates Removed</div>
+                <div className="text-lg font-black text-white">{ragResponse.chromaStats?.duplicatesDetected || 0} Duplicates</div>
+                <div className="text-[10px] text-slate-400 font-mono">Threshold: &gt; 0.85 Similarity</div>
+              </div>
+              <div className="p-3 bg-slate-800/90 border border-slate-700 rounded-xl space-y-1">
+                <div className="text-[10px] font-bold text-emerald-400 uppercase tracking-wider">Selected MCQs</div>
+                <div className="text-lg font-black text-white">{ragResponse.selectionResult?.mcqs?.length || 14} / 14 MCQs</div>
+                <div className="text-[10px] text-emerald-400 font-mono font-bold">Rule: EXACTLY 14 MCQs</div>
+              </div>
+              <div className="p-3 bg-slate-800/90 border border-slate-700 rounded-xl space-y-1">
+                <div className="text-[10px] font-bold text-rose-400 uppercase tracking-wider">Paper Distribution</div>
+                <div className="text-xs font-mono font-bold text-white pt-1">
+                  P1: {ragResponse.selectionResult?.paperDistribution?.paper1 || 0} | P2: {ragResponse.selectionResult?.paperDistribution?.paper2 || 0} | P3: {ragResponse.selectionResult?.paperDistribution?.paper3 || 0}
+                </div>
+                <div className="text-[10px] text-slate-400 font-mono">Controlled Combination</div>
+              </div>
+            </div>
+
+            {/* Checklist items */}
+            <div className="p-4 bg-slate-950/60 border border-slate-800 rounded-xl space-y-2">
+              <div className="text-xs font-bold text-white uppercase tracking-wide flex items-center justify-between">
+                <span>RAG Blueprint & Exact-Count Verification Report</span>
+                <span className={`px-2 py-0.5 rounded text-[10px] font-black uppercase ${
+                  ragResponse.validationReport?.isValid ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30' : 'bg-rose-500/20 text-rose-300 border border-rose-500/30'
+                }`}>
+                  {ragResponse.validationReport?.isValid ? 'BLUEPRINT VALIDATION PASSED' : 'VALIDATION HARD STOP'}
+                </span>
+              </div>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-2 text-xs">
+                {ragResponse.validationReport?.checklist?.map((item: any, idx: number) => (
+                  <div key={idx} className="p-2 bg-slate-900 border border-slate-800 rounded-lg flex items-start gap-2">
+                    {item.passed ? <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0 mt-0.5" /> : <AlertCircle className="w-4 h-4 text-rose-400 shrink-0 mt-0.5" />}
+                    <div>
+                      <div className="font-bold text-white leading-snug">{item.rule}</div>
+                      <div className="text-[11px] text-slate-400">{item.details}</div>
+                    </div>
+                  </div>
+                ))}
+              </div>
             </div>
           </div>
         )}
