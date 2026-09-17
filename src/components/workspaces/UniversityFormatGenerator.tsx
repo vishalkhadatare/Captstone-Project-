@@ -94,6 +94,11 @@ export const UniversityFormatGenerator: React.FC<UniversityFormatGeneratorProps>
   const [showPdfModal, setShowPdfModal] = useState(false);
   const [actionMessage, setActionMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
 
+  // Final PDFKit & Encrypted Paper State
+  const [generatingFinalPdf, setGeneratingFinalPdf] = useState<boolean>(false);
+  const [finalPaperResponse, setFinalPaperResponse] = useState<import('../../types').UniversityFinalPaperResponse | null>(null);
+  const [auditLogs, setAuditLogs] = useState<import('../../types').UniversityPaperAuditLogEntry[]>([]);
+
   // LangChain RAG Pipeline State
   const [runningRag, setRunningRag] = useState<boolean>(false);
   const [ragResponse, setRagResponse] = useState<import('../../types').UniversityRagPipelineResponse | null>(null);
@@ -151,6 +156,46 @@ export const UniversityFormatGenerator: React.FC<UniversityFormatGeneratorProps>
       loadCurrentPaper(selectedExamId);
     }
   }, [selectedExamId]);
+
+  const handleGenerateFinalPaperPdf = async () => {
+    setGeneratingFinalPdf(true);
+    setActionMessage(null);
+    try {
+      const setLetter = ['P', 'Q', 'R', 'S'][activeSetIndex] || 'P';
+      const res = await api.generateUniversityFinalPaper(selectedExamId || 'EXAM-UNIV-MASTER-2026', setLetter);
+      if (res && res.success) {
+        setFinalPaperResponse(res);
+        setActionMessage({
+          type: 'success',
+          text: `Final University Question Paper PDFKit PDF generated & encrypted successfully! SHA-256 Hash: ${res.generatedPaper.pdfHash.substring(0, 16)}...`,
+        });
+        loadAuditLogs();
+      } else {
+        setActionMessage({
+          type: 'error',
+          text: (res as any)?.error || 'Final PDF generation hard stop: pre-PDF validation failed.',
+        });
+      }
+    } catch (err: any) {
+      setActionMessage({
+        type: 'error',
+        text: err.message || 'Error generating final University Question Paper PDF.',
+      });
+    } finally {
+      setGeneratingFinalPdf(false);
+    }
+  };
+
+  const loadAuditLogs = async () => {
+    try {
+      const res = await api.getUniversityAuditLogs(selectedExamId || 'EXAM-UNIV-MASTER-2026');
+      if (res && res.success) {
+        setAuditLogs(res.logs || []);
+      }
+    } catch (err) {
+      console.warn('[University Audit] Error loading logs:', err);
+    }
+  };
 
   const handleRunRagPipeline = async () => {
     setRunningRag(true);

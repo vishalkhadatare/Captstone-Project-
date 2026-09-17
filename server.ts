@@ -105,6 +105,7 @@ import {
 } from './server/multiPaperGenerator.ts';
 import { uploadDraftPapersMulter, handleUploadUniversityDrafts } from './server/universityIngestion.ts';
 import { handleUniversityRagPipeline } from './server/universityRagPipeline.ts';
+import { handleGenerateFinalUniversityPaper, handleGetUniversityAuditLogs, handleDownloadUniversityPaper } from './server/universityFinalPipeline.ts';
 
 const configuredJwtSecret = process.env.JWT_SECRET;
 if (process.env.NODE_ENV === 'production' && (!configuredJwtSecret || configuredJwtSecret.length < 32)) {
@@ -9846,6 +9847,12 @@ async function startServer() {
   // ==========================================
   app.post('/api/university/upload-drafts', uploadDraftPapersMulter.array('files', 3), handleUploadUniversityDrafts);
   app.post('/api/university/rag-pipeline', handleUniversityRagPipeline);
+
+  app.post('/api/university/generate-final-paper', handleGenerateFinalUniversityPaper);
+  app.get('/api/university/audit-logs', handleGetUniversityAuditLogs);
+  app.get('/api/university/download-paper/:id', handleDownloadUniversityPaper);
+
+
 
   app.get('/api/university/draft-questions', async (req: Request, res: Response) => {
     try {

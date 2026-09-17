@@ -608,6 +608,43 @@ function initializeSchema(db: Database) {
       uploaded_at TEXT NOT NULL
     );
 
+
+    -- University Generated Papers Record
+    CREATE TABLE IF NOT EXISTS university_generated_papers (
+      id TEXT PRIMARY KEY,
+      exam_id TEXT NOT NULL,
+      version_code TEXT NOT NULL,
+      set_letter TEXT NOT NULL DEFAULT 'P',
+      total_questions INTEGER NOT NULL,
+      mcq_count INTEGER NOT NULL,
+      short_answer_count INTEGER NOT NULL DEFAULT 0,
+      descriptive_count INTEGER NOT NULL DEFAULT 0,
+      total_marks INTEGER NOT NULL DEFAULT 70,
+      duplicate_count INTEGER NOT NULL DEFAULT 0,
+      paper_distribution_json TEXT,
+      pdf_filename TEXT NOT NULL,
+      pdf_url TEXT NOT NULL,
+      pdf_hash TEXT NOT NULL,
+      encrypted_pdf_path TEXT,
+      encryption_algorithm TEXT NOT NULL DEFAULT 'PDF-LIB-AES256',
+      status TEXT NOT NULL DEFAULT 'GENERATED_ENCRYPTED',
+      created_by TEXT,
+      created_at TEXT NOT NULL
+    );
+
+    -- University Paper Audit Logs
+    CREATE TABLE IF NOT EXISTS university_paper_audit_logs (
+      id TEXT PRIMARY KEY,
+      exam_id TEXT NOT NULL,
+      paper_id TEXT,
+      action_type TEXT NOT NULL, -- 'UPLOAD', 'EXTRACTION', 'RAG_PROCESSING', 'SELECTION', 'VALIDATION', 'GENERATION', 'ENCRYPTION', 'DOWNLOAD'
+      user_id TEXT,
+      user_role TEXT,
+      details_json TEXT,
+      ip_address TEXT,
+      timestamp TEXT NOT NULL
+    );
+
     -- Draft Questions (Parsed Structured Questions from Draft Papers)
     CREATE TABLE IF NOT EXISTS draft_questions (
       id TEXT PRIMARY KEY,

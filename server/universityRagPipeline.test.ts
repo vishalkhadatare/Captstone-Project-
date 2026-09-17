@@ -175,3 +175,4 @@ test('4. Blueprint validation & Error hard-stop when valid question count is ins
   assert.equal(report.errors.length > 0, true);
   assert.match(report.errors[0], /INSUFFICIENT_VALID_QUESTIONS/);
 });
+

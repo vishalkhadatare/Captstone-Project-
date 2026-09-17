@@ -1001,6 +1001,72 @@ export interface UniversityRagPipelineResponse {
   };
 }
 
+export interface UniversityPaperAuditLogEntry {
+  id: string;
+  exam_id: string;
+  paper_id?: string;
+  action_type: 'UPLOAD' | 'EXTRACTION' | 'RAG_PROCESSING' | 'SELECTION' | 'VALIDATION' | 'GENERATION' | 'ENCRYPTION' | 'DOWNLOAD';
+  user_id?: string;
+  user_role?: string;
+  details_json?: string;
+  ip_address?: string;
+  timestamp: string;
+}
+
+export interface UniversityFinalPaperResponse {
+  success: boolean;
+  message: string;
+  generatedPaper: {
+    id: string;
+    exam_id: string;
+    versionCode: string;
+    set_letter: string;
+    totalQuestions: number;
+    mcqCount: number;
+    shortAnswerCount: number;
+    descriptiveCount: number;
+    totalMarks: number;
+    duplicateCount: number;
+    paperDistribution: {
+      paper1: number;
+      paper2: number;
+      paper3: number;
+    };
+    pdfFilename: string;
+    pdfUrl: string;
+    pdfHash: string;
+    created_at: string;
+  };
+  validationSummary: {
+    totalQuestions: number;
+    mcqCount: number;
+    shortAnswerCount: number;
+    descriptiveCount: number;
+    totalMarks: number;
+    duplicateCount: number;
+    sourcePaperDistribution: {
+      paper1: number;
+      paper2: number;
+      paper3: number;
+    };
+    validationPassed: boolean;
+    errors: string[];
+  };
+  validationReport: {
+    isValid: boolean;
+    expectedMcqCount: number;
+    selectedMcqCount: number;
+    expectedTotalMarks: number;
+    selectedTotalMarks: number;
+    section1TheoryCount: number;
+    section2TheoryCount: number;
+    duplicatesDetectedCount: number;
+    errors: string[];
+    checklist: Array<{ rule: string; passed: boolean; details: string }>;
+  };
+}
+
+
 
 
 

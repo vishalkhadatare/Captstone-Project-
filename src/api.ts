@@ -312,6 +312,26 @@ export const api = {
       }),
     }),
 
+  generateUniversityFinalPaper: (examId?: string, setLetter: string = 'P') =>
+    request<import('./types').UniversityFinalPaperResponse>('/api/university/generate-final-paper', {
+      method: 'POST',
+      body: JSON.stringify({
+        exam_id: examId,
+        set_letter: setLetter,
+      }),
+    }),
+
+  getUniversityAuditLogs: (examId?: string) =>
+    request<{ success: boolean; logs: import('./types').UniversityPaperAuditLogEntry[] }>(
+      `/api/university/audit-logs${examId ? `?exam_id=${encodeURIComponent(examId)}` : ''}`
+    ),
+
+  downloadUniversityPaper: (paperId: string) =>
+    request<{ success: boolean; pdfUrl: string; pdfFilename: string; pdfHash: string }>(
+      `/api/university/download-paper/${encodeURIComponent(paperId)}`
+    ),
+
+
 
   // Auth
   register: (payload: any) => request<{ message: string; token: string; user: User }>('/api/auth/register', { method: 'POST', body: JSON.stringify(payload) }),
