@@ -290,7 +290,7 @@ export function generateUniversityLatexDocument(params: {
 
     mcqLines.push(`  \\item ${qText}`);
     if (opts.length > 0) {
-      mcqLines.push(`  \\begin{enumerate}[label=\\textbf{\\alph*)}]`);
+      mcqLines.push(`  \\begin{enumerate}[label={\\textbf{\\alph*)}}]`);
       opts.forEach((opt: any) => {
         const optText = typeof opt === 'object' ? (opt.text || opt.label || '') : String(opt);
         mcqLines.push(`    \\item ${cleanAndSanitizeLatex(optText)}`);
