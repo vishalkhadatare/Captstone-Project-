@@ -836,11 +836,15 @@ export const ExamManagerWorkspace: React.FC<ExamManagerWorkspaceProps> = ({
     try {
       const res = await api.deleteExamination(examId);
       setStatusMessage({ type: 'success', text: res.message || `Examination "${examName}" deleted successfully from backend and database.` });
-      await loadData();
-      onRefresh();
+      setExaminations(prev => prev.filter(e => e.id !== examId));
+      if (selectedExamId === examId) {
+        setSelectedExamId('');
+      }
       if (selectedGenExamId === examId) {
         setSelectedGenExamId('');
       }
+      await loadData();
+      onRefresh();
     } catch (err: any) {
       setStatusMessage({ type: 'error', text: err.message || 'Failed to delete examination.' });
     } finally {
