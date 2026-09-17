@@ -6508,17 +6508,20 @@ async function startServer() {
   // Clean up any legacy dummy/mock questions so only real extracted/uploaded questions exist
   function cleanLegacyDummyQuestions(db: any) {
     try {
-      // 1. Permanently delete all NEET / physics prism / dummy question papers
+      // 1. Permanently delete all NEET / physics / chemistry / biology / dummy question papers
       executeRun(
         db,
         `DELETE FROM question_papers 
          WHERE LOWER(original_filename) LIKE '%neet%' 
             OR LOWER(original_filename) LIKE '%sample%' 
             OR id LIKE 'PAPER-SRC-NEET%'
-            OR original_filename = 'sample.jpg'`
+            OR original_filename = 'sample.jpg'
+            OR original_filename = 'a015768b-c298-4b94-84eb-9b8f9497b944.pdf'
+            OR LOWER(subject) IN ('physics', 'chemistry', 'biology', 'botany', 'zoology', 'neet', 'academic examination')
+            OR LOWER(examination_category) LIKE '%neet%'`
       );
 
-      // 2. Permanently delete all questions associated with NEET, prism, botany, zoology, biology, or dummy prefixes
+      // 2. Permanently delete all questions associated with NEET, physics, chemistry, biology, or dummy prefixes
       executeRun(
         db,
         `DELETE FROM questions 
@@ -6530,7 +6533,18 @@ async function startServer() {
             OR id LIKE 'EXT-P1-NEET%'
             OR id LIKE 'EXT-P2-NEET%'
             OR id LIKE 'EXT-P3-NEET%'
+            OR LOWER(subject) IN ('physics', 'chemistry', 'biology', 'botany', 'zoology', 'neet', 'academic examination', 'computer science & cryptography')
             OR LOWER(content_text) LIKE '%prism%'
+            OR LOWER(content_text) LIKE '%photon%'
+            OR LOWER(content_text) LIKE '%bob of heavy%'
+            OR LOWER(content_text) LIKE '%helminths%'
+            OR LOWER(content_text) LIKE '%cohesion%'
+            OR LOWER(content_text) LIKE '%echinoderms%'
+            OR LOWER(content_text) LIKE '%comb plates%'
+            OR LOWER(content_text) LIKE '%velocity of light%'
+            OR LOWER(content_text) LIKE '%triploblastic%'
+            OR LOWER(content_text) LIKE '%guttation%'
+            OR LOWER(content_text) LIKE '%metagenesis%'
             OR LOWER(content_text) LIKE '%light ray enters%'
             OR LOWER(content_text) LIKE '%refractive index%'
             OR LOWER(content_text) LIKE '%neet 202%'
@@ -6541,11 +6555,46 @@ async function startServer() {
             OR LOWER(content_text) LIKE '%cellular organelle%'
             OR LOWER(content_text) LIKE '%elisa technique%'
             OR LOWER(content_text) LIKE '%magnetic flux%'
+            OR LOWER(content_text) LIKE '%reaction equilibrium%'
+            OR LOWER(content_text) LIKE '%gemmae%'
+            OR LOWER(content_text) LIKE '%gymnosperm%'
+            OR LOWER(content_text) LIKE '%liverwort%'
+            OR LOWER(content_text) LIKE '%pteridophyte%'
+            OR LOWER(content_text) LIKE '%photosynthesis%'
+            OR LOWER(content_text) LIKE '%chloroplast%'
+            OR LOWER(content_text) LIKE '%mitochondria%'
+            OR LOWER(content_text) LIKE '%bullock cart%'
+            OR LOWER(content_text) LIKE '%inelastic%collision%'
+            OR LOWER(content_text) LIKE '%brewster%'
+            OR LOWER(content_text) LIKE '%moment of inertia%'
+            OR LOWER(content_text) LIKE '%steel wire%'
+            OR LOWER(content_text) LIKE '%spectral lines of hydrogen%'
+            OR LOWER(content_text) LIKE '%thermodynamic system%'
+            OR LOWER(content_text) LIKE '%[ contd%'
             OR content_text LIKE 'In AES-256-GCM%'
             OR content_text LIKE 'Given the foundational principles of%'`
       );
 
-      // 3. Clean any orphaned mappings
+      // 3. Permanently delete NEET examinations
+      executeRun(
+        db,
+        `DELETE FROM examinations 
+         WHERE LOWER(category) = 'neet' 
+            OR LOWER(name) LIKE '%neet%' 
+            OR id = 'EXAM-F100345C'`
+      );
+
+      // 4. Clean draft questions
+      executeRun(
+        db,
+        `DELETE FROM draft_questions 
+         WHERE LOWER(subject) IN ('physics', 'chemistry', 'biology', 'botany', 'zoology', 'neet')
+            OR LOWER(content_text) LIKE '%photon%'
+            OR LOWER(content_text) LIKE '%bob of heavy%'
+            OR LOWER(content_text) LIKE '%helminths%'`
+      );
+
+      // 5. Clean any orphaned mappings
       executeRun(db, `DELETE FROM paper_questions WHERE question_id NOT IN (SELECT id FROM questions)`);
     } catch {}
   }
@@ -9440,195 +9489,286 @@ async function startServer() {
           status: 'ELIGIBLE_FOR_PAPER',
         },
 
-        // Physics (for NEET, JEE, and Multi-Subject MCQ Pools)
+        // --- DATABASE MANAGEMENT SYSTEMS (DBMS) ---
         {
-          id: 'Q-PHY-001',
-          subject: 'Physics',
-          topic: 'Electrodynamics & Induction',
-          difficulty: 'MEDIUM',
-          marks: 4,
-          negative_marks: 1.0,
+          id: 'Q-DBMS-001',
+          subject: 'Data Structure',
+          topic: 'Relational Database Management Systems',
+          difficulty: 'EASY',
+          marks: 1,
+          negative_marks: 0,
           correct_answer: 'B',
           question_type: 'MCQ',
-          content_text: 'A superconducting ring of radius r is placed in a uniform magnetic field B perpendicular to its plane. If the magnetic field is doubled, what is the induced persistent current in the ring?',
-          options: ['A) Zero', 'B) -B·πr²/L where L is self-inductance', 'C) 2B·πr²/R', 'D) Infinite'],
+          content_text: 'Which normal form is based on the concept of full functional dependency and eliminates partial dependency on candidate keys?',
+          options: ['A) First Normal Form (1NF)', 'B) Second Normal Form (2NF)', 'C) Third Normal Form (3NF)', 'D) Boyce-Codd Normal Form (BCNF)'],
           status: 'ELIGIBLE_FOR_PAPER',
         },
         {
-          id: 'Q-PHY-002',
-          subject: 'Physics',
-          topic: 'Modern Physics & Photoelectric Effect',
-          difficulty: 'EASY',
-          marks: 4,
-          negative_marks: 1.0,
+          id: 'Q-DBMS-002',
+          subject: 'Data Structure',
+          topic: 'Database Transactions & Concurrency',
+          difficulty: 'MEDIUM',
+          marks: 1,
+          negative_marks: 0,
           correct_answer: 'C',
           question_type: 'MCQ',
-          content_text: 'In a photoelectric effect experiment, if the frequency of incident radiation is doubled (above threshold frequency), what happens to the maximum kinetic energy of emitted photoelectrons?',
-          options: ['A) Remains unchanged', 'B) Exactly doubles', 'C) More than doubles', 'D) Halves'],
+          content_text: 'In database transaction management, which ACID property guarantees that concurrent execution of transactions results in a state equivalent to serial execution?',
+          options: ['A) Atomicity', 'B) Consistency', 'C) Isolation', 'D) Durability'],
           status: 'ELIGIBLE_FOR_PAPER',
         },
         {
-          id: 'Q-PHY-003',
-          subject: 'Physics',
-          topic: 'Thermodynamics & Carnot Cycle',
+          id: 'Q-DBMS-003',
+          subject: 'Data Structure',
+          topic: 'Indexing & B-Trees',
           difficulty: 'MEDIUM',
-          marks: 4,
-          negative_marks: 1.0,
-          correct_answer: 'A',
+          marks: 1,
+          negative_marks: 0,
+          correct_answer: 'B',
           question_type: 'MCQ',
-          content_text: 'A Carnot engine operates between temperatures T1 = 500 K and T2 = 300 K. If the sink temperature is decreased by 50 K, by how much does the thermal efficiency increase?',
-          options: ['A) Increases by 10% absolute (from 40% to 50%)', 'B) Decreases by 5%', 'C) Remains constant at 40%', 'D) Increases by 25%'],
+          content_text: 'In a B+ Tree of order p, where are the actual data record pointers (or records) stored?',
+          options: ['A) Only in the internal nodes', 'B) Only in the leaf nodes', 'C) Uniformly in both leaf and internal nodes', 'D) At the root node only'],
           status: 'ELIGIBLE_FOR_PAPER',
         },
         {
-          id: 'Q-PHY-004',
-          subject: 'Physics',
-          topic: 'Wave Optics & Interference',
-          difficulty: 'HARD',
-          marks: 4,
-          negative_marks: 1.0,
-          correct_answer: 'D',
+          id: 'Q-DBMS-004',
+          subject: 'Data Structure',
+          topic: 'Relational Algebra',
+          difficulty: 'EASY',
+          marks: 1,
+          negative_marks: 0,
+          correct_answer: 'B',
           question_type: 'MCQ',
-          content_text: "In Young's Double Slit Experiment, if a thin transparent mica sheet of thickness t and refractive index μ is placed in front of one slit, what is the optical path shift of the central fringe?",
-          options: ['A) t / μ', 'B) μ·t', 'C) (μ + 1)t', 'D) (μ - 1)t'],
+          content_text: 'Which relational algebra operation selects rows from a relation that satisfy a specified predicate or condition?',
+          options: ['A) Projection (π)', 'B) Selection (σ)', 'C) Cartesian Product (×)', 'D) Natural Join (⨝)'],
+          status: 'ELIGIBLE_FOR_PAPER',
+        },
+        {
+          id: 'Q-DBMS-005',
+          subject: 'Data Structure',
+          topic: 'Query Optimization',
+          difficulty: 'HARD',
+          marks: 1,
+          negative_marks: 0,
+          correct_answer: 'B',
+          question_type: 'MCQ',
+          content_text: 'Which locking protocol prevents cascading aborts in concurrent transaction execution?',
+          options: ['A) Basic Two-Phase Locking (2PL)', 'B) Strict Two-Phase Locking (Strict 2PL)', 'C) Conservative Two-Phase Locking', 'D) Graph-based Tree Locking Protocol'],
+          status: 'ELIGIBLE_FOR_PAPER',
+        },
+        {
+          id: 'Q-DBMS-006',
+          subject: 'Data Structure',
+          topic: 'SQL & Query Processing',
+          difficulty: 'MEDIUM',
+          marks: 5,
+          negative_marks: 0,
+          correct_answer: 'Clustered indexes define physical data order while non-clustered store separate pointers.',
+          question_type: 'THEORY',
+          content_text: 'Explain the difference between clustered and non-clustered indexes in SQL databases. Discuss why a table can have only one clustered index while having multiple non-clustered indexes.',
+          options: null,
+          status: 'ELIGIBLE_FOR_PAPER',
+        },
+        {
+          id: 'Q-DBMS-007',
+          subject: 'Data Structure',
+          topic: 'Relational Normalization',
+          difficulty: 'HARD',
+          marks: 5,
+          negative_marks: 0,
+          correct_answer: 'Candidate keys: (A), (E), (BC), (CD). Verification against 3NF and BCNF.',
+          question_type: 'THEORY',
+          content_text: 'Given a relational schema R(A, B, C, D, E) with functional dependencies F = {A -> BC, CD -> E, B -> D, E -> A}. Find all candidate keys of R and determine the highest normal form satisfied by R.',
+          options: null,
+          status: 'ELIGIBLE_FOR_PAPER',
+        },
+        {
+          id: 'Q-DBMS-008',
+          subject: 'Data Structure',
+          topic: 'Crash Recovery & WAL',
+          difficulty: 'HARD',
+          marks: 10,
+          negative_marks: 0,
+          correct_answer: 'Analysis phase, Redo phase repeating history, and Undo phase rolling back active transactions.',
+          question_type: 'THEORY',
+          content_text: 'Describe the ARIES recovery algorithm in database management systems. Detail the three phases: Analysis, Redo, and Undo, along with the significance of Write-Ahead Logging (WAL) and checkpoints.',
+          options: null,
           status: 'ELIGIBLE_FOR_PAPER',
         },
 
-        // Chemistry (for NEET, JEE, and Multi-Subject MCQ Pools)
+        // --- DATA STRUCTURES & ALGORITHMS ---
         {
-          id: 'Q-CHEM-001',
-          subject: 'Chemistry',
-          topic: 'Organic Chemistry & Reaction Mechanisms',
-          difficulty: 'MEDIUM',
-          marks: 4,
-          negative_marks: 1.0,
-          correct_answer: 'A',
-          question_type: 'MCQ',
-          content_text: 'Which reaction pathway exhibits complete Walden Inversion (stereochemical inversion) at the chiral carbon centre in a single concerted step?',
-          options: ['A) SN2 Bimolecular Nucleophilic Substitution', 'B) SN1 Carbocation Pathway', 'C) E1 Elimination', 'D) Free Radical Halogenation'],
-          status: 'ELIGIBLE_FOR_PAPER',
-        },
-        {
-          id: 'Q-CHEM-002',
-          subject: 'Chemistry',
-          topic: 'Electrochemistry & Nernst Equation',
-          difficulty: 'HARD',
-          marks: 4,
-          negative_marks: 1.0,
-          correct_answer: 'C',
-          question_type: 'MCQ',
-          content_text: 'For the standard Daniell cell Zn(s) | Zn2+(aq, 0.1M) || Cu2+(aq, 0.01M) | Cu(s), if E°cell = 1.10 V at 298 K, what is the cell EMF Ecell?',
-          options: ['A) 1.10 V', 'B) 1.13 V', 'C) 1.07 V', 'D) 0.98 V'],
-          status: 'ELIGIBLE_FOR_PAPER',
-        },
-        {
-          id: 'Q-CHEM-003',
-          subject: 'Chemistry',
-          topic: 'Coordination Compounds & Crystal Field Theory',
-          difficulty: 'MEDIUM',
-          marks: 4,
-          negative_marks: 1.0,
+          id: 'Q-DSA-001',
+          subject: 'Data Structure',
+          topic: 'Trees & Balanced Search Trees',
+          difficulty: 'EASY',
+          marks: 1,
+          negative_marks: 0,
           correct_answer: 'B',
           question_type: 'MCQ',
-          content_text: 'In an octahedral complex [Fe(CN)6]3- with a strong field cyanide ligand, what is the electronic configuration of the d5 iron(III) ion in crystal field splitting?',
-          options: ['A) t2g3 eg2 (High spin)', 'B) t2g5 eg0 (Low spin, 1 unpaired electron)', 'C) t2g4 eg1', 'D) t2g6 eg0'],
+          content_text: 'What is the worst-case time complexity of searching an element in an AVL Tree with n nodes?',
+          options: ['A) O(1)', 'B) O(log n)', 'C) O(n)', 'D) O(n log n)'],
           status: 'ELIGIBLE_FOR_PAPER',
         },
         {
-          id: 'Q-CHEM-004',
-          subject: 'Chemistry',
-          topic: 'Chemical Kinetics & Arrhenius Equation',
-          difficulty: 'EASY',
-          marks: 4,
-          negative_marks: 1.0,
-          correct_answer: 'D',
+          id: 'Q-DSA-002',
+          subject: 'Data Structure',
+          topic: 'Graph Algorithms',
+          difficulty: 'MEDIUM',
+          marks: 1,
+          negative_marks: 0,
+          correct_answer: 'B',
           question_type: 'MCQ',
-          content_text: 'According to the Arrhenius equation k = A · e^(-Ea/RT), a plot of ln(k) versus 1/T yields a straight line with a slope equal to:',
-          options: ['A) Ea / R', 'B) -Ea', 'C) ln(A)', 'D) -Ea / R'],
+          content_text: 'Which algorithm finds the single-source shortest paths in a directed graph containing edges with negative weights (assuming no negative weight cycles)?',
+          options: ["A) Dijkstra's Algorithm", 'B) Bellman-Ford Algorithm', "C) Prim's Algorithm", "D) Kruskal's Algorithm"],
+          status: 'ELIGIBLE_FOR_PAPER',
+        },
+        {
+          id: 'Q-DSA-003',
+          subject: 'Data Structure',
+          topic: 'Dynamic Programming',
+          difficulty: 'MEDIUM',
+          marks: 1,
+          negative_marks: 0,
+          correct_answer: 'A',
+          question_type: 'MCQ',
+          content_text: 'What is the minimum number of scalar multiplications required to multiply a chain of matrices with dimensions: A1 (10x30), A2 (30x5), A3 (5x60)?',
+          options: ['A) 4,500', 'B) 2,700', 'C) 18,000', 'D) 3,000'],
+          status: 'ELIGIBLE_FOR_PAPER',
+        },
+        {
+          id: 'Q-DSA-004',
+          subject: 'Data Structure',
+          topic: 'Sorting & Divide and Conquer',
+          difficulty: 'EASY',
+          marks: 1,
+          negative_marks: 0,
+          correct_answer: 'C',
+          question_type: 'MCQ',
+          content_text: 'Which of the following sorting algorithms is inherently stable and operates with O(n log n) worst-case time complexity?',
+          options: ['A) Quick Sort', 'B) Heap Sort', 'C) Merge Sort', 'D) Selection Sort'],
+          status: 'ELIGIBLE_FOR_PAPER',
+        },
+        {
+          id: 'Q-DSA-005',
+          subject: 'Data Structure',
+          topic: 'Hashing & Hash Tables',
+          difficulty: 'MEDIUM',
+          marks: 1,
+          negative_marks: 0,
+          correct_answer: 'B',
+          question_type: 'MCQ',
+          content_text: 'In open addressing with linear probing, what phenomenon occurs when filled hash slots form continuous clusters, degrading search performance?',
+          options: ['A) Secondary Clustering', 'B) Primary Clustering', 'C) Hash Overflow', 'D) Perfect Hashing'],
+          status: 'ELIGIBLE_FOR_PAPER',
+        },
+        {
+          id: 'Q-DSA-006',
+          subject: 'Data Structure',
+          topic: 'Dynamic Programming & Knapsack',
+          difficulty: 'MEDIUM',
+          marks: 5,
+          negative_marks: 0,
+          correct_answer: 'DP recurrence relation: DP[i][w] = max(DP[i-1][w], DP[i-1][w-w_i] + v_i)',
+          question_type: 'THEORY',
+          content_text: 'Formulate the dynamic programming recurrence relation for the 0/1 Knapsack Problem with capacity W and items of weights w_i and values v_i. Analyze its time and space complexity.',
+          options: null,
+          status: 'ELIGIBLE_FOR_PAPER',
+        },
+        {
+          id: 'Q-DSA-007',
+          subject: 'Data Structure',
+          topic: 'Binary Search Trees & Heap Structures',
+          difficulty: 'MEDIUM',
+          marks: 5,
+          negative_marks: 0,
+          correct_answer: 'Min-heap property and bottom-up heapification algorithm steps.',
+          question_type: 'THEORY',
+          content_text: 'Explain the min-heap property. Illustrate step-by-step the procedure to build a binary min-heap from the unsorted array [12, 11, 13, 5, 6, 7] using bottom-up heapification.',
+          options: null,
+          status: 'ELIGIBLE_FOR_PAPER',
+        },
+        {
+          id: 'Q-DSA-008',
+          subject: 'Data Structure',
+          topic: 'Graph Algorithms & Shortest Path',
+          difficulty: 'HARD',
+          marks: 10,
+          negative_marks: 0,
+          correct_answer: 'Induction proof on shortest path relaxation and Fibonacci heap O(E + V log V) complexity.',
+          question_type: 'THEORY',
+          content_text: "Explain Dijkstra's shortest path algorithm using a min-priority queue (Fibonacci Heap). Provide a formal proof of correctness by induction and analyze its time complexity as O(E + V log V).",
+          options: null,
           status: 'ELIGIBLE_FOR_PAPER',
         },
 
-        // Biology / Botany & Zoology (for NEET Question Pool)
+        // --- OPERATING SYSTEMS ---
         {
-          id: 'Q-BIO-001',
-          subject: 'Biology',
-          topic: 'Genetics & Molecular Basis of Inheritance',
-          difficulty: 'MEDIUM',
-          marks: 4,
-          negative_marks: 1.0,
+          id: 'Q-OS-001',
+          subject: 'Data Structure',
+          topic: 'Operating Systems & CPU Scheduling',
+          difficulty: 'EASY',
+          marks: 1,
+          negative_marks: 0,
           correct_answer: 'B',
           question_type: 'MCQ',
-          content_text: 'During DNA replication in eukaryotes, which enzyme is responsible for removing RNA primers and replacing them with deoxyribonucleotides?',
-          options: ['A) DNA Helicase', 'B) DNA Polymerase I / FEN1 Flap Endonuclease', 'C) RNA Primase', 'D) DNA Topoisomerase II'],
+          content_text: 'Which CPU scheduling algorithm gives the minimum average waiting time for a given set of processes?',
+          options: ['A) First-Come First-Served (FCFS)', 'B) Shortest Job First (SJF / Preemptive SRTF)', 'C) Round Robin (RR)', 'D) Priority Scheduling'],
           status: 'ELIGIBLE_FOR_PAPER',
         },
         {
-          id: 'Q-BIO-002',
-          subject: 'Biology',
-          topic: 'Plant Physiology & Photosynthesis',
+          id: 'Q-OS-002',
+          subject: 'Data Structure',
+          topic: 'Virtual Memory & Paging',
           difficulty: 'MEDIUM',
-          marks: 4,
-          negative_marks: 1.0,
+          marks: 1,
+          negative_marks: 0,
           correct_answer: 'C',
           question_type: 'MCQ',
-          content_text: 'In C4 plants such as maize and sugarcane, the primary carbon dioxide acceptor phosphoenolpyruvate (PEP) is present in which specialized cellular compartment?',
-          options: ['A) Bundle sheath cells', 'B) Sieve tube elements', 'C) Mesophyll cells', 'D) Epidermal guard cells'],
+          content_text: "Belady's Anomaly—where allocating more page frames results in more page faults—can occur in which page replacement algorithm?",
+          options: ['A) Optimal Page Replacement (OPT)', 'B) Least Recently Used (LRU)', 'C) First-In First-Out (FIFO)', 'D) Least Frequently Used (LFU)'],
           status: 'ELIGIBLE_FOR_PAPER',
         },
         {
-          id: 'Q-BIO-003',
-          subject: 'Biology',
-          topic: 'Cell Biology & Oxidative Phosphorylation',
-          difficulty: 'EASY',
-          marks: 4,
-          negative_marks: 1.0,
+          id: 'Q-OS-003',
+          subject: 'Data Structure',
+          topic: 'Deadlocks & Resource Allocation',
+          difficulty: 'MEDIUM',
+          marks: 1,
+          negative_marks: 0,
           correct_answer: 'A',
           question_type: 'MCQ',
-          content_text: 'In the mitochondrial electron transport chain, which protein complex transfers electrons directly to molecular oxygen to form water?',
-          options: ['A) Complex IV (Cytochrome c Oxidase)', 'B) Complex I (NADH Dehydrogenase)', 'C) Complex II (Succinate Dehydrogenase)', 'D) Complex III (Cytochrome bc1)'],
+          content_text: "Which algorithm is utilized by operating systems to safely avoid deadlocks when processes declare their maximum resource claims in advance?",
+          options: ["A) Banker's Algorithm", "B) Peterson's Algorithm", "C) Lamport's Bakery Algorithm", "D) Dekker's Algorithm"],
           status: 'ELIGIBLE_FOR_PAPER',
         },
         {
-          id: 'Q-ZOO-001',
-          subject: 'Zoology',
-          topic: 'Human Physiology & Cardiovascular System',
+          id: 'Q-OS-004',
+          subject: 'Data Structure',
+          topic: 'Process Synchronization',
           difficulty: 'MEDIUM',
-          marks: 4,
-          negative_marks: 1.0,
-          correct_answer: 'D',
-          question_type: 'MCQ',
-          content_text: 'According to the Frank-Starling law of the heart, what is the primary determinant of myocardial contractile force and stroke volume?',
-          options: ['A) Parasympathetic vagal tone', 'B) Arterial baroreceptor threshold', 'C) Coronary sinus flow velocity', 'D) End-diastolic ventricular stretch (Preload)'],
+          marks: 5,
+          negative_marks: 0,
+          correct_answer: 'Coffman conditions: Mutual Exclusion, Hold & Wait, No Preemption, Circular Wait.',
+          question_type: 'THEORY',
+          content_text: 'State the four Coffman conditions necessary for a deadlock to occur in an operating system. Explain how preventing the Circular Wait condition avoids system deadlock.',
+          options: null,
           status: 'ELIGIBLE_FOR_PAPER',
         },
         {
-          id: 'Q-ZOO-002',
-          subject: 'Zoology',
-          topic: 'Immunology & Antigen Presentation',
+          id: 'Q-OS-005',
+          subject: 'Data Structure',
+          topic: 'Virtual Memory & TLB',
           difficulty: 'HARD',
-          marks: 4,
-          negative_marks: 1.0,
-          correct_answer: 'A',
-          question_type: 'MCQ',
-          content_text: 'Which Major Histocompatibility Complex (MHC) molecule presents endogenous viral peptides to CD8+ Cytotoxic T Lymphocytes?',
-          options: ['A) MHC Class I', 'B) MHC Class II', 'C) MHC Class III', 'D) Toll-like Receptor 4'],
-          status: 'ELIGIBLE_FOR_PAPER',
-        },
-        {
-          id: 'Q-ZOO-003',
-          subject: 'Zoology',
-          topic: 'Endocrine Regulation & RAAS',
-          difficulty: 'MEDIUM',
-          marks: 4,
-          negative_marks: 1.0,
-          correct_answer: 'B',
-          question_type: 'MCQ',
-          content_text: 'In the Renin-Angiotensin-Aldosterone System (RAAS), which enzyme converts Angiotensin I into active Angiotensin II in the pulmonary capillary endothelium?',
-          options: ['A) Renin', 'B) Angiotensin Converting Enzyme (ACE)', 'C) Aldosterone Synthase', 'D) Erythropoietin'],
+          marks: 10,
+          negative_marks: 0,
+          correct_answer: 'EMAT = 0.95 * (20 + 100) + 0.05 * (20 + 200 + 100) = 130 ns.',
+          question_type: 'THEORY',
+          content_text: 'Explain the two-level hierarchical paging scheme with Translation Lookaside Buffer (TLB). Calculate the Effective Memory Access Time (EMAT) if TLB hit ratio is 95%, TLB lookup time is 20 ns, and main memory access time is 100 ns.',
+          options: null,
           status: 'ELIGIBLE_FOR_PAPER',
         },
 
-        // Mathematics (for JEE & Engineering Entrance MCQ Pools)
+        // Mathematics (for Engineering Entrance & University Math Pools)
         {
           id: 'Q-MATH-001',
           subject: 'Mathematics',
