@@ -285,6 +285,8 @@ export const ExamManagerWorkspace: React.FC<ExamManagerWorkspaceProps> = ({
     onRefresh();
   };
 
+  const [deletingExamId, setDeletingExamId] = useState<string | null>(null);
+
   // Workflow Sub-Navigation
   const [questionWorkflowTab, setQuestionWorkflowTab] = useState<'extraction' | 'manual' | 'matrix'>('extraction');
   const [matrixFilter, setMatrixFilter] = useState<'ALL' | 'SME_REVIEW' | 'TRANSLATION' | 'COMPLETED'>('ALL');
@@ -829,16 +831,20 @@ export const ExamManagerWorkspace: React.FC<ExamManagerWorkspaceProps> = ({
   };
 
   const handleDeleteExam = async (examId: string, examName: string) => {
-    if (!window.confirm(`Are you sure you want to permanently delete "${examName}" and all its encrypted paper versions?`)) return;
+    if (!window.confirm(`Are you sure you want to permanently delete "${examName}" (ID: ${examId}) and all its encrypted paper versions from the database?`)) return;
+    setDeletingExamId(examId);
     try {
-      await api.deleteExamination(examId);
-      setStatusMessage({ type: 'success', text: `Examination "${examName}" deleted successfully.` });
+      const res = await api.deleteExamination(examId);
+      setStatusMessage({ type: 'success', text: res.message || `Examination "${examName}" deleted successfully from backend and database.` });
       await loadData();
+      onRefresh();
       if (selectedGenExamId === examId) {
         setSelectedGenExamId('');
       }
     } catch (err: any) {
       setStatusMessage({ type: 'error', text: err.message || 'Failed to delete examination.' });
+    } finally {
+      setDeletingExamId(null);
     }
   };
 
@@ -1312,7 +1318,7 @@ export const ExamManagerWorkspace: React.FC<ExamManagerWorkspaceProps> = ({
                         </span>
                       </div>
 
-                      <div className="flex items-center gap-3">
+                      <div className="flex flex-wrap items-center gap-2.5">
                         <span
                           className={`px-3 py-1 rounded-full text-[11px] font-black tracking-wider uppercase border flex items-center gap-1.5 ${
                             ex.status === 'GENERATED' || ex.status === 'READY'
@@ -1343,6 +1349,17 @@ export const ExamManagerWorkspace: React.FC<ExamManagerWorkspaceProps> = ({
                             <ArrowRight className="w-3.5 h-3.5" />
                           </button>
                         )}
+
+                        <button
+                          type="button"
+                          disabled={deletingExamId === ex.id}
+                          onClick={() => handleDeleteExam(ex.id, ex.name)}
+                          className="px-3.5 py-2 rounded-xl bg-red-50 hover:bg-red-100 text-red-700 hover:text-red-800 border border-red-200 hover:border-red-300 font-bold text-xs flex items-center gap-1.5 transition-all cursor-pointer shadow-xs hover:shadow-sm disabled:opacity-50"
+                          title="Permanently remove examination from database"
+                        >
+                          <Trash2 className="w-3.5 h-3.5 text-red-600 shrink-0" />
+                          <span>{deletingExamId === ex.id ? 'Removing...' : 'Remove'}</span>
+                        </button>
                       </div>
                     </div>
 

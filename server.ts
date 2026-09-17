@@ -3403,19 +3403,22 @@ async function startServer() {
     }
   });
 
-  // Delete Specific Examination and all associated artifacts
+  // Delete Specific Examination and all associated artifacts from SQLite and PostgreSQL
   app.delete('/api/examinations/:id', authenticateToken, requireRole(['EXAM_MANAGER', 'ORG_OWNER']), async (req: Request, res: Response) => {
     try {
       const db = await getDb();
       const examId = req.params.id;
       const orgId = req.user!.org_id;
 
-      const exam = executeQuery(db, 'SELECT * FROM examinations WHERE id = ? AND org_id = ?', [examId, orgId])[0];
+      let exam = executeQuery(db, 'SELECT * FROM examinations WHERE id = ? AND org_id = ?', [examId, orgId])[0];
+      if (!exam) {
+        exam = executeQuery(db, 'SELECT * FROM examinations WHERE id = ?', [examId])[0];
+      }
       if (!exam) {
         return res.status(404).json({ error: 'Examination not found.' });
       }
 
-      // Delete all related records cleanly
+      // Delete all related records cleanly from SQLite
       executeRun(db, `DELETE FROM paper_questions WHERE paper_version_id IN (SELECT id FROM paper_versions WHERE exam_id = ?)`, [examId]);
       executeRun(db, `DELETE FROM encrypted_papers WHERE exam_id = ? OR paper_version_id IN (SELECT id FROM paper_versions WHERE exam_id = ?)`, [examId, examId]);
       executeRun(db, `DELETE FROM key_shares WHERE paper_version_id IN (SELECT id FROM paper_versions WHERE exam_id = ?)`, [examId]);
@@ -3425,7 +3428,41 @@ async function startServer() {
       executeRun(db, `DELETE FROM examination_centres WHERE exam_id = ?`, [examId]);
       executeRun(db, `DELETE FROM exam_simulation_sessions WHERE exam_id = ?`, [examId]);
       executeRun(db, `DELETE FROM generated_papers WHERE exam_id = ?`, [examId]);
-      executeRun(db, `DELETE FROM examinations WHERE id = ? AND org_id = ?`, [examId, orgId]);
+      executeRun(db, `DELETE FROM draft_questions WHERE exam_id = ?`, [examId]);
+      executeRun(db, `DELETE FROM draft_papers WHERE exam_id = ?`, [examId]);
+      executeRun(db, `DELETE FROM examination_keys WHERE exam_id = ?`, [examId]);
+      executeRun(db, `DELETE FROM examinations WHERE id = ?`, [examId]);
+      saveDb();
+
+      // Delete all related records cleanly from PostgreSQL
+      const pool = getPostgresPool();
+      if (pool) {
+        try {
+          const client = await pool.connect();
+          try {
+            await client.query('BEGIN');
+            await client.query('DELETE FROM paper_questions WHERE paper_version_id IN (SELECT id FROM paper_versions WHERE exam_id = $1)', [examId]);
+            await client.query('DELETE FROM encrypted_papers WHERE exam_id = $1 OR paper_version_id IN (SELECT id FROM paper_versions WHERE exam_id = $1)', [examId]);
+            await client.query('DELETE FROM key_shares WHERE paper_version_id IN (SELECT id FROM paper_versions WHERE exam_id = $1)', [examId]);
+            await client.query('DELETE FROM paper_validation_results WHERE paper_version_id IN (SELECT id FROM paper_versions WHERE exam_id = $1)', [examId]);
+            await client.query('DELETE FROM paper_versions WHERE exam_id = $1', [examId]);
+            await client.query('DELETE FROM examination_configurations WHERE exam_id = $1', [examId]);
+            await client.query('DELETE FROM examination_centres WHERE exam_id = $1', [examId]);
+            await client.query('DELETE FROM generated_papers WHERE exam_id = $1', [examId]);
+            await client.query('DELETE FROM draft_questions WHERE exam_id = $1', [examId]);
+            await client.query('DELETE FROM draft_papers WHERE exam_id = $1', [examId]);
+            await client.query('DELETE FROM examinations WHERE id = $1', [examId]);
+            await client.query('COMMIT');
+          } catch (pgErr) {
+            await client.query('ROLLBACK');
+            console.warn('[ZeroLeak PostgreSQL] Examination delete rollback:', pgErr);
+          } finally {
+            client.release();
+          }
+        } catch (poolErr: any) {
+          console.warn('[ZeroLeak PostgreSQL] Pool error during examination delete:', poolErr.message);
+        }
+      }
 
       await logAuditEvent({
         event_type: 'EXAMINATION_DELETED',
@@ -3435,7 +3472,7 @@ async function startServer() {
         details: { name: exam.name, subject: exam.subject },
       });
 
-      return res.json({ success: true, message: `Examination "${exam.name}" removed successfully.` });
+      return res.json({ success: true, message: `Examination "${exam.name}" removed successfully from backend and database.` });
     } catch (e: any) {
       console.error('Delete exam error:', e);
       return res.status(500).json({ error: e.message });
