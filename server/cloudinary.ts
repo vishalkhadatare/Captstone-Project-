@@ -34,7 +34,10 @@ export async function uploadDocumentToCloudinary(
   if (fileBuffer.length === 0 || fileBuffer.length > 50 * 1024 * 1024) return null;
 
   const sanitized = originalFilename.replace(/[^a-zA-Z0-9._-]/g, '_');
-  const publicId = `${crypto.randomUUID().substring(0, 8)}-${sanitized.replace(/\.[^.]+$/, '')}`;
+  const baseName = sanitized.replace(/\.[^.]+$/, '');
+  const ext = (sanitized.includes('.') ? sanitized.split('.').pop() : 'pdf') || 'pdf';
+  // Ensure public_id retains .pdf extension so Cloudinary issues a direct .pdf URL
+  const publicId = `${crypto.randomUUID().substring(0, 8)}-${baseName}.${ext}`;
 
   // 1. Try Cloudinary upload
   try {
@@ -51,8 +54,12 @@ export async function uploadDocumentToCloudinary(
       }) as Partial<CloudinaryUploadResult>;
 
       if (payload?.secure_url && payload?.public_id) {
+        let secureUrl = payload.secure_url;
+        if (!secureUrl.toLowerCase().endsWith(`.${ext}`)) {
+          secureUrl = `${secureUrl}.${ext}`;
+        }
         return {
-          secure_url: payload.secure_url,
+          secure_url: secureUrl,
           public_id: payload.public_id,
           bytes: payload.bytes || fileBuffer.length,
           resource_type: payload.resource_type || 'raw',
@@ -70,7 +77,9 @@ export async function uploadDocumentToCloudinary(
     if (!fs.existsSync(localDir)) {
       fs.mkdirSync(localDir, { recursive: true });
     }
-    const localFileName = `${publicId}_${sanitized}`;
+    const localFileName = publicId.endsWith(`.${ext}`) ? publicId : `${publicId}.${ext}`;
+    const localFilePath = path.join(localDir, localFileName);
+    fs.writeFileSync(localFilePath, fileBuffer);
     return {
       secure_url: `/uploads/papers/${localFileName}`,
       public_id: publicId,

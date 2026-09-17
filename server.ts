@@ -10016,6 +10016,28 @@ async function startServer() {
     },
   }));
 
+  const compiledPapersDir = path.join(process.cwd(), 'public', 'compiled_papers');
+  if (!fs.existsSync(compiledPapersDir)) fs.mkdirSync(compiledPapersDir, { recursive: true });
+  app.use('/compiled_papers', express.static(compiledPapersDir, {
+    setHeaders: (res, filePath) => {
+      if (filePath.endsWith('.pdf')) {
+        res.setHeader('Content-Type', 'application/pdf');
+        res.setHeader('Content-Disposition', 'inline');
+      }
+    },
+  }));
+
+  const uploadsDir = path.join(process.cwd(), 'public', 'uploads');
+  if (!fs.existsSync(uploadsDir)) fs.mkdirSync(uploadsDir, { recursive: true });
+  app.use('/uploads', express.static(uploadsDir, {
+    setHeaders: (res, filePath) => {
+      if (filePath.endsWith('.pdf')) {
+        res.setHeader('Content-Type', 'application/pdf');
+        res.setHeader('Content-Disposition', 'inline');
+      }
+    },
+  }));
+
   // ==========================================
   // UNIVERSITY EXAM RAG PIPELINE & INGESTION ROUTES
   // ==========================================
