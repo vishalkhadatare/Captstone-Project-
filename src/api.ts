@@ -501,6 +501,10 @@ export const api = {
       method: 'POST',
       body: JSON.stringify({ ids: paperIds }),
     }),
+  purgeAllQuestionPapers: () =>
+    request<{ success: boolean; message: string }>('/api/question-papers/purge-all', {
+      method: 'POST',
+    }),
   extractThreeStandardPapers: () =>
     request<{ message: string; extractedQuestions: any[]; papers: any[]; totalExtracted: number }>('/api/question-papers/extract-three-standard-papers', { method: 'POST' }),
   getExtractionProgress: (jobId: string) =>

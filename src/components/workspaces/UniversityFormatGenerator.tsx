@@ -469,6 +469,28 @@ export const UniversityFormatGenerator: React.FC<UniversityFormatGeneratorProps>
     }
   };
 
+  const handlePurgeAllDrafts = async () => {
+    if (!confirm('WARNING: Are you sure you want to permanently purge ALL draft question papers from the vault and Cloudinary? This cannot be undone.')) {
+      return;
+    }
+    setActionMessage(null);
+    try {
+      const res = await api.purgeAllQuestionPapers();
+      if (res.success) {
+        setUploadedPapers([]);
+        setSelectedPaperIds([]);
+        setActionMessage({
+          type: 'success',
+          text: 'All draft question papers permanently purged from vault and Cloudinary.',
+        });
+      } else {
+        setActionMessage({ type: 'error', text: 'Failed to purge documents.' });
+      }
+    } catch (err: any) {
+      setActionMessage({ type: 'error', text: err.message || 'Error purging documents.' });
+    }
+  };
+
   const toggleSelectPaper = (paperId: string) => {
     setSelectedPaperIds(prev =>
       prev.includes(paperId) ? prev.filter(id => id !== paperId) : [...prev, paperId]
@@ -1025,6 +1047,15 @@ export const UniversityFormatGenerator: React.FC<UniversityFormatGeneratorProps>
                     <span>Delete Selected ({selectedPaperIds.length})</span>
                   </button>
                 )}
+                <button
+                  type="button"
+                  onClick={handlePurgeAllDrafts}
+                  title="Purge all draft papers from database & Cloudinary"
+                  className="px-2.5 py-1.5 rounded-xl bg-slate-800 hover:bg-rose-950/60 text-slate-400 hover:text-rose-300 text-xs font-bold border border-slate-700 hover:border-rose-500/40 flex items-center gap-1.5 cursor-pointer transition-all"
+                >
+                  <Trash2 className="w-3.5 h-3.5 text-rose-500" />
+                  <span>Purge Vault</span>
+                </button>
               </>
             )}
 
