@@ -575,6 +575,42 @@ function initializeSchema(db: Database) {
       uploaded_at TEXT NOT NULL
     );
 
+    -- Draft Papers (Ingested University Question Paper PDFs)
+    CREATE TABLE IF NOT EXISTS draft_papers (
+      id TEXT PRIMARY KEY,
+      exam_id TEXT NOT NULL,
+      paper_index INTEGER NOT NULL,
+      file_name TEXT NOT NULL,
+      file_size INTEGER NOT NULL,
+      mime_type TEXT NOT NULL,
+      storage_path TEXT,
+      extracted_text TEXT,
+      extraction_method TEXT NOT NULL DEFAULT 'PDF_PARSE',
+      question_count INTEGER DEFAULT 0,
+      mcq_count INTEGER DEFAULT 0,
+      theory_count INTEGER DEFAULT 0,
+      uploaded_at TEXT NOT NULL
+    );
+
+    -- Draft Questions (Parsed Structured Questions from Draft Papers)
+    CREATE TABLE IF NOT EXISTS draft_questions (
+      id TEXT PRIMARY KEY,
+      draft_paper_id TEXT NOT NULL,
+      exam_id TEXT NOT NULL,
+      paper_index INTEGER NOT NULL,
+      source_paper TEXT NOT NULL,
+      section TEXT NOT NULL,
+      question_number TEXT NOT NULL,
+      question_text TEXT NOT NULL,
+      question_type TEXT NOT NULL,
+      options_json TEXT,
+      correct_answer TEXT,
+      marks INTEGER NOT NULL DEFAULT 1,
+      sub_question_pattern TEXT,
+      diagram_url TEXT,
+      created_at TEXT NOT NULL
+    );
+
     -- Question Paper High-Res Pages (Preserved at 300 DPI)
     CREATE TABLE IF NOT EXISTS question_paper_pages (
       id TEXT PRIMARY KEY,

@@ -94,6 +94,7 @@ import {
   PaperBlueprintConfig,
   QuestionItem,
 } from './server/multiPaperGenerator.ts';
+import { uploadDraftPapersMulter, handleUploadUniversityDrafts } from './server/universityIngestion.ts';
 
 const configuredJwtSecret = process.env.JWT_SECRET;
 if (process.env.NODE_ENV === 'production' && (!configuredJwtSecret || configuredJwtSecret.length < 32)) {
@@ -839,6 +840,48 @@ async function startServer() {
         message: 'Internal server error during website verification.',
         error_code: 'VERIFICATION_ERROR',
       });
+    }
+  });
+
+  // Requirement 1, 2, 3, 4, 10: University Exam Draft Papers Ingestion Route (3 PDFs Upload, pdf-parse & Tesseract OCR fallback)
+  app.post(
+    '/api/university/upload-drafts',
+    uploadDraftPapersMulter.array('draft_papers', 3),
+    handleUploadUniversityDrafts
+  );
+
+  app.get('/api/university/draft-questions', async (req: Request, res: Response) => {
+    try {
+      const exam_id = ((req.query.exam_id as string) || 'EXAM-UNIV-MASTER-2026').trim();
+      const db = await getDb();
+      const draftPapers = executeQuery(db, 'SELECT * FROM draft_papers WHERE exam_id = ? ORDER BY paper_index ASC', [exam_id]);
+      const questions = executeQuery(db, 'SELECT * FROM draft_questions WHERE exam_id = ? ORDER BY paper_index ASC, section ASC', [exam_id]);
+      
+      const paper1Count = questions.filter((q: any) => q.paper_index === 1).length;
+      const paper2Count = questions.filter((q: any) => q.paper_index === 2).length;
+      const paper3Count = questions.filter((q: any) => q.paper_index === 3).length;
+      const totalQuestions = questions.length;
+      const mcqCount = questions.filter((q: any) => q.question_type === 'MCQ').length;
+      const theoryCount = questions.filter((q: any) => q.question_type === 'THEORY').length;
+
+      return res.json({
+        success: true,
+        draftPapers,
+        paperCounts: {
+          paper1Count,
+          paper2Count,
+          paper3Count,
+          totalQuestions,
+          mcqCount,
+          theoryCount,
+        },
+        questions: questions.map((q: any) => ({
+          ...q,
+          options: q.options_json ? JSON.parse(q.options_json) : undefined,
+        })),
+      });
+    } catch (err: any) {
+      return res.status(500).json({ success: false, error: err.message });
     }
   });
 

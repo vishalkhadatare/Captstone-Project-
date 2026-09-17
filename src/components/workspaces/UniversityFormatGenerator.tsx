@@ -19,10 +19,13 @@ import {
   BookOpen,
   Cpu,
   Binary,
-  GraduationCap
+  GraduationCap,
+  Upload,
+  FileUp,
+  Trash2,
 } from 'lucide-react';
 import { api } from '../../api';
-import { User, Examination } from '../../types';
+import { User, Examination, DraftPaper, UniversityDraftQuestion, IngestDraftPapersResponse } from '../../types';
 import { QuestionPaperPdfModal } from './QuestionPaperPdfModal';
 
 interface UniversityFormatGeneratorProps {
@@ -32,7 +35,7 @@ interface UniversityFormatGeneratorProps {
 
 const NINE_STEP_PIPELINE = [
   { step: 1, title: '3 Draft Papers', desc: 'Loaded paper1, paper2, paper3' },
-  { step: 2, title: 'OCR / AI Extraction', desc: 'Puter & NaviDC OCR engines' },
+  { step: 2, title: 'OCR / AI Extraction', desc: 'pdf-parse & Tesseract OCR' },
   { step: 3, title: 'Blueprint Detection', desc: 'Detected SLR-HL-475 CBCS pattern' },
   { step: 4, title: 'Question Bank', desc: 'Aggregated question pool' },
   { step: 5, title: 'AI Permutations', desc: 'Permuted sequence & options (a,b,c,d)' },
@@ -55,6 +58,13 @@ export const UniversityFormatGenerator: React.FC<UniversityFormatGeneratorProps>
   const [showPdfModal, setShowPdfModal] = useState(false);
   const [actionMessage, setActionMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
 
+  // 3 Draft Papers Ingestion State
+  const [selectedFiles, setSelectedFiles] = useState<File[]>([]);
+  const [uploadingDrafts, setUploadingDrafts] = useState<boolean>(false);
+  const [uploadValidationError, setUploadValidationError] = useState<string | null>(null);
+  const [ingestedData, setIngestedData] = useState<IngestDraftPapersResponse | null>(null);
+  const [filterSourcePaper, setFilterSourcePaper] = useState<'ALL' | 'Paper 1' | 'Paper 2' | 'Paper 3'>('ALL');
+
   // Generated Sets State
   const [validationResult, setValidationResult] = useState<{
     isValid: boolean;
@@ -67,6 +77,12 @@ export const UniversityFormatGenerator: React.FC<UniversityFormatGeneratorProps>
   useEffect(() => {
     loadExaminations();
   }, [currentUser]);
+
+  useEffect(() => {
+    if (selectedExamId) {
+      loadIngestedDraftQuestions(selectedExamId);
+    }
+  }, [selectedExamId]);
 
   const loadExaminations = async () => {
     setLoading(true);
@@ -82,6 +98,88 @@ export const UniversityFormatGenerator: React.FC<UniversityFormatGeneratorProps>
       console.error(e);
     } finally {
       setLoading(false);
+    }
+  };
+
+  const loadIngestedDraftQuestions = async (examId: string) => {
+    try {
+      const res = await api.getUniversityDraftQuestions(examId);
+      if (res && res.success) {
+        setIngestedData(res);
+      }
+    } catch (err) {
+      console.warn('[University UI] Error loading draft questions:', err);
+    }
+  };
+
+  // Requirement 1 & 3: Handle selection and validation of EXACTLY 3 PDF files
+  const handleFileSelectionChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    setUploadValidationError(null);
+    const filesArray: File[] = Array.from(e.target.files || []);
+
+    if (filesArray.length === 0) {
+      setSelectedFiles([]);
+      return;
+    }
+
+    // Validate maximum & exact file count = 3
+    if (filesArray.length !== 3) {
+      setSelectedFiles([]);
+      setUploadValidationError('INVALID_FILE_COUNT: Exactly 3 question-paper PDFs (Paper 1, Paper 2, Paper 3) must be selected.');
+      return;
+    }
+
+    // Validate MIME types and .pdf extension
+    for (let i = 0; i < filesArray.length; i++) {
+      const file = filesArray[i];
+      const isPdfMime = file.type === 'application/pdf' || file.type === 'application/x-pdf' || file.type === '';
+      const isPdfExt = file.name.toLowerCase().endsWith('.pdf');
+      if (!isPdfMime || !isPdfExt) {
+        setSelectedFiles([]);
+        setUploadValidationError(`INVALID_FILE_FORMAT: File "${file.name}" is not a valid PDF document.`);
+        return;
+      }
+      if (file.size > 30 * 1024 * 1024) {
+        setSelectedFiles([]);
+        setUploadValidationError(`FILE_SIZE_EXCEEDED: File "${file.name}" exceeds the 30 MB size limit.`);
+        return;
+      }
+    }
+
+    setSelectedFiles(filesArray);
+  };
+
+  // Requirement 2, 4, 5, 6, 7, 8, 9, 10, 11, 12: Ingest 3 PDFs via Multer, pdf-parse & Tesseract OCR fallback
+  const handleUploadAndIngestDrafts = async () => {
+    if (selectedFiles.length !== 3) {
+      setUploadValidationError('EXACTLY 3 question-paper PDFs (Paper 1, Paper 2, Paper 3) are required for University Exam ingestion.');
+      return;
+    }
+
+    setUploadingDrafts(true);
+    setUploadValidationError(null);
+    setActionMessage(null);
+
+    try {
+      const res = await api.uploadUniversityDraftPapers(selectedFiles, selectedExamId || 'EXAM-UNIV-MASTER-2026');
+      if (res && res.success) {
+        setIngestedData(res);
+        setActionMessage({
+          type: 'success',
+          text: res.message || `Successfully uploaded 3 draft PDFs. Extracted ${res.paperCounts.totalQuestions} questions into SQLite!`,
+        });
+        setSelectedFiles([]);
+        // Refresh paper compilation
+        if (selectedExamId) {
+          triggerUniversityGenerator(selectedExamId);
+        }
+      } else {
+        setUploadValidationError('Failed to ingest draft papers.');
+      }
+    } catch (err: any) {
+      setUploadValidationError(err.message || 'Error occurred while uploading and parsing draft papers.');
+    } finally {
+      setUploadingDrafts(false);
     }
   };
 
@@ -162,6 +260,11 @@ export const UniversityFormatGenerator: React.FC<UniversityFormatGeneratorProps>
 
   const selectedExam = exams.find(e => e.id === selectedExamId);
 
+  const filteredQuestions = (ingestedData?.questions || []).filter(q => {
+    if (filterSourcePaper === 'ALL') return true;
+    return q.source_paper === filterSourcePaper;
+  });
+
   return (
     <div className="space-y-6">
       {/* Module Title Header */}
@@ -210,6 +313,228 @@ export const UniversityFormatGenerator: React.FC<UniversityFormatGeneratorProps>
             <span>{generating ? 'Compiling 3 Drafts...' : 'Regenerate Paper Set'}</span>
           </button>
         </div>
+      </div>
+
+      {/* Requirement 1, 2, 3, 11, 12: EXACTLY 3 Question-Paper PDFs Upload & Ingestion Dropzone */}
+      <div className="bg-slate-900 border border-slate-800 p-6 rounded-2xl shadow-xl space-y-4">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-800 pb-3">
+          <div>
+            <h3 className="text-sm font-extrabold text-white flex items-center gap-2">
+              <Upload className="w-4 h-4 text-rose-400" />
+              <span>University Exam Draft-Paper Ingestion (Exactly 3 PDFs Required)</span>
+            </h3>
+            <p className="text-xs text-slate-400 mt-0.5">
+              Upload exactly 3 draft question papers (Paper 1, Paper 2, Paper 3). Processed via Multer, pdf-parse, and Tesseract OCR fallback.
+            </p>
+          </div>
+
+          <span className="px-3 py-1 rounded-full text-[10px] font-mono font-bold bg-indigo-500/20 text-indigo-300 border border-indigo-500/30 self-start sm:self-auto">
+            Multer + pdf-parse + Tesseract OCR
+          </span>
+        </div>
+
+        {/* Dropzone File Input */}
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+          <div className="md:col-span-2 border-2 border-dashed border-slate-700 hover:border-rose-500/70 rounded-xl p-5 bg-slate-800/40 text-center transition-all flex flex-col items-center justify-center space-y-3">
+            <div className="w-12 h-12 rounded-2xl bg-rose-500/20 text-rose-400 flex items-center justify-center">
+              <FileUp className="w-6 h-6" />
+            </div>
+
+            <div>
+              <label htmlFor="university-pdf-drafts-input" className="cursor-pointer font-bold text-xs text-rose-400 hover:text-rose-300">
+                Select EXACTLY 3 Question-Paper PDFs
+              </label>
+              <input
+                id="university-pdf-drafts-input"
+                type="file"
+                accept="application/pdf,.pdf"
+                multiple
+                onChange={handleFileSelectionChange}
+                className="hidden"
+              />
+              <p className="text-[11px] text-slate-400 mt-1">
+                Required: Select exactly 3 files representing <span className="text-white font-bold">Paper 1, Paper 2, and Paper 3</span> (PDF format, max 30MB each).
+              </p>
+            </div>
+
+            {selectedFiles.length > 0 && (
+              <div className="w-full space-y-1.5 pt-2 border-t border-slate-700/60">
+                <span className="text-[11px] font-bold text-emerald-400 block text-left">
+                  ✓ 3 Files Selected & Validated:
+                </span>
+                <div className="grid grid-cols-3 gap-2">
+                  {selectedFiles.map((file, index) => (
+                    <div key={index} className="p-2 rounded-lg bg-slate-900 border border-slate-700 text-left text-[11px]">
+                      <span className="font-bold text-rose-400 block truncate">Paper {index + 1}</span>
+                      <span className="text-slate-300 truncate block" title={file.name}>{file.name}</span>
+                      <span className="text-slate-500 font-mono text-[10px]">{(file.size / (1024 * 1024)).toFixed(2)} MB</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+
+          {/* Action & Ingestion Control Card */}
+          <div className="bg-slate-800/70 border border-slate-700/80 p-5 rounded-xl flex flex-col justify-between space-y-3">
+            <div>
+              <span className="text-xs font-bold text-white block mb-1">Upload & Parse Requirements</span>
+              <ul className="text-[11px] text-slate-400 space-y-1.5 list-disc pl-4">
+                <li>Validates PDF MIME type & .pdf extension.</li>
+                <li>Exact file count = 3 enforced strictly.</li>
+                <li>Temporary files unlinked after text extraction.</li>
+                <li>Preserves 100% original question wording.</li>
+                <li>Stores parsed questions into SQLite DB.</li>
+              </ul>
+            </div>
+
+            <button
+              type="button"
+              onClick={handleUploadAndIngestDrafts}
+              disabled={selectedFiles.length !== 3 || uploadingDrafts}
+              className={`w-full py-2.5 rounded-xl font-bold text-xs flex items-center justify-center gap-2 cursor-pointer transition-all ${
+                selectedFiles.length === 3 && !uploadingDrafts
+                  ? 'bg-gradient-to-r from-rose-600 to-amber-600 text-white shadow-lg shadow-rose-600/30 hover:from-rose-500 hover:to-amber-500'
+                  : 'bg-slate-700 text-slate-500 cursor-not-allowed'
+              }`}
+            >
+              {uploadingDrafts ? (
+                <>
+                  <RefreshCw className="w-4 h-4 animate-spin text-rose-300" />
+                  <span>Extracting & Parsing (pdf-parse + OCR)...</span>
+                </>
+              ) : (
+                <>
+                  <Upload className="w-4 h-4 text-white" />
+                  <span>Ingest & Extract 3 Draft Papers</span>
+                </>
+              )}
+            </button>
+          </div>
+        </div>
+
+        {uploadValidationError && (
+          <div className="p-3 rounded-xl bg-rose-500/10 border border-rose-500/30 text-rose-400 text-xs font-bold flex items-center gap-2">
+            <AlertTriangle className="w-4 h-4 shrink-0 text-rose-400" />
+            <span>{uploadValidationError}</span>
+          </div>
+        )}
+
+        {/* Requirement 12: Display Separate Counts for Paper 1, Paper 2, and Paper 3 */}
+        {ingestedData?.paperCounts && (
+          <div className="space-y-4 pt-2">
+            <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-3">
+              <div className="p-3.5 rounded-xl bg-slate-800 border border-rose-500/30 space-y-1">
+                <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Paper 1 Questions</span>
+                <div className="flex items-baseline justify-between">
+                  <span className="text-2xl font-black text-rose-400 font-mono">{ingestedData.paperCounts.paper1Count}</span>
+                  <span className="text-[10px] text-slate-400 bg-slate-900 px-2 py-0.5 rounded border border-slate-700 font-mono">Paper 1</span>
+                </div>
+              </div>
+
+              <div className="p-3.5 rounded-xl bg-slate-800 border border-amber-500/30 space-y-1">
+                <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Paper 2 Questions</span>
+                <div className="flex items-baseline justify-between">
+                  <span className="text-2xl font-black text-amber-400 font-mono">{ingestedData.paperCounts.paper2Count}</span>
+                  <span className="text-[10px] text-slate-400 bg-slate-900 px-2 py-0.5 rounded border border-slate-700 font-mono">Paper 2</span>
+                </div>
+              </div>
+
+              <div className="p-3.5 rounded-xl bg-slate-800 border border-teal-500/30 space-y-1">
+                <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Paper 3 Questions</span>
+                <div className="flex items-baseline justify-between">
+                  <span className="text-2xl font-black text-teal-400 font-mono">{ingestedData.paperCounts.paper3Count}</span>
+                  <span className="text-[10px] text-slate-400 bg-slate-900 px-2 py-0.5 rounded border border-slate-700 font-mono">Paper 3</span>
+                </div>
+              </div>
+
+              <div className="p-3.5 rounded-xl bg-slate-800 border border-emerald-500/30 space-y-1">
+                <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Total Ingested Pool</span>
+                <div className="flex items-baseline justify-between">
+                  <span className="text-2xl font-black text-emerald-400 font-mono">{ingestedData.paperCounts.totalQuestions}</span>
+                  <span className="text-[10px] text-emerald-300 bg-emerald-500/10 px-2 py-0.5 rounded border border-emerald-500/20 font-mono">
+                    MCQ: {ingestedData.paperCounts.mcqCount} | Theory: {ingestedData.paperCounts.theoryCount}
+                  </span>
+                </div>
+              </div>
+            </div>
+
+            {/* Extracted Questions Preview Matrix */}
+            <div className="bg-slate-950 p-4 rounded-xl border border-slate-800 space-y-3">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-slate-800 pb-2.5">
+                <span className="text-xs font-bold text-white flex items-center gap-2">
+                  <FileText className="w-4 h-4 text-rose-400" />
+                  <span>Structured Extracted Questions Preview (Stored in SQLite)</span>
+                </span>
+
+                {/* Filter by Source Paper */}
+                <div className="flex items-center gap-1.5">
+                  {(['ALL', 'Paper 1', 'Paper 2', 'Paper 3'] as const).map(p => (
+                    <button
+                      key={p}
+                      type="button"
+                      onClick={() => setFilterSourcePaper(p)}
+                      className={`px-2.5 py-1 rounded-lg font-bold text-[11px] transition-all cursor-pointer ${
+                        filterSourcePaper === p
+                          ? 'bg-rose-600 text-white shadow-xs'
+                          : 'bg-slate-800 text-slate-400 hover:bg-slate-700'
+                      }`}
+                    >
+                      {p}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              <div className="max-h-[350px] overflow-y-auto space-y-2 pr-1">
+                {filteredQuestions.length === 0 ? (
+                  <div className="py-8 text-center text-slate-500 text-xs font-mono">
+                    No draft questions found for selected filter. Upload 3 draft paper PDFs to populate.
+                  </div>
+                ) : (
+                  filteredQuestions.map((q, idx) => (
+                    <div key={q.id || idx} className="p-3 rounded-lg bg-slate-900 border border-slate-800 text-xs space-y-1.5">
+                      <div className="flex items-center justify-between gap-2">
+                        <div className="flex items-center gap-2">
+                          <span className={`px-2 py-0.5 rounded text-[10px] font-bold font-mono ${
+                            q.source_paper === 'Paper 1' ? 'bg-rose-500/20 text-rose-300 border border-rose-500/30' :
+                            q.source_paper === 'Paper 2' ? 'bg-amber-500/20 text-amber-300 border border-amber-500/30' :
+                            'bg-teal-500/20 text-teal-300 border border-teal-500/30'
+                          }`}>
+                            {q.source_paper}
+                          </span>
+                          <span className="font-bold text-white">{q.section}</span>
+                          <span className="text-slate-400 font-mono">Q.No: {q.question_number}</span>
+                        </div>
+
+                        <div className="flex items-center gap-2">
+                          <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${
+                            q.question_type === 'MCQ' ? 'bg-blue-500/20 text-blue-300 border border-blue-500/30' : 'bg-purple-500/20 text-purple-300 border border-purple-500/30'
+                          }`}>
+                            {q.question_type}
+                          </span>
+                          <span className="font-mono text-emerald-400 text-[11px] font-bold">{q.marks} Marks</span>
+                        </div>
+                      </div>
+
+                      <p className="text-slate-200 leading-relaxed font-sans text-xs">{q.question_text}</p>
+
+                      {Array.isArray(q.options) && q.options.length > 0 && (
+                        <div className="grid grid-cols-2 gap-1.5 pt-1 pl-2 border-t border-slate-800/80 text-[11px] text-slate-300 font-mono">
+                          {q.options.map((opt, optIdx) => (
+                            <div key={optIdx} className="truncate" title={opt}>
+                              {opt}
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  ))
+                )}
+              </div>
+            </div>
+          </div>
+        )}
       </div>
 
       {/* Action Notification */}
@@ -261,330 +586,71 @@ export const UniversityFormatGenerator: React.FC<UniversityFormatGeneratorProps>
         </div>
       </div>
 
-      {/* Main Grid: Master Template & Validation Checklist on Left, Live Preview on Right */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        {/* Left Column: Master Template Card & Blueprint Validation Panel */}
-        <div className="space-y-6 lg:col-span-1">
-          {/* Master Template Card */}
-          <div className="bg-slate-900 border border-slate-800 p-5 rounded-2xl shadow-xl space-y-3">
-            <div className="flex items-center gap-2 text-rose-400 font-bold text-xs uppercase tracking-wide">
-              <FileCheck className="w-4 h-4" />
-              <span>Detected Master Template Blueprint</span>
-            </div>
-
-            <div className="bg-slate-800/90 p-4 rounded-xl border border-slate-700 space-y-2 text-xs">
-              <div className="flex items-center justify-between text-white font-black">
-                <span>PAPER CODE</span>
-                <span className="font-mono text-rose-400 bg-rose-500/10 px-2 py-0.5 rounded border border-rose-500/30">
-                  SLR-HL-475
-                </span>
+      {/* Pre-PDF Master Blueprint Validation Checklist Hard Stop Gate */}
+      {validationResult && (
+        <div className={`p-6 rounded-2xl border shadow-xl space-y-4 ${
+          validationResult.isValid
+            ? 'bg-slate-900 border-emerald-500/40 text-emerald-100'
+            : 'bg-slate-900 border-rose-500/40 text-rose-100'
+        }`}>
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-800 pb-4">
+            <div className="flex items-center gap-3">
+              <div className={`p-2.5 rounded-xl ${validationResult.isValid ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30' : 'bg-rose-500/20 text-rose-400 border border-rose-500/30'}`}>
+                <ShieldCheck className="w-6 h-6" />
               </div>
-              <div className="text-slate-300 font-bold">
-                S.Y. (B.Tech.) (Sem - I) Examination: Oct/Nov-2022
-              </div>
-              <div className="text-slate-400 text-[11px]">
-                COMPUTER SCIENCE & ENGINEERING &bull; Computer Graphics
-              </div>
-
-              <div className="grid grid-cols-2 gap-2 pt-2 border-t border-slate-700/80 text-[11px] font-mono text-slate-300">
-                <div>Duration: <strong>180 Mins</strong></div>
-                <div>Max Marks: <strong>70 Marks</strong></div>
-                <div>MCQ Section: <strong>14 Qs (14M)</strong></div>
-                <div>Sections: <strong>Sec I & II (56M)</strong></div>
-              </div>
-            </div>
-          </div>
-
-          {/* Master Blueprint Hard-Stop Gate & Pre-PDF Checklist */}
-          <div className="bg-slate-900 border border-slate-800 p-5 rounded-2xl shadow-xl space-y-4">
-            <div className="flex items-center justify-between border-b border-slate-800 pb-3">
-              <div className="flex items-center gap-2 text-white font-extrabold text-xs">
-                <ShieldCheck className="w-4 h-4 text-emerald-400" />
-                <span>Pre-PDF Master Blueprint Validation</span>
-              </div>
-              <span className={`px-2 py-0.5 rounded text-[10px] font-black uppercase ${
-                validationResult?.isValid ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30' : 'bg-rose-500/20 text-rose-300 border border-rose-500/30'
-              }`}>
-                {validationResult?.isValid ? 'PASSED (100%)' : 'VALIDATION FAILED'}
-              </span>
-            </div>
-
-            {/* Checklist items */}
-            <div className="space-y-2">
-              {validationResult?.checklist?.map((item, idx) => (
-                <div key={idx} className="p-2.5 rounded-xl bg-slate-800/80 border border-slate-700/80 flex items-start gap-2.5 text-xs">
-                  {item.passed ? (
-                    <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0 mt-0.5" />
-                  ) : (
-                    <AlertCircle className="w-4 h-4 text-rose-400 shrink-0 mt-0.5" />
-                  )}
-                  <div>
-                    <div className="font-bold text-white leading-snug">{item.rule}</div>
-                    <div className="text-[11px] text-slate-400">{item.details}</div>
-                  </div>
+              <div>
+                <div className="flex items-center gap-2">
+                  <h3 className="text-base font-bold text-white">Pre-PDF Master Blueprint Validation Checklist</h3>
+                  <span className={`px-2 py-0.5 rounded text-[10px] font-black uppercase font-mono ${
+                    validationResult.isValid ? 'bg-emerald-500 text-slate-950' : 'bg-rose-500 text-white'
+                  }`}>
+                    {validationResult.isValid ? 'PASSED — PDF GATE OPEN' : 'BLOCKED — DISCREPANCY'}
+                  </span>
                 </div>
-              ))}
+                <p className="text-xs text-slate-400 mt-0.5">
+                  SLR-HL-475 Master Blueprint: 14 MCQs (14M) + Section I (28M) + Section II (28M) = 70 Marks Total
+                </p>
+              </div>
             </div>
 
-            {/* PDF Launcher Button */}
             <button
               type="button"
               onClick={() => setShowPdfModal(true)}
-              disabled={!validationResult?.isValid}
-              className={`w-full py-3 rounded-xl font-extrabold text-xs shadow-lg flex items-center justify-center gap-2 cursor-pointer transition-all ${
-                validationResult?.isValid
-                  ? 'bg-rose-600 hover:bg-rose-500 text-white shadow-rose-600/20'
-                  : 'bg-slate-800 text-slate-500 border border-slate-700 cursor-not-allowed'
+              disabled={!validationResult.isValid}
+              className={`px-5 py-2.5 rounded-xl font-black text-xs flex items-center gap-2 transition-all cursor-pointer ${
+                validationResult.isValid
+                  ? 'bg-gradient-to-r from-emerald-500 to-teal-500 text-slate-950 shadow-lg shadow-emerald-500/20 hover:from-emerald-400 hover:to-teal-400'
+                  : 'bg-slate-800 text-slate-500 cursor-not-allowed border border-slate-700'
               }`}
             >
               <Printer className="w-4 h-4" />
-              <span>Generate & Launch Official University PDF</span>
-            </button>
-
-            {!validationResult?.isValid && (
-              <p className="text-[11px] text-rose-400 font-semibold text-center">
-                PDF generation is locked until all blueprint checks pass. Click "Regenerate Paper Set" to re-compile.
-              </p>
-            )}
-          </div>
-        </div>
-
-        {/* Right Column: Live Printable Paper Preview */}
-        <div className="lg:col-span-2 space-y-4">
-          {/* Controls Bar */}
-          <div className="bg-slate-900 border border-slate-800 p-3.5 rounded-2xl shadow-xl flex flex-wrap items-center justify-between gap-3">
-            {/* Set Switcher */}
-            <div className="flex items-center gap-1.5">
-              <span className="text-xs font-bold text-slate-400 mr-1">Select Set:</span>
-              {['Set P', 'Set Q', 'Set R', 'Set S'].map((setName, sIdx) => (
-                <button
-                  key={setName}
-                  type="button"
-                  onClick={() => setActiveSetIndex(sIdx)}
-                  className={`px-3 py-1.5 rounded-lg text-xs font-black cursor-pointer transition-all ${
-                    activeSetIndex === sIdx
-                      ? 'bg-rose-600 text-white shadow-sm'
-                      : 'bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700'
-                  }`}
-                >
-                  {setName}
-                </button>
-              ))}
-            </div>
-
-            {/* Answer Key Toggle */}
-            <button
-              type="button"
-              onClick={() => setShowAnswerKey(!showAnswerKey)}
-              className={`px-3 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1.5 cursor-pointer transition-all ${
-                showAnswerKey
-                  ? 'bg-amber-500/20 text-amber-300 border border-amber-500/40'
-                  : 'bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700'
-              }`}
-            >
-              {showAnswerKey ? <Eye className="w-3.5 h-3.5" /> : <EyeOff className="w-3.5 h-3.5" />}
-              <span>{showAnswerKey ? 'Answer Key ON' : 'Answer Key OFF'}</span>
+              <span>Launch Official A4 PDF Printer Modal</span>
             </button>
           </div>
 
-          {/* Paper Preview Box */}
-          <div className="bg-white text-slate-900 p-6 sm:p-10 rounded-2xl shadow-2xl border border-slate-300 space-y-6 max-w-full overflow-hidden relative">
-            {/* SLR-HL-475 Header */}
-            <div className="space-y-3 border-b-2 border-slate-900 pb-4">
-              <div className="flex items-center justify-between font-mono text-xs font-bold text-slate-900">
-                <div className="flex items-center gap-2">
-                  <span className="border border-slate-900 px-2 py-1 text-xs font-black">Seat No.</span>
-                  <div className="w-28 h-6 border border-slate-900 flex items-center px-2 text-[10px] text-slate-400">
-                    [ Seat No ]
-                  </div>
-                </div>
-                <div className="flex items-center gap-3">
-                  <span className="text-sm font-black tracking-wider uppercase text-slate-900">
-                    SLR-HL-475
-                  </span>
-                  <div className="flex items-center border-2 border-slate-900 rounded overflow-hidden">
-                    <span className="bg-slate-900 text-white text-xs font-black px-2 py-0.5">Set</span>
-                    <span className="text-sm font-black px-2 py-0.5 text-slate-950 bg-slate-100">
-                      {['P', 'Q', 'R', 'S'][activeSetIndex]}
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+            {validationResult.checklist.map((item, idx) => (
+              <div key={idx} className="p-3 rounded-xl bg-slate-800/70 border border-slate-700 space-y-1">
+                <div className="flex items-center justify-between text-xs font-bold">
+                  <span className="text-white truncate" title={item.rule}>{item.rule}</span>
+                  {item.passed ? (
+                    <span className="text-emerald-400 text-[10px] font-mono flex items-center gap-1 shrink-0">
+                      <Check className="w-3.5 h-3.5" /> PASSED
                     </span>
-                  </div>
+                  ) : (
+                    <span className="text-rose-400 text-[10px] font-mono flex items-center gap-1 shrink-0">
+                      <X className="w-3.5 h-3.5" /> FAILED
+                    </span>
+                  )}
                 </div>
+                <p className="text-[11px] text-slate-400 leading-snug">{item.details}</p>
               </div>
-
-              <div className="text-center space-y-1">
-                <div className="text-[10px] font-black uppercase tracking-widest text-slate-500">
-                  CONFIDENTIAL &bull; UNIVERSITY BOARD EXAMINATION &bull; PROTECTED UNDER OFFICIAL SECRECY ACT
-                </div>
-                <h1 className="text-base font-black text-slate-950 uppercase leading-snug">
-                  S.Y. (B.Tech.) (Sem - I) (New) (CBCS) Examination: Oct/Nov-2022
-                </h1>
-                <h2 className="text-xs sm:text-sm font-extrabold text-slate-900 uppercase">
-                  {selectedExam?.name || 'COMPUTER SCIENCE & ENGINEERING'}
-                </h2>
-                <div className="text-xs font-bold text-slate-800 uppercase">
-                  Subject: {selectedExam?.subject || 'Computer Graphics'}
-                </div>
-
-                <div className="flex flex-wrap items-center justify-between pt-2 text-xs font-bold text-slate-900 border-t border-slate-300 mt-2 font-mono">
-                  <span>Day & Date: <strong>Monday, 20-03-2023</strong></span>
-                  <span>Time: <strong>02:00 PM To 05:00 PM</strong></span>
-                  <span>Max. Marks: <strong>70</strong></span>
-                </div>
-              </div>
-
-              <div className="p-3 bg-slate-50 rounded-lg border border-slate-300 text-xs text-slate-800 space-y-1">
-                <div className="font-extrabold text-slate-950 uppercase text-[11px]">
-                  Instructions:
-                </div>
-                <ol className="list-decimal list-inside space-y-0.5 text-[11px] leading-relaxed">
-                  <li>Q. No. 1 is compulsory. It should be solved in the first 30 minutes in answer book. Page no 03 (Starting page of the Answer Book). Each question carries one mark.</li>
-                  <li>Don’t forget to Mention question paper set (P/Q/R/S) on top of page.</li>
-                  <li>Figures to the right indicate full marks.</li>
-                  <li>Assume suitable data wherever needed and mention it clearly.</li>
-                </ol>
-              </div>
-            </div>
-
-            {/* MCQ Section */}
-            <div className="space-y-3 border-b border-slate-300 pb-5">
-              <div className="flex items-center justify-between font-bold text-xs border-b border-slate-400 pb-1 text-slate-900 font-mono">
-                <span className="uppercase text-sm font-black">MCQ/Objective Type Questions</span>
-                <span>Duration: 30 Minutes &nbsp;|&nbsp; Marks: 14</span>
-              </div>
-
-              <div className="flex items-center justify-between font-bold text-sm text-slate-950">
-                <span>Q.1 Choose the correct alternatives from the options.</span>
-                <span className="font-mono text-sm font-black pr-2">14</span>
-              </div>
-
-              <div className="space-y-3 pl-2">
-                {[
-                  { q: '_______ is the features of Computer Graphics.', opts: ['Creation and deletion of images by computer only', 'Deletion and manipulation of graphical images by computer', 'Creation and manipulation of graphics by computer', 'Creation of artificial images by computer only'], ans: 'c' },
-                  { q: 'The maximum number of points that can be displayed without overlap on a CRT is referred to as _______.', opts: ['Resolution', 'Persistence', 'Attenuation', 'None of the above'], ans: 'a' },
-                  { q: 'The process of determining the suitable or appropriate pixels for representing image or graphic object is called ______.', opts: ['Animation', 'Rasterization', 'Scan-Conversion', 'Quantization'], ans: 'b' },
-                  { q: 'Run length coding is used for _______.', opts: ['Image smoothening', 'Image compression', 'Image coloring', 'Image dithering'], ans: 'b' },
-                ].map((item, idx) => (
-                  <div key={idx} className="space-y-1 text-xs">
-                    <div className="flex items-start gap-1.5 font-semibold text-slate-950">
-                      <span className="font-bold shrink-0">{idx + 1})</span>
-                      <div>{item.q}</div>
-                    </div>
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-1 pl-5 text-slate-800">
-                      {item.opts.map((opt, oIdx) => {
-                        const optLabel = String.fromCharCode(97 + oIdx);
-                        const isCorrect = item.ans === optLabel;
-                        return (
-                          <div key={oIdx} className="flex items-center gap-1.5">
-                            <span className="font-bold shrink-0">{optLabel})</span>
-                            <span>{opt}</span>
-                            {showAnswerKey && isCorrect && (
-                              <span className="ml-1 text-[9px] font-black text-emerald-700 bg-emerald-100 px-1 py-0.5 rounded">
-                                [CORRECT]
-                              </span>
-                            )}
-                          </div>
-                        );
-                      })}
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </div>
-
-            {/* Section – I */}
-            <div className="space-y-3 border-b border-slate-300 pb-5">
-              <div className="flex items-center justify-between font-black text-sm border-b border-slate-400 pb-1 text-slate-950 uppercase font-mono">
-                <span>Section – I</span>
-                <span>Max. Marks: 28</span>
-              </div>
-
-              <div className="space-y-2">
-                <div className="flex items-center justify-between font-bold text-sm text-slate-950">
-                  <span>Q.2 Answer the following question. (Any Four)</span>
-                  <span className="font-mono text-sm font-black pr-2">16</span>
-                </div>
-                <div className="space-y-1.5 pl-4 text-xs font-medium text-slate-900">
-                  <div>a) Distinguish between the Raster Scan display and Random Scan display.</div>
-                  <div>b) Explain 2D Rotation transformation with matrix representations.</div>
-                  <div>c) Explain any four Computer graphics real-world applications.</div>
-                  <div>d) Scale the polygon with coordinates P(2,5), Q(7,10), C(10,2) by 2 units in both x and y direction.</div>
-                  <div>e) Explain Run Length Encoding in image compression.</div>
-                </div>
-              </div>
-
-              <div className="space-y-2 pt-1">
-                <div className="flex items-center justify-between font-bold text-sm text-slate-950">
-                  <span>Q.3 Answer the following question. (Any One)</span>
-                  <span className="font-mono text-sm font-black pr-2">06</span>
-                </div>
-                <div className="space-y-1.5 pl-4 text-xs font-medium text-slate-900">
-                  <div>a) Consider a line from (0,0) to (5,6). Use DDA algorithm to rasterize this line.</div>
-                  <div>b) Write Bresenham’s Circle generation algorithm with derivation.</div>
-                </div>
-              </div>
-
-              <div className="space-y-2 pt-1">
-                <div className="flex items-center justify-between font-bold text-sm text-slate-950">
-                  <span>Q.4 Attempt the following.</span>
-                  <span className="font-mono text-sm font-black pr-2">06</span>
-                </div>
-                <div className="space-y-1.5 pl-4 text-xs font-medium text-slate-900">
-                  <div>a) Beam Penetration Technique in color CRT monitors.</div>
-                  <div>b) Shadow Mask Technique in color CRT monitors.</div>
-                </div>
-              </div>
-            </div>
-
-            {/* Section – II */}
-            <div className="space-y-3 border-b border-slate-300 pb-5">
-              <div className="flex items-center justify-between font-black text-sm border-b border-slate-400 pb-1 text-slate-950 uppercase font-mono">
-                <span>Section – II</span>
-                <span>Max. Marks: 28</span>
-              </div>
-
-              <div className="space-y-2">
-                <div className="flex items-center justify-between font-bold text-sm text-slate-950">
-                  <span>Q.5 Answer the following question. (Any Four)</span>
-                  <span className="font-mono text-sm font-black pr-2">16</span>
-                </div>
-                <div className="space-y-1.5 pl-4 text-xs font-medium text-slate-900">
-                  <div>a) Write a short note on segmented display file structure.</div>
-                  <div>b) Explain Viewing transformation pipeline in detail.</div>
-                  <div>c) Explain properties of Bezier curves and control points.</div>
-                  <div>d) Explain Z-Buffer depth buffer algorithm for hidden surface removal.</div>
-                  <div>e) Explain Painter’s algorithm for surface visibility.</div>
-                </div>
-              </div>
-
-              <div className="space-y-2 pt-1">
-                <div className="flex items-center justify-between font-bold text-sm text-slate-950">
-                  <span>Q.6 Answer the following question. (Any One)</span>
-                  <span className="font-mono text-sm font-black pr-2">06</span>
-                </div>
-                <div className="space-y-1.5 pl-4 text-xs font-medium text-slate-900">
-                  <div>a) Explain Warnock area subdivision algorithm.</div>
-                  <div>b) What is antialiasing? Explain different techniques of antialiasing.</div>
-                </div>
-              </div>
-
-              <div className="space-y-2 pt-1">
-                <div className="flex items-center justify-between font-bold text-sm text-slate-950">
-                  <span>Q.7 Explain Cohen-Sutherland Line Clipping algorithm.</span>
-                  <span className="font-mono text-sm font-black pr-2">06</span>
-                </div>
-              </div>
-            </div>
-
-            <div className="pt-3 flex flex-wrap items-center justify-between text-[11px] text-slate-600 font-mono border-t-2 border-slate-900">
-              <div>Generated: {new Date().toLocaleDateString()}</div>
-              <div className="font-extrabold text-slate-900">*** END OF QUESTION PAPER ***</div>
-              <div>SLR-HL-475 (Set {['P', 'Q', 'R', 'S'][activeSetIndex]})</div>
-            </div>
+            ))}
           </div>
         </div>
-      </div>
+      )}
 
-      {/* PDF Modal */}
+      {/* Official Generated Question Paper PDF Modal */}
       {showPdfModal && selectedExam && (
         <QuestionPaperPdfModal
           exam={selectedExam}
@@ -594,4 +660,3 @@ export const UniversityFormatGenerator: React.FC<UniversityFormatGeneratorProps>
     </div>
   );
 };
-

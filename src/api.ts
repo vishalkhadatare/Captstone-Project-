@@ -32,6 +32,9 @@ import {
   AddCentreResponse,
   EmergencyRegeneratePayload,
   EmergencyRegenerateResponse,
+  DraftPaper,
+  UniversityDraftQuestion,
+  IngestDraftPapersResponse,
 } from './types';
 
 export const DEVICE_APPROVAL_EVENT = 'zeroleak:device-approval-needed';
@@ -272,6 +275,33 @@ async function request<T>(endpoint: string, options: RequestInit = {}): Promise<
 }
 
 export const api = {
+  // University Draft Papers Ingestion (3 PDFs Upload, pdf-parse & Tesseract OCR)
+  uploadUniversityDraftPapers: async (files: File[], examId?: string) => {
+    const formData = new FormData();
+    files.forEach(file => {
+      formData.append('draft_papers', file);
+    });
+    if (examId) {
+      formData.append('exam_id', examId);
+    }
+    const token = getStoredToken();
+    const res = await fetch('/api/university/upload-drafts', {
+      method: 'POST',
+      headers: {
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      },
+      body: formData,
+    });
+    const data = await res.json();
+    if (!res.ok || !data.success) {
+      throw new Error(data.error || data.message || 'Failed to upload University draft papers');
+    }
+    return data as IngestDraftPapersResponse;
+  },
+
+  getUniversityDraftQuestions: (examId?: string) =>
+    request<IngestDraftPapersResponse>(`/api/university/draft-questions${examId ? `?exam_id=${encodeURIComponent(examId)}` : ''}`),
+
   // Auth
   register: (payload: any) => request<{ message: string; token: string; user: User }>('/api/auth/register', { method: 'POST', body: JSON.stringify(payload) }),
   registerPersonnel: (payload: any) => request<{ message: string; token?: string; user?: User; requiresDeviceBinding?: boolean; nextStep?: string; challengeId?: string; challenge?: string; expiresAt?: string }>('/api/auth/register-personnel', { method: 'POST', body: JSON.stringify(payload) }),

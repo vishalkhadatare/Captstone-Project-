@@ -891,6 +891,56 @@ export interface EmergencyRegenerateResponse {
   subjectBreakdown?: Array<{ subject: string; count: number; totalMarks: number }>;
 }
 
+// Ingested University Exam Draft Papers & Parsed Questions
+export interface DraftPaper {
+  id: string;
+  exam_id: string;
+  paper_index: number; // 1, 2, or 3
+  file_name: string;
+  file_size: number;
+  mime_type: string;
+  storage_path?: string;
+  extracted_text?: string;
+  extraction_method: 'PDF_PARSE' | 'TESSERACT_OCR' | 'HYBRID';
+  question_count: number;
+  mcq_count: number;
+  theory_count: number;
+  uploaded_at: string;
+}
+
+export interface UniversityDraftQuestion {
+  id: string;
+  draft_paper_id?: string;
+  exam_id?: string;
+  paper_index: number; // 1, 2, 3
+  source_paper: string; // 'Paper 1' | 'Paper 2' | 'Paper 3'
+  section: string; // e.g. "Section I", "Section II", "Q.1", "Q.2"
+  question_number: string; // e.g. "1", "2(a)", "3(b)"
+  question_text: string;
+  question_type: 'MCQ' | 'THEORY';
+  options?: string[]; // e.g. ["A) Option 1", "B) Option 2", ...]
+  correct_answer?: string;
+  marks: number;
+  sub_question_pattern?: string;
+  diagram_url?: string;
+  created_at?: string;
+}
+
+export interface IngestDraftPapersResponse {
+  success: boolean;
+  message: string;
+  draftPapers: DraftPaper[];
+  paperCounts: {
+    paper1Count: number;
+    paper2Count: number;
+    paper3Count: number;
+    totalQuestions: number;
+    mcqCount: number;
+    theoryCount: number;
+  };
+  questions: UniversityDraftQuestion[];
+}
+
 
 
 
