@@ -699,24 +699,24 @@ export const UniversityFormatGenerator: React.FC<UniversityFormatGeneratorProps>
   return (
     <div className="space-y-6">
       {/* Module Title Header */}
-      <div className="bg-slate-900 text-white p-6 rounded-2xl border border-slate-800 shadow-xl flex flex-wrap items-center justify-between gap-4">
+      <div className="bg-white text-slate-900 p-6 rounded-2xl border border-slate-200 shadow-sm flex flex-wrap items-center justify-between gap-4">
         <div className="flex items-center gap-3">
-          <div className="p-3 bg-rose-500/20 rounded-xl text-rose-400 border border-rose-500/30">
+          <div className="p-3 bg-emerald-50 rounded-xl text-emerald-700 border border-emerald-200/80">
             <GraduationCap className="w-7 h-7" />
           </div>
           <div>
             <div className="flex items-center gap-2">
-              <h2 className="text-xl font-black text-white tracking-tight">University & Board Paper Generator</h2>
-              <span className="px-2.5 py-0.5 rounded-full text-[10px] font-black bg-rose-500 text-white uppercase tracking-wide">
+              <h2 className="text-xl font-bold text-slate-900 tracking-tight">University & Board Paper Generator</h2>
+              <span className="px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-indigo-50 text-indigo-700 border border-indigo-200 uppercase tracking-wide">
                 OLLAMA AI ENGINE
               </span>
-              <span className="px-2.5 py-0.5 rounded-full text-[10px] font-black bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 uppercase tracking-wide flex items-center gap-1">
-                <Zap className="w-3 h-3 text-emerald-400" />
-                <span>{latexOnlineHealth?.connected ? '⚡ LATEX.ONLINE (FREE) ACTIVE' : '⚡ LATEX ENGINE'}</span>
+              <span className="px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-emerald-50 text-emerald-800 border border-emerald-200 uppercase tracking-wide flex items-center gap-1">
+                <Zap className="w-3 h-3 text-emerald-600" />
+                <span>{latexOnlineHealth?.connected ? '⚡ LATEX.ONLINE ACTIVE' : '⚡ LATEX ENGINE'}</span>
               </span>
             </div>
-            <p className="text-xs text-slate-400 mt-0.5">
-              Multi-Draft Combination & Permutation &bull; Stored in Cloudinary &bull; LaTeX.Online & FormaTeX Compiler
+            <p className="text-xs text-slate-500 mt-0.5">
+              Multi-Draft Combination &amp; Permutation &bull; Cloudinary Vault Storage &bull; LaTeX.Online &amp; FormaTeX Compiler
             </p>
           </div>
         </div>
@@ -728,7 +728,7 @@ export const UniversityFormatGenerator: React.FC<UniversityFormatGeneratorProps>
             onChange={(e) => {
               setSelectedExamId(e.target.value);
             }}
-            className="bg-slate-800 text-white text-xs font-semibold px-3.5 py-2.5 rounded-xl border border-slate-700 cursor-pointer outline-hidden focus:border-rose-500 max-w-xs truncate"
+            className="bg-slate-50 text-slate-800 text-xs font-semibold px-3.5 py-2.5 rounded-xl border border-slate-200 hover:border-slate-300 focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20 cursor-pointer outline-hidden max-w-xs truncate shadow-2xs"
           >
             {exams.map(e => (
               <option key={e.id} value={e.id}>
@@ -741,7 +741,7 @@ export const UniversityFormatGenerator: React.FC<UniversityFormatGeneratorProps>
             type="button"
             onClick={() => selectedExamId && triggerUniversityGenerator(selectedExamId)}
             disabled={generating || !selectedExamId}
-            className="px-5 py-2.5 bg-rose-600 hover:bg-rose-500 text-white rounded-xl font-bold text-xs shadow-lg shadow-rose-600/20 flex items-center gap-2 cursor-pointer transition-all disabled:opacity-50"
+            className="px-5 py-2.5 bg-emerald-700 hover:bg-emerald-600 text-white rounded-xl font-bold text-xs shadow-xs flex items-center gap-2 cursor-pointer transition-all disabled:opacity-50"
           >
             <RefreshCw className={`w-4 h-4 ${generating ? 'animate-spin' : ''}`} />
             <span>{generating ? 'Compiling Sets via Ollama...' : 'Generate Real Paper Sets'}</span>
@@ -751,45 +751,45 @@ export const UniversityFormatGenerator: React.FC<UniversityFormatGeneratorProps>
 
       {/* Action Notification */}
       {actionMessage && (
-        <div className={`p-4 rounded-xl text-xs font-bold border flex items-center justify-between gap-2 ${
+        <div className={`p-4 rounded-xl text-xs font-bold border flex items-center justify-between gap-2 shadow-xs ${
           actionMessage.type === 'success'
-            ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/30'
-            : 'bg-rose-500/10 text-rose-400 border-rose-500/30'
+            ? 'bg-emerald-50 text-emerald-800 border-emerald-200'
+            : 'bg-rose-50 text-rose-800 border-rose-200'
         }`}>
           <div className="flex items-center gap-2">
-            {actionMessage.type === 'success' ? <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" /> : <AlertTriangle className="w-4 h-4 text-rose-400 shrink-0" />}
+            {actionMessage.type === 'success' ? <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" /> : <AlertTriangle className="w-4 h-4 text-rose-600 shrink-0" />}
             <span>{actionMessage.text}</span>
           </div>
-          <button type="button" onClick={() => setActionMessage(null)} className="text-slate-400 hover:text-white cursor-pointer">
+          <button type="button" onClick={() => setActionMessage(null)} className="text-slate-400 hover:text-slate-600 cursor-pointer">
             <X className="w-3.5 h-3.5" />
           </button>
         </div>
       )}
 
       {/* 3-PDF Question-Paper Upload Dropzone for University Exam */}
-      <div className="bg-slate-900 border border-slate-800 p-5 rounded-2xl shadow-xl space-y-4">
-        <div className="flex flex-wrap items-center justify-between border-b border-slate-800 pb-3 gap-3">
+      <div className="bg-white border border-slate-200 p-6 rounded-2xl shadow-sm space-y-4">
+        <div className="flex flex-wrap items-center justify-between border-b border-slate-100 pb-3 gap-3">
           <div className="flex items-center gap-3">
-            <div className="p-2.5 rounded-xl bg-rose-500/20 text-rose-400 border border-rose-500/30">
+            <div className="p-2.5 rounded-xl bg-indigo-50 text-indigo-700 border border-indigo-200/80">
               <Upload className="w-5 h-5" />
             </div>
             <div>
               <div className="flex items-center gap-2">
-                <h3 className="text-sm font-extrabold text-white tracking-wide uppercase">
+                <h3 className="text-sm font-bold text-slate-900 tracking-wide uppercase">
                   Upload Exactly 3 Draft Question Papers (Paper 1, Paper 2, Paper 3)
                 </h3>
-                <span className="px-2 py-0.5 rounded-full text-[10px] font-black bg-rose-500/20 text-rose-300 border border-rose-500/30">
+                <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-indigo-50 text-indigo-700 border border-indigo-200">
                   REQUIREMENT: EXACTLY 3 PDFs
                 </span>
               </div>
-              <p className="text-[11px] text-slate-400">
-                Upload Paper 1, Paper 2, and Paper 3 PDFs to extract questions via pdf-parse & Tesseract OCR fallback into SQLite.
+              <p className="text-xs text-slate-500">
+                Upload Paper 1, Paper 2, and Paper 3 PDFs to extract questions via pdf-parse &amp; Tesseract OCR fallback into SQLite.
               </p>
             </div>
           </div>
 
           <div className="flex items-center gap-2">
-            <label className="px-4 py-2 bg-gradient-to-r from-rose-600 to-rose-500 hover:from-rose-500 hover:to-rose-400 text-white font-bold text-xs rounded-xl shadow-md flex items-center gap-2 cursor-pointer transition-all">
+            <label className="px-4 py-2 bg-indigo-900 hover:bg-indigo-800 text-white font-bold text-xs rounded-xl shadow-xs flex items-center gap-2 cursor-pointer transition-all">
               <FileUp className="w-4 h-4" />
               <span>Select 3 Question-Paper PDFs</span>
               <input
@@ -804,37 +804,37 @@ export const UniversityFormatGenerator: React.FC<UniversityFormatGeneratorProps>
         </div>
 
         {uploadValidationError && (
-          <div className="p-3 bg-rose-500/10 border border-rose-500/30 rounded-xl text-rose-400 text-xs font-bold flex items-center gap-2">
-            <AlertCircle className="w-4 h-4 shrink-0" />
+          <div className="p-3 bg-rose-50 border border-rose-200 rounded-xl text-rose-800 text-xs font-semibold flex items-center gap-2">
+            <AlertCircle className="w-4 h-4 text-rose-600 shrink-0" />
             <span>{uploadValidationError}</span>
           </div>
         )}
 
         {selectedFiles.length > 0 && (
-          <div className="p-4 bg-slate-800/80 border border-slate-700 rounded-xl space-y-3">
+          <div className="p-4 bg-slate-50 border border-slate-200 rounded-xl space-y-3">
             <div className="flex items-center justify-between">
-              <span className="text-xs font-bold text-slate-300">
+              <span className="text-xs font-bold text-slate-700">
                 Selected Files ({selectedFiles.length} / 3):
               </span>
               <button
                 type="button"
                 onClick={() => setSelectedFiles([])}
-                className="text-xs text-rose-400 hover:text-rose-300 font-bold cursor-pointer"
+                className="text-xs text-rose-700 hover:text-rose-800 font-bold cursor-pointer"
               >
                 Clear Selection
               </button>
             </div>
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
               {selectedFiles.map((f, idx) => (
-                <div key={idx} className="p-2.5 bg-slate-900 border border-slate-700 rounded-lg flex items-center justify-between gap-2">
+                <div key={idx} className="p-2.5 bg-white border border-slate-200 rounded-lg flex items-center justify-between gap-2 shadow-2xs">
                   <div className="flex items-center gap-2 min-w-0">
-                    <FileText className="w-4 h-4 text-rose-400 shrink-0" />
+                    <FileText className="w-4 h-4 text-indigo-600 shrink-0" />
                     <div className="min-w-0">
-                      <div className="text-xs font-bold text-white truncate">{f.name}</div>
-                      <div className="text-[10px] text-slate-400">Paper {idx + 1} &bull; {(f.size / (1024 * 1024)).toFixed(2)} MB</div>
+                      <div className="text-xs font-bold text-slate-900 truncate">{f.name}</div>
+                      <div className="text-[10px] text-slate-500">Paper {idx + 1} &bull; {(f.size / (1024 * 1024)).toFixed(2)} MB</div>
                     </div>
                   </div>
-                  <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
+                  <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
                 </div>
               ))}
             </div>
@@ -844,7 +844,7 @@ export const UniversityFormatGenerator: React.FC<UniversityFormatGeneratorProps>
                 type="button"
                 onClick={handleUploadAndIngestDrafts}
                 disabled={uploadingDrafts || selectedFiles.length !== 3}
-                className="px-5 py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl font-bold text-xs shadow-lg flex items-center gap-2 cursor-pointer transition-all disabled:opacity-50"
+                className="px-5 py-2.5 bg-emerald-700 hover:bg-emerald-600 text-white rounded-xl font-bold text-xs shadow-xs flex items-center gap-2 cursor-pointer transition-all disabled:opacity-50"
               >
                 <Sparkles className={`w-4 h-4 ${uploadingDrafts ? 'animate-spin' : ''}`} />
                 <span>{uploadingDrafts ? 'Ingesting & Running OCR...' : 'Process & Extract Questions'}</span>
@@ -856,44 +856,43 @@ export const UniversityFormatGenerator: React.FC<UniversityFormatGeneratorProps>
         {/* Paper 1, Paper 2, Paper 3 Extracted Summary Cards */}
         {ingestedData && (
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 pt-2">
-            <div className="p-3 bg-slate-800/90 border border-slate-700 rounded-xl space-y-1">
-              <div className="text-[11px] font-bold text-rose-400 uppercase">Paper 1 Questions</div>
-              <div className="text-xl font-black text-white">{ingestedData.paperCounts?.paper1 || 0} Extracted</div>
-              <div className="text-[10px] text-slate-400 font-mono">Status: Processed</div>
+            <div className="p-4 bg-slate-50 border border-slate-200 rounded-xl space-y-1">
+              <div className="text-[11px] font-bold text-slate-600 uppercase">Paper 1 Questions</div>
+              <div className="text-xl font-bold text-slate-900">{ingestedData.paperCounts?.paper1 || 0} Extracted</div>
+              <div className="text-[10px] text-slate-500 font-mono">Status: Processed</div>
             </div>
-            <div className="p-3 bg-slate-800/90 border border-slate-700 rounded-xl space-y-1">
-              <div className="text-[11px] font-bold text-rose-400 uppercase">Paper 2 Questions</div>
-              <div className="text-xl font-black text-white">{ingestedData.paperCounts?.paper2 || 0} Extracted</div>
-              <div className="text-[10px] text-slate-400 font-mono">Status: Processed</div>
+            <div className="p-4 bg-slate-50 border border-slate-200 rounded-xl space-y-1">
+              <div className="text-[11px] font-bold text-slate-600 uppercase">Paper 2 Questions</div>
+              <div className="text-xl font-bold text-slate-900">{ingestedData.paperCounts?.paper2 || 0} Extracted</div>
+              <div className="text-[10px] text-slate-500 font-mono">Status: Processed</div>
             </div>
-            <div className="p-3 bg-slate-800/90 border border-slate-700 rounded-xl space-y-1">
-              <div className="text-[11px] font-bold text-rose-400 uppercase">Paper 3 Questions</div>
-              <div className="text-xl font-black text-white">{ingestedData.paperCounts?.paper3 || 0} Extracted</div>
-              <div className="text-[10px] text-slate-400 font-mono">Status: Processed</div>
+            <div className="p-4 bg-slate-50 border border-slate-200 rounded-xl space-y-1">
+              <div className="text-[11px] font-bold text-slate-600 uppercase">Paper 3 Questions</div>
+              <div className="text-xl font-bold text-slate-900">{ingestedData.paperCounts?.paper3 || 0} Extracted</div>
+              <div className="text-[10px] text-slate-500 font-mono">Status: Processed</div>
             </div>
           </div>
         )}
       </div>
 
-
       {/* LangChain RAG Pipeline & Deterministic Exact-Count Selection Card */}
-      <div className="bg-slate-900 border border-slate-800 p-5 rounded-2xl shadow-xl space-y-4">
-        <div className="flex flex-wrap items-center justify-between border-b border-slate-800 pb-3 gap-3">
+      <div className="bg-white border border-slate-200 p-6 rounded-2xl shadow-sm space-y-4">
+        <div className="flex flex-wrap items-center justify-between border-b border-slate-100 pb-3 gap-3">
           <div className="flex items-center gap-3">
-            <div className="p-2.5 rounded-xl bg-indigo-500/20 text-indigo-400 border border-indigo-500/30">
+            <div className="p-2.5 rounded-xl bg-teal-50 text-teal-700 border border-teal-200/80">
               <Cpu className="w-5 h-5" />
             </div>
             <div>
               <div className="flex items-center gap-2">
-                <h3 className="text-sm font-extrabold text-white tracking-wide uppercase">
-                  LangChain RAG Pipeline & Deterministic Selection Engine
+                <h3 className="text-sm font-bold text-slate-900 tracking-wide uppercase">
+                  LangChain RAG Pipeline &amp; Deterministic Selection Engine
                 </h3>
-                <span className="px-2.5 py-0.5 rounded-full text-[10px] font-black bg-indigo-500/20 text-indigo-300 border border-indigo-500/30 uppercase tracking-wide flex items-center gap-1">
-                  <Sparkles className="w-3 h-3 text-indigo-400" />
+                <span className="px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-teal-50 text-teal-800 border border-teal-200 uppercase tracking-wide flex items-center gap-1">
+                  <Sparkles className="w-3 h-3 text-teal-600" />
                   <span>TEXT-EMBEDDING-3-SMALL &bull; CHROMADB</span>
                 </span>
               </div>
-              <p className="text-[11px] text-slate-400">
+              <p className="text-xs text-slate-500">
                 Embed questions into ChromaDB vector store, run LangChain retrieval by section &amp; type, eliminate duplicates (&gt;0.85 similarity), and enforce EXACTLY 14 MCQs.
               </p>
             </div>
@@ -904,7 +903,7 @@ export const UniversityFormatGenerator: React.FC<UniversityFormatGeneratorProps>
               type="button"
               onClick={handleRunRagPipeline}
               disabled={runningRag}
-              className="px-5 py-2.5 bg-gradient-to-r from-indigo-600 to-indigo-500 hover:from-indigo-500 hover:to-indigo-400 text-white font-black text-xs rounded-xl shadow-lg flex items-center gap-2 cursor-pointer transition-all disabled:opacity-50"
+              className="px-5 py-2.5 bg-slate-900 hover:bg-slate-800 text-white font-bold text-xs rounded-xl shadow-xs flex items-center gap-2 cursor-pointer transition-all disabled:opacity-50"
             >
               <Zap className={`w-4 h-4 ${runningRag ? 'animate-spin' : ''}`} />
               <span>{runningRag ? 'Processing RAG & Vector Store...' : 'Run LangChain RAG & Exact-Count Selection'}</span>
@@ -916,47 +915,47 @@ export const UniversityFormatGenerator: React.FC<UniversityFormatGeneratorProps>
         {ragResponse && (
           <div className="space-y-4 pt-1">
             <div className="grid grid-cols-1 sm:grid-cols-4 gap-3">
-              <div className="p-3 bg-slate-800/90 border border-slate-700 rounded-xl space-y-1">
-                <div className="text-[10px] font-bold text-indigo-400 uppercase tracking-wider">ChromaDB Indexed</div>
-                <div className="text-lg font-black text-white">{ragResponse.chromaStats?.totalIndexed || 0} Vectors</div>
-                <div className="text-[10px] text-slate-400 font-mono">Model: text-embedding-3-small</div>
+              <div className="p-3.5 bg-slate-50 border border-slate-200 rounded-xl space-y-1">
+                <div className="text-[10px] font-bold text-slate-600 uppercase tracking-wider">ChromaDB Indexed</div>
+                <div className="text-lg font-bold text-slate-900">{ragResponse.chromaStats?.totalIndexed || 0} Vectors</div>
+                <div className="text-[10px] text-slate-500 font-mono">Model: text-embedding-3-small</div>
               </div>
-              <div className="p-3 bg-slate-800/90 border border-slate-700 rounded-xl space-y-1">
-                <div className="text-[10px] font-bold text-amber-400 uppercase tracking-wider">Duplicates Removed</div>
-                <div className="text-lg font-black text-white">{ragResponse.chromaStats?.duplicatesDetected || 0} Duplicates</div>
-                <div className="text-[10px] text-slate-400 font-mono">Threshold: &gt; 0.85 Similarity</div>
+              <div className="p-3.5 bg-amber-50/70 border border-amber-200 rounded-xl space-y-1">
+                <div className="text-[10px] font-bold text-amber-800 uppercase tracking-wider">Duplicates Removed</div>
+                <div className="text-lg font-bold text-amber-900">{ragResponse.chromaStats?.duplicatesDetected || 0} Duplicates</div>
+                <div className="text-[10px] text-amber-700 font-mono">Threshold: &gt; 0.85 Similarity</div>
               </div>
-              <div className="p-3 bg-slate-800/90 border border-slate-700 rounded-xl space-y-1">
-                <div className="text-[10px] font-bold text-emerald-400 uppercase tracking-wider">Selected MCQs</div>
-                <div className="text-lg font-black text-white">{ragResponse.selectionResult?.mcqs?.length || 14} / 14 MCQs</div>
-                <div className="text-[10px] text-emerald-400 font-mono font-bold">Rule: EXACTLY 14 MCQs</div>
+              <div className="p-3.5 bg-emerald-50/70 border border-emerald-200 rounded-xl space-y-1">
+                <div className="text-[10px] font-bold text-emerald-800 uppercase tracking-wider">Selected MCQs</div>
+                <div className="text-lg font-bold text-emerald-900">{ragResponse.selectionResult?.mcqs?.length || 14} / 14 MCQs</div>
+                <div className="text-[10px] text-emerald-700 font-mono font-bold">Rule: EXACTLY 14 MCQs</div>
               </div>
-              <div className="p-3 bg-slate-800/90 border border-slate-700 rounded-xl space-y-1">
-                <div className="text-[10px] font-bold text-rose-400 uppercase tracking-wider">Paper Distribution</div>
-                <div className="text-xs font-mono font-bold text-white pt-1">
+              <div className="p-3.5 bg-indigo-50/70 border border-indigo-200 rounded-xl space-y-1">
+                <div className="text-[10px] font-bold text-indigo-800 uppercase tracking-wider">Paper Distribution</div>
+                <div className="text-xs font-mono font-bold text-indigo-950 pt-1">
                   P1: {ragResponse.selectionResult?.paperDistribution?.paper1 || 0} | P2: {ragResponse.selectionResult?.paperDistribution?.paper2 || 0} | P3: {ragResponse.selectionResult?.paperDistribution?.paper3 || 0}
                 </div>
-                <div className="text-[10px] text-slate-400 font-mono">Controlled Combination</div>
+                <div className="text-[10px] text-indigo-600 font-mono">Controlled Combination</div>
               </div>
             </div>
 
             {/* Checklist items */}
-            <div className="p-4 bg-slate-950/60 border border-slate-800 rounded-xl space-y-2">
-              <div className="text-xs font-bold text-white uppercase tracking-wide flex items-center justify-between">
-                <span>RAG Blueprint & Exact-Count Verification Report</span>
-                <span className={`px-2 py-0.5 rounded text-[10px] font-black uppercase ${
-                  ragResponse.validationReport?.isValid ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30' : 'bg-rose-500/20 text-rose-300 border border-rose-500/30'
+            <div className="p-4 bg-slate-50 border border-slate-200 rounded-xl space-y-2">
+              <div className="text-xs font-bold text-slate-900 uppercase tracking-wide flex items-center justify-between">
+                <span>RAG Blueprint &amp; Exact-Count Verification Report</span>
+                <span className={`px-2 py-0.5 rounded text-[10px] font-bold uppercase ${
+                  ragResponse.validationReport?.isValid ? 'bg-emerald-100 text-emerald-800 border border-emerald-300' : 'bg-rose-100 text-rose-800 border border-rose-300'
                 }`}>
                   {ragResponse.validationReport?.isValid ? 'BLUEPRINT VALIDATION PASSED' : 'VALIDATION HARD STOP'}
                 </span>
               </div>
               <div className="grid grid-cols-1 md:grid-cols-2 gap-2 text-xs">
                 {ragResponse.validationReport?.checklist?.map((item: any, idx: number) => (
-                  <div key={idx} className="p-2 bg-slate-900 border border-slate-800 rounded-lg flex items-start gap-2">
-                    {item.passed ? <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0 mt-0.5" /> : <AlertCircle className="w-4 h-4 text-rose-400 shrink-0 mt-0.5" />}
+                  <div key={idx} className="p-2.5 bg-white border border-slate-200 rounded-lg flex items-start gap-2 shadow-2xs">
+                    {item.passed ? <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0 mt-0.5" /> : <AlertCircle className="w-4 h-4 text-rose-600 shrink-0 mt-0.5" />}
                     <div>
-                      <div className="font-bold text-white leading-snug">{item.rule}</div>
-                      <div className="text-[11px] text-slate-400">{item.details}</div>
+                      <div className="font-bold text-slate-900 leading-snug">{item.rule}</div>
+                      <div className="text-[11px] text-slate-500">{item.details}</div>
                     </div>
                   </div>
                 ))}
@@ -967,23 +966,23 @@ export const UniversityFormatGenerator: React.FC<UniversityFormatGeneratorProps>
       </div>
 
       {/* RECENTLY UPLOADED PAPERS (FROM EXAM WORKFLOW & CLOUDINARY) WITH MULTI-SELECT & COMBINATION */}
-      <div className="bg-slate-900 border border-slate-800 p-5 rounded-2xl shadow-xl space-y-4">
+      <div className="bg-white border border-slate-200 p-6 rounded-2xl shadow-sm space-y-4">
         {/* Header Toolbar */}
-        <div className="flex flex-wrap items-center justify-between border-b border-slate-800 pb-3 gap-3">
+        <div className="flex flex-wrap items-center justify-between border-b border-slate-100 pb-3 gap-3">
           <div className="flex items-center gap-3">
-            <div className="p-2 rounded-xl bg-gradient-to-br from-rose-500/20 to-sky-500/20 text-rose-400 border border-rose-500/30">
+            <div className="p-2.5 rounded-xl bg-sky-50 text-sky-700 border border-sky-200/80">
               <Cloud className="w-5 h-5" />
             </div>
             <div>
               <div className="flex items-center gap-2">
-                <h3 className="text-sm font-extrabold text-white tracking-wide uppercase">
+                <h3 className="text-sm font-bold text-slate-900 tracking-wide uppercase">
                   Recently Uploaded Source Draft Papers
                 </h3>
-                <span className="text-[10px] font-mono text-sky-400 font-bold bg-sky-500/10 px-2 py-0.5 rounded-full border border-sky-500/20">
+                <span className="text-[10px] font-mono text-sky-800 font-bold bg-sky-50 px-2 py-0.5 rounded-full border border-sky-200">
                   {uploadedPapers.length} in Cloudinary Vault
                 </span>
               </div>
-              <p className="text-[11px] text-slate-400">
+              <p className="text-xs text-slate-500">
                 Select draft question papers to generate a new blended examination paper using Ollama AI permutation.
               </p>
             </div>
@@ -992,17 +991,17 @@ export const UniversityFormatGenerator: React.FC<UniversityFormatGeneratorProps>
           {/* Controls: Filter & Actions */}
           <div className="flex flex-wrap items-center gap-2">
             {/* Filter Toggle: Recent (6) vs All */}
-            <div className="flex items-center bg-slate-950 p-0.5 rounded-xl border border-slate-800 text-xs font-semibold">
+            <div className="flex items-center bg-slate-100 p-1 rounded-xl border border-slate-200 text-xs font-semibold">
               <button
                 type="button"
                 onClick={() => setFilterMode('recent')}
                 className={`px-3 py-1.5 rounded-lg transition-all cursor-pointer flex items-center gap-1.5 ${
                   filterMode === 'recent'
-                    ? 'bg-rose-600 text-white shadow-md shadow-rose-600/30 font-bold'
-                    : 'text-slate-400 hover:text-slate-200'
+                    ? 'bg-emerald-700 text-white shadow-xs font-bold'
+                    : 'text-slate-600 hover:text-slate-900'
                 }`}
               >
-                <Flame className="w-3.5 h-3.5 text-amber-300" />
+                <Flame className="w-3.5 h-3.5" />
                 <span>Last Uploads ({Math.min(uploadedPapers.length, 6)})</span>
               </button>
               <button
@@ -1010,8 +1009,8 @@ export const UniversityFormatGenerator: React.FC<UniversityFormatGeneratorProps>
                 onClick={() => setFilterMode('all')}
                 className={`px-3 py-1.5 rounded-lg transition-all cursor-pointer flex items-center gap-1.5 ${
                   filterMode === 'all'
-                    ? 'bg-rose-600 text-white shadow-md shadow-rose-600/30 font-bold'
-                    : 'text-slate-400 hover:text-slate-200'
+                    ? 'bg-emerald-700 text-white shadow-xs font-bold'
+                    : 'text-slate-600 hover:text-slate-900'
                 }`}
               >
                 <BookOpen className="w-3.5 h-3.5" />
@@ -1024,15 +1023,15 @@ export const UniversityFormatGenerator: React.FC<UniversityFormatGeneratorProps>
                 <button
                   type="button"
                   onClick={selectAllPapers}
-                  className="px-2.5 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-semibold border border-slate-700 flex items-center gap-1.5 cursor-pointer transition-all"
+                  className="px-2.5 py-1.5 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-semibold border border-slate-200 flex items-center gap-1.5 cursor-pointer transition-all"
                 >
-                  <CheckSquare className="w-3.5 h-3.5 text-emerald-400" />
+                  <CheckSquare className="w-3.5 h-3.5 text-emerald-600" />
                   <span>Select All</span>
                 </button>
                 <button
                   type="button"
                   onClick={clearSelectedPapers}
-                  className="px-2.5 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-semibold border border-slate-700 flex items-center gap-1.5 cursor-pointer transition-all"
+                  className="px-2.5 py-1.5 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-semibold border border-slate-200 flex items-center gap-1.5 cursor-pointer transition-all"
                 >
                   <Square className="w-3.5 h-3.5 text-slate-400" />
                   <span>Clear</span>
@@ -1041,9 +1040,9 @@ export const UniversityFormatGenerator: React.FC<UniversityFormatGeneratorProps>
                   <button
                     type="button"
                     onClick={handleBulkDelete}
-                    className="px-2.5 py-1.5 rounded-xl bg-rose-500/20 hover:bg-rose-500/30 text-rose-300 text-xs font-bold border border-rose-500/40 flex items-center gap-1.5 cursor-pointer transition-all shadow-sm shadow-rose-500/20"
+                    className="px-2.5 py-1.5 rounded-xl bg-rose-50 hover:bg-rose-100 text-rose-700 text-xs font-bold border border-rose-200 flex items-center gap-1.5 cursor-pointer transition-all shadow-xs"
                   >
-                    <Trash2 className="w-3.5 h-3.5 text-rose-400" />
+                    <Trash2 className="w-3.5 h-3.5 text-rose-600" />
                     <span>Delete Selected ({selectedPaperIds.length})</span>
                   </button>
                 )}
@@ -1051,9 +1050,9 @@ export const UniversityFormatGenerator: React.FC<UniversityFormatGeneratorProps>
                   type="button"
                   onClick={handlePurgeAllDrafts}
                   title="Purge all draft papers from database & Cloudinary"
-                  className="px-2.5 py-1.5 rounded-xl bg-slate-800 hover:bg-rose-950/60 text-slate-400 hover:text-rose-300 text-xs font-bold border border-slate-700 hover:border-rose-500/40 flex items-center gap-1.5 cursor-pointer transition-all"
+                  className="px-2.5 py-1.5 rounded-xl bg-slate-100 hover:bg-rose-50 text-slate-600 hover:text-rose-700 text-xs font-bold border border-slate-200 hover:border-rose-200 flex items-center gap-1.5 cursor-pointer transition-all"
                 >
-                  <Trash2 className="w-3.5 h-3.5 text-rose-500" />
+                  <Trash2 className="w-3.5 h-3.5 text-rose-600" />
                   <span>Purge Vault</span>
                 </button>
               </>
@@ -1063,7 +1062,7 @@ export const UniversityFormatGenerator: React.FC<UniversityFormatGeneratorProps>
               type="button"
               onClick={handleSyncCloudinary}
               title="Sync & import from Cloudinary Account"
-              className="p-1.5 px-3 rounded-xl bg-sky-600 hover:bg-sky-500 text-white font-bold border border-sky-500/40 cursor-pointer transition-all flex items-center gap-1.5 text-xs shadow-md shadow-sky-600/20"
+              className="p-1.5 px-3 rounded-xl bg-sky-700 hover:bg-sky-600 text-white font-bold border border-sky-600 cursor-pointer transition-all flex items-center gap-1.5 text-xs shadow-xs"
             >
               <RefreshCw className={`w-3.5 h-3.5 ${loadingPapers ? 'animate-spin' : ''}`} />
               <span>Sync Cloudinary</span>
@@ -1073,21 +1072,21 @@ export const UniversityFormatGenerator: React.FC<UniversityFormatGeneratorProps>
 
         {/* Papers Grid */}
         {loadingPapers ? (
-          <div className="p-12 text-center text-slate-400 text-xs flex items-center justify-center gap-2">
-            <RefreshCw className="w-5 h-5 animate-spin text-rose-500" />
-            <span className="font-semibold text-slate-300">Syncing and loading documents from Cloudinary vault...</span>
+          <div className="p-12 text-center text-slate-500 text-xs flex items-center justify-center gap-2">
+            <RefreshCw className="w-5 h-5 animate-spin text-emerald-600" />
+            <span className="font-semibold text-slate-700">Syncing and loading documents from Cloudinary vault...</span>
           </div>
         ) : uploadedPapers.length === 0 ? (
-          <div className="p-10 rounded-2xl bg-slate-800/40 border border-dashed border-slate-700 text-center space-y-3">
-            <UploadCloud className="w-10 h-10 text-sky-400 mx-auto animate-bounce" />
-            <div className="text-sm font-bold text-slate-200">No draft question papers indexed in local bank yet</div>
-            <p className="text-xs text-slate-400 max-w-md mx-auto">
-              Upload PDF question papers in <strong className="text-rose-400">Exam Workflow</strong> or click below to sync directly from your Cloudinary storage.
+          <div className="p-10 rounded-2xl bg-slate-50 border border-dashed border-slate-300 text-center space-y-3">
+            <UploadCloud className="w-10 h-10 text-sky-600 mx-auto" />
+            <div className="text-sm font-bold text-slate-900">No draft question papers indexed in local bank yet</div>
+            <p className="text-xs text-slate-500 max-w-md mx-auto">
+              Upload PDF question papers in <strong className="text-slate-800">Exam Workflow</strong> or click below to sync directly from your Cloudinary storage.
             </p>
             <button
               type="button"
               onClick={handleSyncCloudinary}
-              className="px-5 py-2.5 bg-sky-600 hover:bg-sky-500 text-white rounded-xl font-bold text-xs shadow-lg shadow-sky-600/30 inline-flex items-center gap-2 cursor-pointer transition-all"
+              className="px-5 py-2.5 bg-sky-700 hover:bg-sky-600 text-white rounded-xl font-bold text-xs shadow-xs inline-flex items-center gap-2 cursor-pointer transition-all"
             >
               <Cloud className="w-4 h-4" />
               <span>Import Documents from Cloudinary Vault</span>
@@ -1106,8 +1105,8 @@ export const UniversityFormatGenerator: React.FC<UniversityFormatGeneratorProps>
                   onClick={() => toggleSelectPaper(paper.id)}
                   className={`group relative p-4 rounded-2xl border transition-all duration-200 cursor-pointer select-none space-y-3 ${
                     isSelected
-                      ? 'bg-gradient-to-br from-rose-950/40 via-slate-900 to-slate-900 border-rose-500/70 shadow-lg shadow-rose-950/40 ring-1 ring-rose-500/60'
-                      : 'bg-slate-900/80 hover:bg-slate-850 border-slate-800 hover:border-slate-700 hover:shadow-md'
+                      ? 'bg-emerald-50/60 border-emerald-500/80 shadow-md ring-2 ring-emerald-500/20'
+                      : 'bg-white hover:bg-slate-50 border-slate-200 hover:border-slate-300 shadow-2xs'
                   } ${isDeleting ? 'opacity-40 pointer-events-none' : ''}`}
                 >
                   {/* Top Bar: Icon, Name, Trash */}
@@ -1116,27 +1115,27 @@ export const UniversityFormatGenerator: React.FC<UniversityFormatGeneratorProps>
                       {/* Checkbox & PDF Badge */}
                       <div className="relative pt-0.5 shrink-0">
                         {isSelected ? (
-                          <div className="w-5 h-5 rounded-lg bg-rose-600 flex items-center justify-center text-white shadow-md shadow-rose-600/40">
+                          <div className="w-5 h-5 rounded-lg bg-emerald-600 flex items-center justify-center text-white shadow-xs">
                             <Check className="w-3.5 h-3.5 stroke-[3]" />
                           </div>
                         ) : (
-                          <div className="w-5 h-5 rounded-lg border border-slate-700 bg-slate-800/80 group-hover:border-slate-500 transition-colors" />
+                          <div className="w-5 h-5 rounded-lg border border-slate-300 bg-slate-50 group-hover:border-slate-400 transition-colors" />
                         )}
                       </div>
 
                       {/* Title and Index */}
                       <div className="min-w-0">
                         <div className="flex items-center gap-1.5">
-                          <span className="text-[10px] font-black font-mono text-rose-400 uppercase tracking-wider">
+                          <span className="text-[10px] font-bold font-mono text-emerald-700 uppercase tracking-wider">
                             Draft #{pIdx + 1}
                           </span>
                           {pIdx < 2 && filterMode === 'recent' && (
-                            <span className="px-1.5 py-0.2 rounded text-[9px] font-black bg-amber-500/20 text-amber-300 border border-amber-500/30">
+                            <span className="px-1.5 py-0.2 rounded text-[9px] font-bold bg-amber-50 text-amber-800 border border-amber-200">
                               NEW
                             </span>
                           )}
                         </div>
-                        <h4 className="font-bold text-xs text-white truncate max-w-[190px]" title={paper.original_filename}>
+                        <h4 className="font-bold text-xs text-slate-900 truncate max-w-[190px]" title={paper.original_filename}>
                           {formattedName}
                         </h4>
                       </div>
@@ -1144,14 +1143,14 @@ export const UniversityFormatGenerator: React.FC<UniversityFormatGeneratorProps>
 
                     {/* Actions: Delete Trash Button */}
                     <div className="flex items-center gap-1 shrink-0">
-                      <span className="px-2 py-0.5 rounded-full text-[9px] font-black bg-sky-500/10 text-sky-400 border border-sky-500/20 uppercase">
+                      <span className="px-2 py-0.5 rounded-full text-[9px] font-bold bg-sky-50 text-sky-700 border border-sky-200 uppercase">
                         PDF
                       </span>
                       <button
                         type="button"
                         onClick={(e) => handleDeletePaper(e, paper.id)}
                         title="Remove this draft document"
-                        className="p-1.5 rounded-lg text-slate-500 hover:text-rose-400 hover:bg-rose-500/20 transition-all cursor-pointer opacity-80 group-hover:opacity-100"
+                        className="p-1.5 rounded-lg text-slate-400 hover:text-rose-600 hover:bg-rose-50 transition-all cursor-pointer opacity-70 group-hover:opacity-100"
                       >
                         <Trash2 className="w-3.5 h-3.5" />
                       </button>
@@ -1159,17 +1158,17 @@ export const UniversityFormatGenerator: React.FC<UniversityFormatGeneratorProps>
                   </div>
 
                   {/* Metadata Pills */}
-                  <div className="grid grid-cols-2 gap-2 text-[11px] font-mono bg-slate-950/70 p-2.5 rounded-xl border border-slate-800/80">
-                    <div className="flex items-center gap-1.5 text-slate-300">
-                      <Hash className="w-3 h-3 text-rose-400" />
+                  <div className="grid grid-cols-2 gap-2 text-[11px] font-mono bg-slate-50 p-2.5 rounded-xl border border-slate-200">
+                    <div className="flex items-center gap-1.5 text-slate-700">
+                      <Hash className="w-3 h-3 text-emerald-600" />
                       <span>{paper.question_count || 14} Questions</span>
                     </div>
-                    <div className="flex items-center gap-1.5 text-slate-300">
-                      <FileText className="w-3 h-3 text-sky-400" />
+                    <div className="flex items-center gap-1.5 text-slate-700">
+                      <FileText className="w-3 h-3 text-sky-600" />
                       <span>{paper.page_count || 1} Pages</span>
                     </div>
-                    <div className="col-span-2 flex items-center justify-between text-[10px] text-slate-400 pt-1 border-t border-slate-800/60 truncate">
-                      <span>Subject: <strong className="text-slate-200">{paper.subject || 'Core Engineering'}</strong></span>
+                    <div className="col-span-2 flex items-center justify-between text-[10px] text-slate-500 pt-1 border-t border-slate-200 truncate">
+                      <span>Subject: <strong className="text-slate-800">{paper.subject || 'Core Engineering'}</strong></span>
                       <span className="text-slate-500">{new Date(paper.uploaded_at).toLocaleDateString()}</span>
                     </div>
                   </div>
@@ -1182,12 +1181,12 @@ export const UniversityFormatGenerator: React.FC<UniversityFormatGeneratorProps>
                         target="_blank"
                         rel="noopener noreferrer"
                         onClick={(e) => e.stopPropagation()}
-                        className="inline-flex items-center gap-1.5 text-[11px] text-sky-400 hover:text-sky-300 font-bold transition-colors"
+                        className="inline-flex items-center gap-1.5 text-[11px] text-sky-700 hover:text-sky-800 font-bold transition-colors"
                       >
                         <ExternalLink className="w-3 h-3" />
                         <span>Preview on Cloudinary</span>
                       </a>
-                      <span className="text-[10px] text-slate-500">Vault Indexed</span>
+                      <span className="text-[10px] text-slate-400">Vault Indexed</span>
                     </div>
                   )}
                 </div>
@@ -1198,19 +1197,19 @@ export const UniversityFormatGenerator: React.FC<UniversityFormatGeneratorProps>
 
         {/* COMBINATION GENERATOR ACTION BAR */}
         {uploadedPapers.length > 0 && (
-          <div className="p-4 rounded-xl bg-gradient-to-r from-rose-950/40 via-slate-800 to-indigo-950/40 border border-rose-500/30 flex flex-wrap items-center justify-between gap-4">
+          <div className="p-4 rounded-xl bg-slate-50 border border-slate-200 flex flex-wrap items-center justify-between gap-4">
             <div className="flex items-center gap-3">
-              <div className="p-2.5 rounded-xl bg-rose-500/20 text-rose-400 border border-rose-500/30">
+              <div className="p-2.5 rounded-xl bg-emerald-50 text-emerald-700 border border-emerald-200">
                 <Combine className="w-5 h-5" />
               </div>
               <div>
-                <div className="text-xs font-black text-white uppercase tracking-wider flex items-center gap-2">
-                  <span>Permutation & Combination Multi-Draft Blending</span>
-                  <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-rose-500/20 text-rose-300 border border-rose-500/40">
+                <div className="text-xs font-bold text-slate-900 uppercase tracking-wider flex items-center gap-2">
+                  <span>Permutation &amp; Combination Multi-Draft Blending</span>
+                  <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-100 text-emerald-800 border border-emerald-200">
                     {selectedPaperIds.length} of {uploadedPapers.length} Drafts Selected
                   </span>
                 </div>
-                <p className="text-[11px] text-slate-300 mt-0.5">
+                <p className="text-[11px] text-slate-600 mt-0.5">
                   {selectedPaperIds.length >= 2
                     ? `Questions from ${selectedPaperIds.length} selected drafts will be blended and permuted across Set P, Set Q, Set R, Set S.`
                     : selectedPaperIds.length === 1
@@ -1224,12 +1223,12 @@ export const UniversityFormatGenerator: React.FC<UniversityFormatGeneratorProps>
               type="button"
               onClick={() => selectedExamId && triggerUniversityGenerator(selectedExamId, selectedPaperIds)}
               disabled={generating || selectedPaperIds.length === 0 || !selectedExamId}
-              className={`px-5 py-3 rounded-xl font-black text-xs shadow-xl flex items-center gap-2 cursor-pointer transition-all ${
+              className={`px-5 py-3 rounded-xl font-bold text-xs shadow-xs flex items-center gap-2 cursor-pointer transition-all ${
                 selectedPaperIds.length >= 2
-                  ? 'bg-rose-600 hover:bg-rose-500 text-white shadow-rose-600/30 animate-pulse'
+                  ? 'bg-emerald-700 hover:bg-emerald-600 text-white'
                   : selectedPaperIds.length === 1
-                  ? 'bg-rose-600 hover:bg-rose-500 text-white shadow-rose-600/20'
-                  : 'bg-slate-800 text-slate-500 border border-slate-700 cursor-not-allowed'
+                  ? 'bg-emerald-700 hover:bg-emerald-600 text-white'
+                  : 'bg-slate-200 text-slate-400 cursor-not-allowed'
               }`}
             >
               <Zap className={`w-4 h-4 ${generating ? 'animate-spin' : ''}`} />
@@ -1248,13 +1247,13 @@ export const UniversityFormatGenerator: React.FC<UniversityFormatGeneratorProps>
       </div>
 
       {/* 9-Step Pipeline Stepper */}
-      <div className="bg-slate-900 border border-slate-800 p-5 rounded-2xl shadow-xl space-y-3">
-        <div className="flex items-center justify-between border-b border-slate-800 pb-3">
-          <span className="text-xs font-extrabold text-slate-300 uppercase tracking-wider flex items-center gap-2">
-            <Layers className="w-4 h-4 text-rose-400" />
-            9-Step Examination Paper Generation & Permutation Pipeline
+      <div className="bg-white border border-slate-200 p-6 rounded-2xl shadow-sm space-y-3">
+        <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+          <span className="text-xs font-bold text-slate-800 uppercase tracking-wider flex items-center gap-2">
+            <Layers className="w-4 h-4 text-emerald-700" />
+            9-Step Examination Paper Generation &amp; Permutation Pipeline
           </span>
-          <span className="text-[11px] font-mono text-emerald-400 font-bold bg-emerald-500/10 px-2 py-0.5 rounded border border-emerald-500/20">
+          <span className="text-[11px] font-mono text-emerald-800 font-bold bg-emerald-50 px-2 py-0.5 rounded border border-emerald-200">
             OLLAMA POWERED &bull; REAL DATA
           </span>
         </div>
@@ -1263,18 +1262,18 @@ export const UniversityFormatGenerator: React.FC<UniversityFormatGeneratorProps>
           {NINE_STEP_PIPELINE.map((s) => (
             <div
               key={s.step}
-              className="bg-slate-800/80 border border-slate-700/80 p-2.5 rounded-xl space-y-1 hover:border-rose-500/50 transition-colors"
+              className="bg-slate-50 border border-slate-200 p-2.5 rounded-xl space-y-1 hover:border-emerald-300 transition-colors"
             >
               <div className="flex items-center justify-between text-[10px]">
-                <span className="w-5 h-5 rounded-full bg-rose-500 text-white font-black flex items-center justify-center">
+                <span className="w-5 h-5 rounded-full bg-slate-900 text-white font-bold text-[10px] flex items-center justify-center">
                   {s.step}
                 </span>
-                <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400" />
+                <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
               </div>
-              <div className="font-bold text-xs text-white leading-snug truncate" title={s.title}>
+              <div className="font-bold text-xs text-slate-900 leading-snug truncate" title={s.title}>
                 {s.title}
               </div>
-              <p className="text-[10px] text-slate-400 truncate" title={s.desc}>
+              <p className="text-[10px] text-slate-500 truncate" title={s.desc}>
                 {s.desc}
               </p>
             </div>
@@ -1287,30 +1286,30 @@ export const UniversityFormatGenerator: React.FC<UniversityFormatGeneratorProps>
         {/* Left Column: Blueprint Card & Master Blueprint Validation Panel */}
         <div className="space-y-6 lg:col-span-1">
           {/* Active Examination Details Card */}
-          <div className="bg-slate-900 border border-slate-800 p-5 rounded-2xl shadow-xl space-y-3">
-            <div className="flex items-center gap-2 text-rose-400 font-bold text-xs uppercase tracking-wide">
+          <div className="bg-white border border-slate-200 p-6 rounded-2xl shadow-sm space-y-3">
+            <div className="flex items-center gap-2 text-indigo-700 font-bold text-xs uppercase tracking-wide">
               <FileCheck className="w-4 h-4" />
               <span>Target Examination Blueprint</span>
             </div>
 
-            <div className="bg-slate-800/90 p-4 rounded-xl border border-slate-700 space-y-2 text-xs">
-              <div className="flex items-center justify-between text-white font-black">
+            <div className="bg-slate-50 p-4 rounded-xl border border-slate-200 space-y-2 text-xs">
+              <div className="flex items-center justify-between text-slate-900 font-bold">
                 <span>PAPER CODE</span>
-                <span className="font-mono text-rose-400 bg-rose-500/10 px-2 py-0.5 rounded border border-rose-500/30">
+                <span className="font-mono text-indigo-800 bg-indigo-50 px-2 py-0.5 rounded border border-indigo-200">
                   {selectedExam?.code || selectedExam?.paper_code || 'EXAM-2026'}
                 </span>
               </div>
-              <div className="text-slate-200 font-black text-sm">
+              <div className="text-slate-900 font-bold text-sm">
                 {selectedExam?.university_name || 'Autonomous Examination Board'}
               </div>
-              <div className="text-rose-300 font-bold">
+              <div className="text-slate-700 font-semibold">
                 {selectedExam?.name || 'Annual Examination'}
               </div>
-              <div className="text-slate-400 text-[11px]">
-                Subject: <strong className="text-slate-200">{selectedExam?.subject || 'Core Engineering'}</strong> &bull; Pattern: <strong className="text-slate-200">{selectedExam?.blueprint_pattern || 'CBCS Standard'}</strong>
+              <div className="text-slate-500 text-[11px]">
+                Subject: <strong className="text-slate-800">{selectedExam?.subject || 'Core Engineering'}</strong> &bull; Pattern: <strong className="text-slate-800">{selectedExam?.blueprint_pattern || 'CBCS Standard'}</strong>
               </div>
 
-              <div className="grid grid-cols-2 gap-2 pt-2 border-t border-slate-700/80 text-[11px] font-mono text-slate-300">
+              <div className="grid grid-cols-2 gap-2 pt-2 border-t border-slate-200 text-[11px] font-mono text-slate-700">
                 <div>Duration: <strong>{selectedExam?.duration_minutes || 180} Mins</strong></div>
                 <div>Max Marks: <strong>{selectedExam?.total_marks || 70} Marks</strong></div>
                 <div>MCQs: <strong>{selectedExam?.mcq_count || 14} Qs</strong></div>
@@ -1318,22 +1317,22 @@ export const UniversityFormatGenerator: React.FC<UniversityFormatGeneratorProps>
               </div>
 
               {selectedExam?.marking_scheme && (
-                <div className="pt-2 border-t border-slate-700/60 text-[10px] text-slate-400">
-                  Marking Scheme: <span className="text-slate-300">{selectedExam.marking_scheme}</span>
+                <div className="pt-2 border-t border-slate-200 text-[10px] text-slate-500">
+                  Marking Scheme: <span className="text-slate-700">{selectedExam.marking_scheme}</span>
                 </div>
               )}
             </div>
           </div>
 
           {/* Master Blueprint Hard-Stop Gate & Pre-PDF Checklist */}
-          <div className="bg-slate-900 border border-slate-800 p-5 rounded-2xl shadow-xl space-y-4">
-            <div className="flex items-center justify-between border-b border-slate-800 pb-3">
-              <div className="flex items-center gap-2 text-white font-extrabold text-xs">
-                <ShieldCheck className="w-4 h-4 text-emerald-400" />
+          <div className="bg-white border border-slate-200 p-6 rounded-2xl shadow-sm space-y-4">
+            <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+              <div className="flex items-center gap-2 text-slate-900 font-bold text-xs">
+                <ShieldCheck className="w-4 h-4 text-emerald-600" />
                 <span>Pre-PDF Master Blueprint Validation</span>
               </div>
-              <span className={`px-2 py-0.5 rounded text-[10px] font-black uppercase ${
-                validationResult?.isValid ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30' : 'bg-rose-500/20 text-rose-300 border border-rose-500/30'
+              <span className={`px-2 py-0.5 rounded text-[10px] font-bold uppercase ${
+                validationResult?.isValid ? 'bg-emerald-100 text-emerald-800 border border-emerald-200' : 'bg-rose-100 text-rose-800 border border-rose-200'
               }`}>
                 {validationResult?.isValid ? 'PASSED (100%)' : 'VALIDATION READY'}
               </span>
@@ -1342,15 +1341,15 @@ export const UniversityFormatGenerator: React.FC<UniversityFormatGeneratorProps>
             {/* Checklist items */}
             <div className="space-y-2">
               {validationResult?.checklist?.map((item, idx) => (
-                <div key={idx} className="p-2.5 rounded-xl bg-slate-800/80 border border-slate-700/80 flex items-start gap-2.5 text-xs">
+                <div key={idx} className="p-3 rounded-xl bg-slate-50 border border-slate-200 flex items-start gap-2.5 text-xs">
                   {item.passed ? (
-                    <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0 mt-0.5" />
+                    <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0 mt-0.5" />
                   ) : (
-                    <AlertCircle className="w-4 h-4 text-rose-400 shrink-0 mt-0.5" />
+                    <AlertCircle className="w-4 h-4 text-rose-600 shrink-0 mt-0.5" />
                   )}
                   <div>
-                    <div className="font-bold text-white leading-snug">{item.rule}</div>
-                    <div className="text-[11px] text-slate-400">{item.details}</div>
+                    <div className="font-bold text-slate-900 leading-snug">{item.rule}</div>
+                    <div className="text-[11px] text-slate-500">{item.details}</div>
                   </div>
                 </div>
               ))}
@@ -1361,10 +1360,10 @@ export const UniversityFormatGenerator: React.FC<UniversityFormatGeneratorProps>
               type="button"
               onClick={() => setShowPdfModal(true)}
               disabled={!selectedExam}
-              className="w-full py-3 bg-rose-600 hover:bg-rose-500 text-white rounded-xl font-extrabold text-xs shadow-lg shadow-rose-600/20 flex items-center justify-center gap-2 cursor-pointer transition-all disabled:opacity-50"
+              className="w-full py-3 bg-emerald-700 hover:bg-emerald-600 text-white rounded-xl font-bold text-xs shadow-xs flex items-center justify-center gap-2 cursor-pointer transition-all disabled:opacity-50"
             >
               <Printer className="w-4 h-4" />
-              <span>Generate & Launch Official University PDF</span>
+              <span>Generate &amp; Launch Official University PDF</span>
             </button>
           </div>
         </div>
@@ -1372,14 +1371,14 @@ export const UniversityFormatGenerator: React.FC<UniversityFormatGeneratorProps>
         {/* Right Column: Live Printable Paper Preview */}
         <div className="lg:col-span-2 space-y-4">
           {!hasRealPaper ? (
-            <div className="bg-slate-900 border border-slate-800 p-12 rounded-2xl shadow-xl text-center space-y-5">
-              <div className="w-16 h-16 rounded-2xl bg-gradient-to-br from-rose-500/20 to-sky-500/20 border border-rose-500/30 text-rose-400 flex items-center justify-center mx-auto shadow-inner">
+            <div className="bg-white border border-slate-200 p-12 rounded-2xl shadow-sm text-center space-y-5">
+              <div className="w-16 h-16 rounded-2xl bg-emerald-50 border border-emerald-200 text-emerald-700 flex items-center justify-center mx-auto shadow-2xs">
                 <Sparkles className="w-8 h-8" />
               </div>
               <div className="space-y-1.5 max-w-md mx-auto">
-                <h3 className="text-base font-extrabold text-white">No Examination Paper Generated Yet</h3>
-                <p className="text-xs text-slate-400 leading-relaxed">
-                  Select your uploaded source draft papers from the vault above and click <strong className="text-rose-400">"Generate Real Paper Sets"</strong> (or <strong className="text-sky-400">"Generate from Combination"</strong>) to compile 4 authentic, randomized sets (Set P, Set Q, Set R, Set S) using Ollama AI.
+                <h3 className="text-base font-bold text-slate-900">No Examination Paper Generated Yet</h3>
+                <p className="text-xs text-slate-500 leading-relaxed">
+                  Select your uploaded source draft papers from the vault above and click <strong className="text-slate-800">"Generate Real Paper Sets"</strong> (or <strong className="text-slate-800">"Generate Paper from Combination"</strong>) to compile 4 authentic, randomized sets (Set P, Set Q, Set R, Set S) using Ollama AI.
                 </p>
               </div>
 
@@ -1388,14 +1387,14 @@ export const UniversityFormatGenerator: React.FC<UniversityFormatGeneratorProps>
                   type="button"
                   onClick={() => triggerUniversityGenerator(selectedExamId, selectedPaperIds)}
                   disabled={generating}
-                  className="px-6 py-3 bg-gradient-to-r from-rose-600 to-rose-500 hover:from-rose-500 hover:to-rose-400 text-white font-bold text-xs rounded-xl shadow-lg shadow-rose-600/30 inline-flex items-center gap-2 cursor-pointer transition-all disabled:opacity-50"
+                  className="px-6 py-3 bg-emerald-700 hover:bg-emerald-600 text-white font-bold text-xs rounded-xl shadow-xs inline-flex items-center gap-2 cursor-pointer transition-all disabled:opacity-50"
                 >
                   <Zap className={`w-4 h-4 ${generating ? 'animate-spin' : ''}`} />
                   <span>{generating ? 'Compiling Real Sets with Ollama...' : `Generate Real Sets from ${selectedPaperIds.length} Selected Drafts`}</span>
                 </button>
               ) : (
-                <div className="inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-slate-800/80 border border-slate-700 text-slate-400 text-xs font-medium">
-                  <Info className="w-4 h-4 text-sky-400" />
+                <div className="inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-slate-50 border border-slate-200 text-slate-600 text-xs font-medium">
+                  <Info className="w-4 h-4 text-sky-600" />
                   <span>Select at least 1 draft paper above to enable generation</span>
                 </div>
               )}
@@ -1404,20 +1403,20 @@ export const UniversityFormatGenerator: React.FC<UniversityFormatGeneratorProps>
             <>
               {/* PDF Ready Quick Access Bar */}
               {latestFormatexPdfUrl && (
-                <div className="bg-gradient-to-r from-emerald-950 via-slate-900 to-slate-900 border border-emerald-500/40 p-4 rounded-2xl shadow-xl flex flex-wrap items-center justify-between gap-3 animate-fadeIn">
+                <div className="bg-emerald-50 border border-emerald-200 p-4 rounded-2xl shadow-xs flex flex-wrap items-center justify-between gap-3 animate-fadeIn">
                   <div className="flex items-center gap-3">
-                    <div className="p-2.5 bg-emerald-500/20 text-emerald-400 rounded-xl border border-emerald-500/30">
+                    <div className="p-2.5 bg-emerald-100 text-emerald-800 rounded-xl border border-emerald-300">
                       <FileCheck className="w-5 h-5" />
                     </div>
                     <div>
                       <div className="flex items-center gap-2">
-                        <span className="font-extrabold text-sm text-white">Official Question Paper PDF Ready</span>
-                        <span className="px-2 py-0.5 rounded-full text-[10px] font-black bg-emerald-500 text-white">
+                        <span className="font-bold text-sm text-slate-900">Official Question Paper PDF Ready</span>
+                        <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-700 text-white">
                           READY TO PRINT
                         </span>
                       </div>
-                      <p className="text-xs text-slate-400">
-                        Generated & compiled via Free LaTeX.Online cloud compiler
+                      <p className="text-xs text-slate-600">
+                        Generated &amp; compiled via Free LaTeX.Online cloud compiler
                       </p>
                     </div>
                   </div>
@@ -1425,7 +1424,7 @@ export const UniversityFormatGenerator: React.FC<UniversityFormatGeneratorProps>
                     <button
                       type="button"
                       onClick={() => window.open(latestFormatexPdfUrl, '_blank')}
-                      className="px-3.5 py-2 bg-emerald-500 hover:bg-emerald-400 text-slate-950 rounded-xl font-black text-xs flex items-center gap-1.5 shadow-md shadow-emerald-500/20 cursor-pointer transition-all"
+                      className="px-3.5 py-2 bg-emerald-700 hover:bg-emerald-600 text-white rounded-xl font-bold text-xs flex items-center gap-1.5 shadow-xs cursor-pointer transition-all"
                     >
                       <ExternalLink className="w-3.5 h-3.5" />
                       <span>Open PDF</span>
@@ -1433,7 +1432,7 @@ export const UniversityFormatGenerator: React.FC<UniversityFormatGeneratorProps>
                     <button
                       type="button"
                       onClick={() => setShowPdfModal(true)}
-                      className="px-3.5 py-2 bg-slate-800 hover:bg-slate-700 text-white border border-slate-700 rounded-xl font-bold text-xs flex items-center gap-1.5 cursor-pointer transition-all"
+                      className="px-3.5 py-2 bg-white hover:bg-slate-50 text-slate-800 border border-slate-300 rounded-xl font-bold text-xs flex items-center gap-1.5 cursor-pointer transition-all shadow-2xs"
                     >
                       <Eye className="w-3.5 h-3.5" />
                       <span>View PDF Modal</span>
@@ -1443,19 +1442,19 @@ export const UniversityFormatGenerator: React.FC<UniversityFormatGeneratorProps>
               )}
 
               {/* Controls Bar */}
-              <div className="bg-slate-900 border border-slate-800 p-3.5 rounded-2xl shadow-xl flex flex-wrap items-center justify-between gap-3">
+              <div className="bg-white border border-slate-200 p-3.5 rounded-2xl shadow-sm flex flex-wrap items-center justify-between gap-3">
                 {/* Set Switcher */}
                 <div className="flex items-center gap-1.5">
-                  <span className="text-xs font-bold text-slate-400 mr-1">Select Set:</span>
+                  <span className="text-xs font-bold text-slate-500 mr-1">Select Set:</span>
                   {['Set P', 'Set Q', 'Set R', 'Set S'].map((setName, sIdx) => (
                     <button
                       key={setName}
                       type="button"
                       onClick={() => setActiveSetIndex(sIdx)}
-                      className={`px-3 py-1.5 rounded-lg text-xs font-black cursor-pointer transition-all ${
+                      className={`px-3 py-1.5 rounded-lg text-xs font-bold cursor-pointer transition-all ${
                         activeSetIndex === sIdx
-                          ? 'bg-rose-600 text-white shadow-sm'
-                          : 'bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700'
+                          ? 'bg-emerald-700 text-white shadow-xs'
+                          : 'bg-slate-100 hover:bg-slate-200 text-slate-700 border border-slate-200'
                       }`}
                     >
                       {setName}
@@ -1470,7 +1469,7 @@ export const UniversityFormatGenerator: React.FC<UniversityFormatGeneratorProps>
                     onClick={() => handleCompileFormatexPdf(setLetter)}
                     disabled={compilingFormatex}
                     title="Compile and download publication-ready official PDF using LaTeX.Online / FormaTeX Engine"
-                    className="px-3 py-1.5 rounded-lg text-xs font-bold bg-amber-500 hover:bg-amber-400 text-slate-950 flex items-center gap-1.5 cursor-pointer transition-all shadow-md shadow-amber-500/20 disabled:opacity-50"
+                    className="px-3 py-1.5 rounded-lg text-xs font-bold bg-amber-500 hover:bg-amber-600 text-slate-950 flex items-center gap-1.5 cursor-pointer transition-all shadow-xs disabled:opacity-50"
                   >
                     <Zap className={`w-3.5 h-3.5 ${compilingFormatex ? 'animate-spin' : ''}`} />
                     <span>{compilingFormatex ? `Compiling Set ${setLetter}...` : `⚡ Compile Official PDF (Set ${setLetter})`}</span>
@@ -1481,9 +1480,9 @@ export const UniversityFormatGenerator: React.FC<UniversityFormatGeneratorProps>
                     type="button"
                     onClick={() => handleViewLatexCode(setLetter)}
                     title="View and edit clean LaTeX source code"
-                    className="px-3 py-1.5 rounded-lg text-xs font-bold bg-slate-800 hover:bg-slate-700 text-sky-300 border border-sky-500/30 flex items-center gap-1.5 cursor-pointer transition-all"
+                    className="px-3 py-1.5 rounded-lg text-xs font-bold bg-slate-100 hover:bg-slate-200 text-slate-800 border border-slate-200 flex items-center gap-1.5 cursor-pointer transition-all"
                   >
-                    <Code2 className="w-3.5 h-3.5 text-sky-400" />
+                    <Code2 className="w-3.5 h-3.5 text-slate-600" />
                     <span>LaTeX Source</span>
                   </button>
 
@@ -1493,8 +1492,8 @@ export const UniversityFormatGenerator: React.FC<UniversityFormatGeneratorProps>
                     onClick={() => setShowAnswerKey(!showAnswerKey)}
                     className={`px-3 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1.5 cursor-pointer transition-all ${
                       showAnswerKey
-                        ? 'bg-amber-500/20 text-amber-300 border border-amber-500/40'
-                        : 'bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700'
+                        ? 'bg-amber-50 text-amber-900 border border-amber-300'
+                        : 'bg-slate-100 hover:bg-slate-200 text-slate-700 border border-slate-200'
                     }`}
                   >
                     {showAnswerKey ? <Eye className="w-3.5 h-3.5" /> : <EyeOff className="w-3.5 h-3.5" />}
@@ -1504,23 +1503,23 @@ export const UniversityFormatGenerator: React.FC<UniversityFormatGeneratorProps>
               </div>
 
               {/* Paper Preview Box */}
-              <div className="bg-white text-slate-900 p-6 sm:p-10 rounded-2xl shadow-2xl border border-slate-300 space-y-6 max-w-full overflow-hidden relative">
+              <div className="bg-white text-slate-900 p-6 sm:p-10 rounded-2xl shadow-md border border-slate-200 space-y-6 max-w-full overflow-hidden relative">
                 {/* Official University Header */}
                 <div className="space-y-3 border-b-2 border-slate-900 pb-4">
                   <div className="flex items-center justify-between font-mono text-xs font-bold text-slate-900">
                     <div className="flex items-center gap-2">
-                      <span className="border border-slate-900 px-2 py-1 text-xs font-black">Seat No.</span>
+                      <span className="border border-slate-900 px-2 py-1 text-xs font-bold">Seat No.</span>
                       <div className="w-28 h-6 border border-slate-900 flex items-center px-2 text-[10px] text-slate-400">
                         [ Seat No ]
                       </div>
                     </div>
                     <div className="flex items-center gap-3">
-                      <span className="text-sm font-black tracking-wider uppercase text-slate-900">
+                      <span className="text-sm font-bold tracking-wider uppercase text-slate-900">
                         {selectedExam?.code || selectedExam?.paper_code || 'EXAM-2026'}
                       </span>
                       <div className="flex items-center border-2 border-slate-900 rounded overflow-hidden">
-                        <span className="bg-slate-900 text-white text-xs font-black px-2 py-0.5">Set</span>
-                        <span className="text-sm font-black px-2.5 py-0.5 text-slate-950 bg-slate-100">
+                        <span className="bg-slate-900 text-white text-xs font-bold px-2 py-0.5">Set</span>
+                        <span className="text-sm font-bold px-2.5 py-0.5 text-slate-950 bg-slate-100">
                           {setLetter}
                         </span>
                       </div>
@@ -1528,28 +1527,28 @@ export const UniversityFormatGenerator: React.FC<UniversityFormatGeneratorProps>
                   </div>
 
                   <div className="text-center space-y-1">
-                    <div className="text-[10px] font-black uppercase tracking-widest text-slate-500">
+                    <div className="text-[10px] font-bold uppercase tracking-widest text-slate-500">
                       CONFIDENTIAL &bull; UNIVERSITY BOARD EXAMINATION &bull; PROTECTED UNDER ZEROLEAK VAULT
                     </div>
-                    <h1 className="text-lg font-black text-slate-950 uppercase leading-snug">
+                    <h1 className="text-lg font-bold text-slate-950 uppercase leading-snug">
                       {selectedExam?.university_name || 'Autonomous State Examination Board'}
                     </h1>
-                    <h2 className="text-sm font-extrabold text-slate-900 uppercase">
+                    <h2 className="text-sm font-bold text-slate-900 uppercase">
                       {selectedExam?.name || 'Annual Examination 2026'}
                     </h2>
                     <div className="text-xs font-bold text-slate-800 uppercase">
                       Subject: {selectedExam?.subject || 'Core Engineering'} {selectedExam?.blueprint_pattern ? `• Pattern: ${selectedExam.blueprint_pattern}` : ''}
                     </div>
 
-                    <div className="flex flex-wrap items-center justify-between pt-2 text-xs font-bold text-slate-900 border-t border-slate-300 mt-2 font-mono">
-                      <span>Day & Date: <strong>{new Date().toLocaleDateString('en-US', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })}</strong></span>
+                    <div className="flex flex-wrap items-center justify-between pt-2 text-xs font-bold text-slate-900 border-t border-slate-200 mt-2 font-mono">
+                      <span>Day &amp; Date: <strong>{new Date().toLocaleDateString('en-US', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })}</strong></span>
                       <span>Duration: <strong>{selectedExam?.duration_minutes || 180} Minutes</strong></span>
                       <span>Max. Marks: <strong>{selectedExam?.total_marks || 70} Marks</strong></span>
                     </div>
                   </div>
 
-                  <div className="p-3 bg-slate-50 rounded-lg border border-slate-300 text-xs text-slate-800 space-y-1">
-                    <div className="font-extrabold text-slate-950 uppercase text-[11px]">
+                  <div className="p-3 bg-slate-50 rounded-lg border border-slate-200 text-xs text-slate-800 space-y-1">
+                    <div className="font-bold text-slate-950 uppercase text-[11px]">
                       Instructions:
                     </div>
                     <ol className="list-decimal list-inside space-y-0.5 text-[11px] leading-relaxed">
@@ -1563,15 +1562,15 @@ export const UniversityFormatGenerator: React.FC<UniversityFormatGeneratorProps>
                 </div>
 
                 {/* MCQ Section */}
-                <div className="space-y-3 border-b border-slate-300 pb-5">
-                  <div className="flex items-center justify-between font-bold text-xs border-b border-slate-400 pb-1 text-slate-900 font-mono">
-                    <span className="uppercase text-sm font-black">MCQ / Objective Type Questions</span>
+                <div className="space-y-3 border-b border-slate-200 pb-5">
+                  <div className="flex items-center justify-between font-bold text-xs border-b border-slate-300 pb-1 text-slate-900 font-mono">
+                    <span className="uppercase text-sm font-bold">MCQ / Objective Type Questions</span>
                     <span>Duration: 30 Minutes &nbsp;|&nbsp; Marks: {realMcqs.length || 14}</span>
                   </div>
 
                   <div className="flex items-center justify-between font-bold text-sm text-slate-950">
                     <span>Q.1 Choose the correct alternatives from the options.</span>
-                    <span className="font-mono text-sm font-black pr-2">{realMcqs.length || 14}</span>
+                    <span className="font-mono text-sm font-bold pr-2">{realMcqs.length || 14}</span>
                   </div>
 
                   <div className="space-y-4 pl-2">
@@ -1610,7 +1609,7 @@ export const UniversityFormatGenerator: React.FC<UniversityFormatGeneratorProps>
                                       <LaTeXText text={optText} />
                                     </div>
                                     {showAnswerKey && isCorrect && (
-                                      <span className="ml-1 text-[9px] font-black text-emerald-700 bg-emerald-100 px-1 py-0.5 rounded shrink-0">
+                                      <span className="ml-1 text-[9px] font-bold text-emerald-800 bg-emerald-100 px-1 py-0.5 rounded shrink-0">
                                         [CORRECT]
                                       </span>
                                     )}
@@ -1630,9 +1629,9 @@ export const UniversityFormatGenerator: React.FC<UniversityFormatGeneratorProps>
                 </div>
 
                 {/* Section – I Theory */}
-                <div className="space-y-3 border-b border-slate-300 pb-5">
-                  <div className="flex items-center justify-between font-black text-sm border-b border-slate-400 pb-1 text-slate-950 uppercase font-mono">
-                    <span>Section – I (Theory & Analysis)</span>
+                <div className="space-y-3 border-b border-slate-200 pb-5">
+                  <div className="flex items-center justify-between font-bold text-sm border-b border-slate-300 pb-1 text-slate-950 uppercase font-mono">
+                    <span>Section – I (Theory &amp; Analysis)</span>
                     <span>Max. Marks: 28</span>
                   </div>
 
@@ -1640,7 +1639,7 @@ export const UniversityFormatGenerator: React.FC<UniversityFormatGeneratorProps>
                     <div className="space-y-4">
                       <div className="flex items-center justify-between font-bold text-sm text-slate-950">
                         <span>Q.2 Answer the following questions.</span>
-                        <span className="font-mono text-sm font-black pr-2">16</span>
+                        <span className="font-mono text-sm font-bold pr-2">16</span>
                       </div>
                       <div className="space-y-2.5 pl-4 text-xs font-medium text-slate-900">
                         {theorySec1.slice(0, 5).map((tQ, tIdx) => (
@@ -1659,7 +1658,7 @@ export const UniversityFormatGenerator: React.FC<UniversityFormatGeneratorProps>
                         <div className="space-y-2.5 pt-2">
                           <div className="flex items-center justify-between font-bold text-sm text-slate-950">
                             <span>Q.3 Answer the following questions in detail.</span>
-                            <span className="font-mono text-sm font-black pr-2">12</span>
+                            <span className="font-mono text-sm font-bold pr-2">12</span>
                           </div>
                           <div className="space-y-2 pl-4 text-xs font-medium text-slate-900">
                             {theorySec1.slice(5).map((tQ, tIdx) => (
@@ -1682,9 +1681,9 @@ export const UniversityFormatGenerator: React.FC<UniversityFormatGeneratorProps>
                 </div>
 
                 {/* Section – II Theory */}
-                <div className="space-y-3 border-b border-slate-300 pb-5">
-                  <div className="flex items-center justify-between font-black text-sm border-b border-slate-400 pb-1 text-slate-950 uppercase font-mono">
-                    <span>Section – II (Applications & Problems)</span>
+                <div className="space-y-3 border-b border-slate-200 pb-5">
+                  <div className="flex items-center justify-between font-bold text-sm border-b border-slate-300 pb-1 text-slate-950 uppercase font-mono">
+                    <span>Section – II (Applications &amp; Problems)</span>
                     <span>Max. Marks: 28</span>
                   </div>
 
@@ -1692,7 +1691,7 @@ export const UniversityFormatGenerator: React.FC<UniversityFormatGeneratorProps>
                     <div className="space-y-4">
                       <div className="flex items-center justify-between font-bold text-sm text-slate-950">
                         <span>Q.4 Answer the following questions.</span>
-                        <span className="font-mono text-sm font-black pr-2">16</span>
+                        <span className="font-mono text-sm font-bold pr-2">16</span>
                       </div>
                       <div className="space-y-2.5 pl-4 text-xs font-medium text-slate-900">
                         {theorySec2.slice(0, 5).map((tQ, tIdx) => (
@@ -1711,7 +1710,7 @@ export const UniversityFormatGenerator: React.FC<UniversityFormatGeneratorProps>
                         <div className="space-y-2.5 pt-2">
                           <div className="flex items-center justify-between font-bold text-sm text-slate-950">
                             <span>Q.5 Solve / Explain the following.</span>
-                            <span className="font-mono text-sm font-black pr-2">12</span>
+                            <span className="font-mono text-sm font-bold pr-2">12</span>
                           </div>
                           <div className="space-y-2 pl-4 text-xs font-medium text-slate-900">
                             {theorySec2.slice(5).map((tQ, tIdx) => (
@@ -1736,7 +1735,7 @@ export const UniversityFormatGenerator: React.FC<UniversityFormatGeneratorProps>
                 {/* Paper Footer */}
                 <div className="pt-3 flex flex-wrap items-center justify-between text-[11px] text-slate-600 font-mono border-t-2 border-slate-900">
                   <div>Generated: {new Date().toLocaleDateString()}</div>
-                  <div className="font-extrabold text-slate-900">*** END OF QUESTION PAPER ***</div>
+                  <div className="font-bold text-slate-900">*** END OF QUESTION PAPER ***</div>
                   <div>{selectedExam?.code || selectedExam?.paper_code || 'EXAM-2026'} (Set {setLetter})</div>
                 </div>
               </div>
@@ -1755,22 +1754,22 @@ export const UniversityFormatGenerator: React.FC<UniversityFormatGeneratorProps>
 
       {/* FormaTeX LaTeX Source Code Modal */}
       {showLatexModal && (
-        <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-xs flex items-center justify-center p-4 sm:p-6 animate-fadeIn">
-          <div className="bg-slate-900 border border-slate-700 rounded-2xl shadow-2xl w-full max-w-4xl max-h-[90vh] flex flex-col overflow-hidden">
+        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-center justify-center p-4 sm:p-6 animate-fadeIn">
+          <div className="bg-white border border-slate-200 rounded-2xl shadow-2xl w-full max-w-4xl max-h-[90vh] flex flex-col overflow-hidden">
             {/* Modal Header */}
-            <div className="px-6 py-4 border-b border-slate-800 flex items-center justify-between bg-slate-950/60">
+            <div className="px-6 py-4 border-b border-slate-200 flex items-center justify-between bg-slate-50">
               <div className="flex items-center gap-2.5">
-                <div className="p-2 rounded-xl bg-amber-500/20 text-amber-400 border border-amber-500/30">
+                <div className="p-2 rounded-xl bg-amber-50 text-amber-800 border border-amber-200">
                   <Code2 className="w-5 h-5" />
                 </div>
                 <div>
-                  <h3 className="text-sm font-black text-white flex items-center gap-2">
+                  <h3 className="text-sm font-bold text-slate-900 flex items-center gap-2">
                     <span>FormaTeX LaTeX Publication Source</span>
-                    <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">
+                    <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-emerald-100 text-emerald-800 border border-emerald-200">
                       SET {setLetter}
                     </span>
                   </h3>
-                  <p className="text-[11px] text-slate-400">
+                  <p className="text-[11px] text-slate-500">
                     Clean, publication-ready mathematical LaTeX markup with full typography rules
                   </p>
                 </div>
@@ -1784,9 +1783,9 @@ export const UniversityFormatGenerator: React.FC<UniversityFormatGeneratorProps>
                     setCopiedLatex(true);
                     setTimeout(() => setCopiedLatex(false), 2000);
                   }}
-                  className="px-3 py-1.5 rounded-lg text-xs font-bold bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 flex items-center gap-1.5 cursor-pointer transition-all"
+                  className="px-3 py-1.5 rounded-lg text-xs font-bold bg-white hover:bg-slate-100 text-slate-700 border border-slate-300 flex items-center gap-1.5 cursor-pointer transition-all shadow-2xs"
                 >
-                  {copiedLatex ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5 text-slate-400" />}
+                  {copiedLatex ? <Check className="w-3.5 h-3.5 text-emerald-600" /> : <Copy className="w-3.5 h-3.5 text-slate-500" />}
                   <span>{copiedLatex ? 'Copied!' : 'Copy LaTeX'}</span>
                 </button>
 
@@ -1794,7 +1793,7 @@ export const UniversityFormatGenerator: React.FC<UniversityFormatGeneratorProps>
                   type="button"
                   onClick={() => handleCompileFormatexPdf(setLetter)}
                   disabled={compilingFormatex}
-                  className="px-3 py-1.5 rounded-lg text-xs font-bold bg-amber-500 hover:bg-amber-400 text-slate-950 flex items-center gap-1.5 cursor-pointer transition-all shadow-md shadow-amber-500/20 disabled:opacity-50"
+                  className="px-3 py-1.5 rounded-lg text-xs font-bold bg-amber-500 hover:bg-amber-600 text-slate-950 flex items-center gap-1.5 cursor-pointer transition-all shadow-xs disabled:opacity-50"
                 >
                   <Zap className={`w-3.5 h-3.5 ${compilingFormatex ? 'animate-spin' : ''}`} />
                   <span>{compilingFormatex ? 'Compiling...' : 'Compile with FormaTeX'}</span>
@@ -1803,7 +1802,7 @@ export const UniversityFormatGenerator: React.FC<UniversityFormatGeneratorProps>
                 <button
                   type="button"
                   onClick={() => setShowLatexModal(false)}
-                  className="p-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-white cursor-pointer transition-all ml-2"
+                  className="p-1.5 rounded-lg hover:bg-slate-200 text-slate-500 hover:text-slate-800 cursor-pointer transition-all ml-2"
                 >
                   <X className="w-5 h-5" />
                 </button>
@@ -1822,9 +1821,9 @@ export const UniversityFormatGenerator: React.FC<UniversityFormatGeneratorProps>
             </div>
 
             {/* Modal Footer */}
-            <div className="px-6 py-3 border-t border-slate-800 bg-slate-950/80 flex items-center justify-between text-xs text-slate-400">
+            <div className="px-6 py-3 border-t border-slate-200 bg-slate-50 flex items-center justify-between text-xs text-slate-600">
               <div className="flex items-center gap-2">
-                <span className="inline-block w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
+                <span className="inline-block w-2 h-2 rounded-full bg-emerald-500"></span>
                 <span>FormaTeX Cloud Engine Ready</span>
               </div>
               <div>
