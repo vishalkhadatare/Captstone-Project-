@@ -425,6 +425,7 @@ export const UniversityFormatGenerator: React.FC<UniversityFormatGeneratorProps>
     if (!confirm('Are you sure you want to permanently remove this draft paper from the repository and Cloudinary?')) {
       return;
     }
+    setDeletingId(paperId);
     setActionMessage(null);
     try {
       const res = await api.deleteQuestionPaper(paperId);
@@ -440,6 +441,8 @@ export const UniversityFormatGenerator: React.FC<UniversityFormatGeneratorProps>
       }
     } catch (err: any) {
       setActionMessage({ type: 'error', text: err.message || 'Error deleting document.' });
+    } finally {
+      setDeletingId(null);
     }
   };
 

@@ -4587,80 +4587,41 @@ async function startServer() {
     );
   }
 
-  // Get all uploaded question papers with Cloudinary metadata + auto-import
+  // Get all uploaded question papers with Cloudinary metadata
   app.get('/api/question-papers', authenticateToken, async (req: Request, res: Response) => {
     try {
       const db = await getDb();
       await ensureDeletedVaultAssetsTable(db);
       const { exam_id } = req.query;
-      const orgId = req.user?.org_id || '';
 
-      // Get set of deleted public_ids so they are NEVER re-imported
+      // Filter out any question_papers whose public_id or url was marked as deleted
       const deletedRows = executeQuery(db, `SELECT public_id, cloudinary_url FROM deleted_vault_assets`);
       const deletedSet = new Set<string>();
       deletedRows.forEach((r: any) => {
-        if (r.public_id) deletedSet.add(r.public_id);
-        if (r.cloudinary_url) deletedSet.add(r.cloudinary_url);
+        if (r.public_id) deletedSet.add(r.public_id.toLowerCase());
+        if (r.cloudinary_url) deletedSet.add(r.cloudinary_url.toLowerCase());
       });
 
-      // Auto-sync any assets from Cloudinary account that are not yet in question_papers and NOT in deletedSet
-      try {
-        const cloudAssets = await listAllCloudinaryAssets();
-        let newImported = false;
-        for (const asset of cloudAssets) {
-          if (deletedSet.has(asset.public_id) || deletedSet.has(asset.secure_url)) {
-            continue;
-          }
-
-          const existing = executeQuery(
-            db,
-            `SELECT id FROM question_papers WHERE cloudinary_public_id = ? OR cloudinary_url = ?`,
-            [asset.public_id, asset.secure_url]
-          )[0];
-
-          if (!existing) {
-            const paperId = `PAPER-${uuidv4().substring(0, 8).toUpperCase()}`;
-            executeRun(
-              db,
-              `INSERT INTO question_papers (
-                id, org_id, exam_id, original_filename, subject, examination_category, processing_status,
-                page_count, question_count, auto_extracted_count, needs_review_count, manually_corrected_count,
-                cloudinary_url, cloudinary_public_id, uploaded_at
-              ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-              [
-                paperId,
-                orgId || 'ORG-DEFAULT',
-                exam_id || null,
-                asset.original_filename || 'document.pdf',
-                'Core Engineering',
-                'University Exam',
-                'COMPLETED',
-                1,
-                14,
-                14,
-                0,
-                0,
-                asset.secure_url,
-                asset.public_id,
-                asset.created_at || new Date().toISOString(),
-              ]
-            );
-            newImported = true;
-          }
-        }
-        if (newImported) {
-          saveDb();
-        }
-      } catch (cloudErr) {
-        console.warn('[ZeroLeak] Cloudinary auto-sync warning:', cloudErr);
-      }
-
-      const papers = executeQuery(
+      const allPapers = executeQuery(
         db,
         `SELECT * FROM question_papers ORDER BY uploaded_at DESC`
       );
 
-      return res.json({ success: true, papers });
+      // Clean out any lingering deleted papers from database
+      const validPapers = allPapers.filter((p: any) => {
+        const pubId = (p.cloudinary_public_id || '').toLowerCase();
+        const url = (p.cloudinary_url || '').toLowerCase();
+        const id = (p.id || '').toLowerCase();
+        if (deletedSet.has(pubId) || deletedSet.has(url) || deletedSet.has(id)) {
+          executeRun(db, `DELETE FROM question_papers WHERE id = ?`, [p.id]);
+          return false;
+        }
+        return true;
+      });
+
+      saveDb();
+
+      return res.json({ success: true, papers: validPapers });
     } catch (err: any) {
       return res.status(500).json({ error: err.message });
     }
@@ -4975,24 +4936,61 @@ async function startServer() {
       await ensureDeletedVaultAssetsTable(db);
       const { id } = req.params;
 
-      const paper = executeQuery(db, `SELECT * FROM question_papers WHERE id = ?`, [id])[0];
-      if (paper) {
-        const pubId = paper.cloudinary_public_id || paper.id;
-        const cloudUrl = paper.cloudinary_url || '';
-        executeRun(
-          db,
-          `INSERT OR REPLACE INTO deleted_vault_assets (public_id, cloudinary_url, deleted_at) VALUES (?, ?, ?)`,
-          [pubId, cloudUrl, new Date().toISOString()]
-        );
-        if (paper.cloudinary_public_id) {
-          deleteAssetFromCloudinary(paper.cloudinary_public_id).catch(() => {});
-        }
+      const paper = executeQuery(
+        db,
+        `SELECT * FROM question_papers WHERE id = ? OR cloudinary_public_id = ? OR cloudinary_url = ?`,
+        [id, id, id]
+      )[0];
+
+      const pubId = paper?.cloudinary_public_id || id;
+      const cloudUrl = paper?.cloudinary_url || '';
+      const paperId = paper?.id || id;
+      const originalFilename = paper?.original_filename || '';
+
+      // 1. Record in deleted_vault_assets to prevent any re-import
+      const now = new Date().toISOString();
+      if (pubId) executeRun(db, `INSERT OR REPLACE INTO deleted_vault_assets (public_id, cloudinary_url, deleted_at) VALUES (?, ?, ?)`, [pubId, cloudUrl, now]);
+      if (cloudUrl) executeRun(db, `INSERT OR REPLACE INTO deleted_vault_assets (public_id, cloudinary_url, deleted_at) VALUES (?, ?, ?)`, [cloudUrl, cloudUrl, now]);
+      if (paperId) executeRun(db, `INSERT OR REPLACE INTO deleted_vault_assets (public_id, cloudinary_url, deleted_at) VALUES (?, ?, ?)`, [paperId, cloudUrl, now]);
+
+      // 2. Destroy in Cloudinary
+      if (pubId) {
+        deleteAssetFromCloudinary(pubId).catch(() => {});
       }
 
-      executeRun(db, `DELETE FROM question_paper_pages WHERE paper_id = ?`, [id]);
-      executeRun(db, `DELETE FROM questions WHERE question_paper_id = ?`, [id]);
-      executeRun(db, `DELETE FROM question_papers WHERE id = ?`, [id]);
+      // 3. Delete from local cache/disk
+      try {
+        if (cloudUrl && cloudUrl.startsWith('/')) {
+          const diskPath = path.join(process.cwd(), 'public', cloudUrl);
+          if (fs.existsSync(diskPath)) fs.unlinkSync(diskPath);
+        }
+        if (originalFilename) {
+          const paperDir = path.join(process.cwd(), 'public', 'compiled_papers');
+          const pPath = path.join(paperDir, originalFilename);
+          if (fs.existsSync(pPath)) fs.unlinkSync(pPath);
+        }
+      } catch {}
+
+      // 4. Delete from SQLite
+      executeRun(db, `DELETE FROM question_paper_pages WHERE paper_id = ? OR paper_id = ?`, [paperId, id]);
+      executeRun(db, `DELETE FROM questions WHERE question_paper_id = ? OR question_paper_id = ?`, [paperId, id]);
+      executeRun(db, `DELETE FROM question_papers WHERE id = ? OR id = ? OR cloudinary_public_id = ?`, [paperId, id, pubId]);
       saveDb();
+
+      // 5. Delete from PostgreSQL
+      const pool = getPostgresPool();
+      if (pool) {
+        try {
+          const client = await pool.connect();
+          try {
+            await client.query('DELETE FROM question_paper_pages WHERE paper_id = $1', [paperId]);
+            await client.query('DELETE FROM questions WHERE question_paper_id = $1', [paperId]);
+            await client.query('DELETE FROM question_papers WHERE id = $1 OR cloudinary_public_id = $2', [paperId, pubId]);
+          } catch {}
+          client.release();
+        } catch {}
+      }
+
       return res.json({ success: true, message: 'Draft question paper removed successfully.' });
     } catch (err: any) {
       return res.status(500).json({ error: err.message });
@@ -5006,23 +5004,54 @@ async function startServer() {
       await ensureDeletedVaultAssetsTable(db);
       const { ids } = req.body || {};
       if (Array.isArray(ids) && ids.length > 0) {
+        const pool = getPostgresPool();
         for (const id of ids) {
-          const paper = executeQuery(db, `SELECT * FROM question_papers WHERE id = ?`, [id])[0];
-          if (paper) {
-            const pubId = paper.cloudinary_public_id || paper.id;
-            const cloudUrl = paper.cloudinary_url || '';
-            executeRun(
-              db,
-              `INSERT OR REPLACE INTO deleted_vault_assets (public_id, cloudinary_url, deleted_at) VALUES (?, ?, ?)`,
-              [pubId, cloudUrl, new Date().toISOString()]
-            );
-            if (paper.cloudinary_public_id) {
-              deleteAssetFromCloudinary(paper.cloudinary_public_id).catch(() => {});
-            }
+          const paper = executeQuery(
+            db,
+            `SELECT * FROM question_papers WHERE id = ? OR cloudinary_public_id = ? OR cloudinary_url = ?`,
+            [id, id, id]
+          )[0];
+          const pubId = paper?.cloudinary_public_id || id;
+          const cloudUrl = paper?.cloudinary_url || '';
+          const paperId = paper?.id || id;
+          const originalFilename = paper?.original_filename || '';
+
+          const now = new Date().toISOString();
+          if (pubId) executeRun(db, `INSERT OR REPLACE INTO deleted_vault_assets (public_id, cloudinary_url, deleted_at) VALUES (?, ?, ?)`, [pubId, cloudUrl, now]);
+          if (cloudUrl) executeRun(db, `INSERT OR REPLACE INTO deleted_vault_assets (public_id, cloudinary_url, deleted_at) VALUES (?, ?, ?)`, [cloudUrl, cloudUrl, now]);
+          if (paperId) executeRun(db, `INSERT OR REPLACE INTO deleted_vault_assets (public_id, cloudinary_url, deleted_at) VALUES (?, ?, ?)`, [paperId, cloudUrl, now]);
+
+          if (pubId) {
+            deleteAssetFromCloudinary(pubId).catch(() => {});
           }
-          executeRun(db, `DELETE FROM question_paper_pages WHERE paper_id = ?`, [id]);
-          executeRun(db, `DELETE FROM questions WHERE question_paper_id = ?`, [id]);
-          executeRun(db, `DELETE FROM question_papers WHERE id = ?`, [id]);
+
+          try {
+            if (cloudUrl && cloudUrl.startsWith('/')) {
+              const diskPath = path.join(process.cwd(), 'public', cloudUrl);
+              if (fs.existsSync(diskPath)) fs.unlinkSync(diskPath);
+            }
+            if (originalFilename) {
+              const paperDir = path.join(process.cwd(), 'public', 'compiled_papers');
+              const pPath = path.join(paperDir, originalFilename);
+              if (fs.existsSync(pPath)) fs.unlinkSync(pPath);
+            }
+          } catch {}
+
+          executeRun(db, `DELETE FROM question_paper_pages WHERE paper_id = ? OR paper_id = ?`, [paperId, id]);
+          executeRun(db, `DELETE FROM questions WHERE question_paper_id = ? OR question_paper_id = ?`, [paperId, id]);
+          executeRun(db, `DELETE FROM question_papers WHERE id = ? OR id = ? OR cloudinary_public_id = ?`, [paperId, id, pubId]);
+
+          if (pool) {
+            try {
+              const client = await pool.connect();
+              try {
+                await client.query('DELETE FROM question_paper_pages WHERE paper_id = $1', [paperId]);
+                await client.query('DELETE FROM questions WHERE question_paper_id = $1', [paperId]);
+                await client.query('DELETE FROM question_papers WHERE id = $1 OR cloudinary_public_id = $2', [paperId, pubId]);
+              } catch {}
+              client.release();
+            } catch {}
+          }
         }
         saveDb();
       }

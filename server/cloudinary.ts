@@ -166,12 +166,32 @@ export async function deleteAssetFromCloudinary(publicId: string): Promise<boole
     const config = getCloudinaryConfig();
     if (!config || !publicId) return false;
 
-    try {
-      await cloudinary.uploader.destroy(publicId, { resource_type: 'raw', invalidate: true });
-    } catch {}
-    try {
-      await cloudinary.uploader.destroy(publicId, { resource_type: 'image', invalidate: true });
-    } catch {}
+    const candidates = new Set<string>();
+    candidates.add(publicId);
+    candidates.add(publicId.replace(/\.[^.]+$/, ''));
+    if (!publicId.endsWith('.pdf')) candidates.add(`${publicId}.pdf`);
+
+    // Add without folder
+    const baseOnly = publicId.split('/').pop() || publicId;
+    candidates.add(baseOnly);
+    candidates.add(baseOnly.replace(/\.[^.]+$/, ''));
+    if (!baseOnly.endsWith('.pdf')) candidates.add(`${baseOnly}.pdf`);
+
+    // Common folders
+    for (const folder of ['zeroleak/question-papers', 'zeroleak/formatex-papers', 'zeroleak/documents', 'zeroleak/organization-documents']) {
+      candidates.add(`${folder}/${baseOnly}`);
+      candidates.add(`${folder}/${baseOnly.replace(/\.[^.]+$/, '')}`);
+      candidates.add(`${folder}/${baseOnly.replace(/\.[^.]+$/, '')}.pdf`);
+    }
+
+    for (const pid of candidates) {
+      try {
+        await cloudinary.uploader.destroy(pid, { resource_type: 'raw', invalidate: true });
+      } catch {}
+      try {
+        await cloudinary.uploader.destroy(pid, { resource_type: 'image', invalidate: true });
+      } catch {}
+    }
 
     return true;
   } catch (err: any) {
