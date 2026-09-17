@@ -452,13 +452,39 @@ export const api = {
     request<{ success: boolean; message: { content: string }; text: string }>('/api/ai/ollama-chat', { method: 'POST', body: JSON.stringify(payload) }),
   getOllamaModels: () =>
     request<{ connected: boolean; models: Array<{ name: string; model: string; size?: number }> }>('/api/ai/ollama-models'),
-  extractQuestionsFromPaper: (payload: { paper_text?: string; file_name?: string; file_data?: string; subject?: string; category?: string; job_id?: string }) =>
+  extractQuestionsFromPaper: (payload: { paper_text?: string; file_name?: string; file_data?: string; subject?: string; category?: string; job_id?: string; exam_id?: string }) =>
     request<PaperExtractionResponse>('/api/question-papers/extract', { method: 'POST', body: JSON.stringify(payload) }),
+  getUploadedQuestionPapers: (examId?: string) => {
+    const qs = examId ? `?exam_id=${encodeURIComponent(examId)}` : '';
+    return request<{ success: boolean; papers: any[] }>(`/api/question-papers${qs}`);
+  },
+  syncCloudinaryQuestionPapers: (exam_id?: string) =>
+    request<{ success: boolean; importedCount: number; totalAssetsInCloudinary: number; papers: any[] }>('/api/question-papers/sync-cloudinary', {
+      method: 'POST',
+      body: JSON.stringify({ exam_id }),
+    }),
+  deleteQuestionPaper: (paperId: string) =>
+    request<{ success: boolean; message: string }>(`/api/question-papers/${paperId}`, { method: 'DELETE' }),
+  bulkDeleteQuestionPapers: (paperIds: string[]) =>
+    request<{ success: boolean; message: string }>('/api/question-papers/bulk-delete', {
+      method: 'POST',
+      body: JSON.stringify({ ids: paperIds }),
+    }),
   extractThreeStandardPapers: () =>
     request<{ message: string; extractedQuestions: any[]; papers: any[]; totalExtracted: number }>('/api/question-papers/extract-three-standard-papers', { method: 'POST' }),
   getExtractionProgress: (jobId: string) =>
     request<{ jobId: string; status: 'PENDING' | 'PROCESSING' | 'COMPLETED' | 'FAILED'; percent: number; stage: string; message: string; current: number; total: number; updatedAt: number }>(`/api/question-papers/extract-progress/${jobId}`),
+  getCloudinaryHealth: () => request<{ connected: boolean; cloud_name?: string; assets_count?: number; error?: string }>('/api/question-papers/cloudinary-health'),
   getOllamaHealth: () => request<{ connected: boolean; model: string; error?: string }>('/api/question-papers/ollama-health'),
+  getFormatexHealth: () => request<{ connected: boolean; engine?: string; error?: string }>('/api/formatex/health'),
+  getLatexOnlineHealth: () => request<{ connected: boolean; service?: string; engine?: string; error?: string }>('/api/latex-online/health'),
+  compileFormatexPdf: (examId: string, payload?: { setLetter?: string; customLatex?: string; preferEngine?: 'latexonline' | 'formatex' | 'auto' }) =>
+    request<{ success: boolean; pdfUrl: string; latex: string; sizeBytes: number; checksumSha256: string; compilerService?: string; error?: string }>(`/api/examinations/${examId}/compile-formatex-pdf`, {
+      method: 'POST',
+      body: JSON.stringify(payload || {}),
+    }),
+  getFormatexLatex: (examId: string, setLetter?: string) =>
+    request<{ success: boolean; latex: string; setLetter: string; error?: string }>(`/api/examinations/${examId}/formatex-latex?setLetter=${setLetter || 'P'}`),
   bulkCreateQuestions: (payload: { questions: any[]; auto_assign_sme_id?: string; auto_assign_translator_id?: string; target_language?: string; assignment_notes?: string; initial_status?: string }) =>
     request<{ message: string; createdCount: number; questionIds: string[] }>('/api/questions/bulk-create', { method: 'POST', body: JSON.stringify(payload) }),
   bulkVerifyQuestions: (payload: { question_ids: string[]; status?: string }) =>
@@ -519,7 +545,7 @@ export const api = {
   aiTranslate: (payload: { content: string; options?: string[] | null; targetLanguage: string; subject?: string }) => request<{ result: { translatedContent: string; translatedOptions: string[] | null; targetLanguage: string; linguisticNotes: string; aiConfidence: number } }>('/api/translations/ai-translate', { method: 'POST', body: JSON.stringify(payload) }),
 
   // Paper Generation & Encryption
-  generatePaper: (examId: string, payload?: { exam_mode?: string; subject_pool?: string[]; num_sets?: number }) =>
+  generatePaper: (examId: string, payload?: { exam_mode?: string; subject_pool?: string[]; num_sets?: number; selected_paper_ids?: string[] }) =>
     request<{
       message: string;
       versionCode: string;

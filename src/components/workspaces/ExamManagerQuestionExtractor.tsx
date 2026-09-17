@@ -36,8 +36,9 @@ import {
   RotateCcw,
   Plus,
   Cpu,
+  Award,
 } from 'lucide-react';
-import { User, ExtractedQuestion, Organization, QuestionAssignment } from '../../types';
+import { User, ExtractedQuestion, Organization, QuestionAssignment, Examination } from '../../types';
 import { api } from '../../api';
 import { QuestionBoundaryEditor } from './QuestionBoundaryEditor';
 import { LaTeXText } from '../common/LaTeXText';
@@ -50,6 +51,9 @@ interface ExamManagerQuestionExtractorProps {
   currentUser: User | null;
   onAssignmentsUpdated: () => void;
   onNavigateSubTab?: (subTab: string) => void;
+  examinations?: Examination[];
+  selectedExamId?: string;
+  onSelectExamId?: (id: string) => void;
 }
 
 interface UploadedQuestionFile {
@@ -189,18 +193,65 @@ export const ExamManagerQuestionExtractor: React.FC<ExamManagerQuestionExtractor
   currentUser,
   onAssignmentsUpdated,
   onNavigateSubTab,
+  examinations,
+  selectedExamId,
+  onSelectExamId,
 }) => {
+  // 3-Dropdown Cascading States
+  const [selectedType, setSelectedType] = useState<'University Exam' | 'Competitive Exam'>('University Exam');
+  const [selectedUni, setSelectedUni] = useState<string>('');
+
+  // 1. Filter exams by selectedType
+  const typeFilteredExams = (examinations || []).filter(ex => {
+    const isUni = ex.category === 'University Exam' || ex.category?.toLowerCase().includes('university');
+    return selectedType === 'University Exam' ? isUni : !isUni;
+  });
+
+  // 2. Distinct Universities / Authorities for this type
+  const availableUniversities = Array.from(
+    new Set(
+      typeFilteredExams
+        .map(ex => ex.university_name || (selectedType === 'University Exam' ? ex.name : 'National Testing Authority'))
+        .filter(Boolean)
+    )
+  );
+
+  const activeUni = (selectedUni && availableUniversities.includes(selectedUni)) ? selectedUni : (availableUniversities[0] || '');
+
+  // 3. Exams for this university
+  const universityFilteredExams = typeFilteredExams.filter(ex => {
+    const uName = ex.university_name || (selectedType === 'University Exam' ? ex.name : 'National Testing Authority');
+    return !activeUni || uName === activeUni;
+  });
+
+  // Active selected examination
+  const activeExamId = selectedExamId || universityFilteredExams[0]?.id || (examinations && examinations[0]?.id) || '';
+  const currentSelectedExam = examinations?.find(e => e.id === activeExamId) || universityFilteredExams[0] || (examinations && examinations[0]) || null;
+
   // Upload & Extraction Input State
   const [pdfFileName, setPdfFileName] = useState('');
   const [pdfFileData, setPdfFileData] = useState('');
   const [uploadedFiles, setUploadedFiles] = useState<UploadedQuestionFile[]>([]);
   const [pdfText, setPdfText] = useState('');
-  const [paperSubject, setPaperSubject] = useState('Computer Science & Cryptography');
-  const [paperCategory, setPaperCategory] = useState('Competitive Exam');
+  const [paperSubject, setPaperSubject] = useState(currentSelectedExam?.subject || 'Computer Science & Cryptography');
+  const [paperCategory, setPaperCategory] = useState(currentSelectedExam?.category || 'University Exam');
   const [extracting, setExtracting] = useState(false);
   const [isDragOver, setIsDragOver] = useState(false);
   const [showRawText, setShowRawText] = useState(false);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
+
+  // Synchronize target subject and category automatically from selected examination
+  React.useEffect(() => {
+    if (currentSelectedExam) {
+      setPaperSubject(currentSelectedExam.subject || currentSelectedExam.name);
+      setPaperCategory(currentSelectedExam.category || 'University Exam');
+      if (currentSelectedExam.university_name) {
+        setSelectedUni(currentSelectedExam.university_name);
+      }
+      const isUni = currentSelectedExam.category === 'University Exam' || currentSelectedExam.category?.toLowerCase().includes('university');
+      setSelectedType(isUni ? 'University Exam' : 'Competitive Exam');
+    }
+  }, [currentSelectedExam?.id, currentSelectedExam?.subject, currentSelectedExam?.category, currentSelectedExam?.university_name]);
 
   // Extracted Questions & Sidebar State
   const [extractedQuestions, setExtractedQuestions] = useState<ExtractedQuestion[]>([]);
@@ -708,6 +759,7 @@ export const ExamManagerQuestionExtractor: React.FC<ExamManagerQuestionExtractor
               job_id: file.jobId,
               subject: paperSubject || 'Academic Examination',
               category: paperCategory || 'Competitive Exam',
+              exam_id: activeExamId || currentSelectedExam?.id || undefined,
             });
 
             if (res.sourcePaperId || res.paperId) {
@@ -1230,7 +1282,10 @@ export const ExamManagerQuestionExtractor: React.FC<ExamManagerQuestionExtractor
     try {
       // Call bulk-create to persist questions into question bank and create assignments
       const res = await api.bulkCreateQuestions({
-        questions: targetQuestionList,
+        questions: targetQuestionList.map(q => ({
+          ...q,
+          exam_id: activeExamId || currentSelectedExam?.id || undefined,
+        })),
         auto_assign_translator_id: needTranslator ? assignTargetTranslatorId : undefined,
         target_language: needTranslator ? assignTargetLanguage : undefined,
         assignment_notes: assignNotes || (isDirect ? 'Directly verified & approved by Exam Manager' : undefined),
@@ -1368,34 +1423,151 @@ export const ExamManagerQuestionExtractor: React.FC<ExamManagerQuestionExtractor
           </div>
         </div>
 
-        {/* Paper Subject & Category Metadata Input */}
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-xs">
-          <div>
-            <label className="block text-slate-700 font-bold mb-1">Target Subject / Domain</label>
-            <input
-              type="text"
-              value={paperSubject}
-              onChange={e => setPaperSubject(e.target.value)}
-              placeholder="e.g. Computer Science & Cryptography / Physics / Chemistry"
-              className="w-full px-3 py-2 rounded-lg bg-slate-50 border border-slate-300 text-slate-900 focus:bg-white focus:border-emerald-800 focus:outline-hidden"
-            />
+        {/* Target Examination Dropdown Selector (No Manual Typing Needed) */}
+        <div className="p-4 rounded-xl bg-gradient-to-r from-slate-50 via-emerald-50/40 to-slate-50 border border-emerald-300 shadow-2xs space-y-3">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+            <div className="flex items-center gap-2">
+              <div className="p-1.5 rounded-lg bg-emerald-800 text-white shadow-2xs">
+                <Award className="w-4 h-4 text-emerald-200" />
+              </div>
+              <div>
+                <label className="block text-slate-900 font-bold text-xs">
+                  Target Examination (Auto-Selected from Created Exams)
+                </label>
+                <p className="text-[11px] text-slate-500">
+                  Select your created examination from the dropdown. No manual typing required.
+                </p>
+              </div>
+            </div>
+            {currentSelectedExam && (
+              <span className="px-2.5 py-1 rounded-full text-[10px] font-mono font-bold bg-emerald-100 text-emerald-900 border border-emerald-300">
+                {currentSelectedExam.id}
+              </span>
+            )}
           </div>
 
-          <div>
-            <label className="block text-slate-700 font-bold mb-1">Examination Category</label>
-            <select
-              value={paperCategory}
-              onChange={e => setPaperCategory(e.target.value)}
-              className="w-full px-3 py-2 rounded-lg bg-slate-50 border border-slate-300 text-slate-900 focus:bg-white focus:border-emerald-800 focus:outline-hidden"
-            >
-              <option value="Competitive Exam">Competitive Entrance Examination (JEE / NEET / GATE)</option>
-              <option value="NEET">NEET (National Eligibility Entrance Test - PCB)</option>
-              <option value="JEE">JEE (Joint Entrance Examination - PCM)</option>
-              <option value="University Exam">University Semester Board Examination</option>
-              <option value="TCET / CET-type Exam">State Technical Common Entrance Test</option>
-              <option value="Custom Exam">Institutional Enclave Assessment</option>
-            </select>
+          <div className="grid grid-cols-1 md:grid-cols-12 gap-3 items-center text-xs">
+            {/* Dropdown 1: Examination Type */}
+            <div className="md:col-span-3">
+              <label className="block text-slate-700 font-bold mb-1">1. Examination Type *</label>
+              <select
+                value={selectedType}
+                onChange={e => {
+                  const newType = e.target.value as 'University Exam' | 'Competitive Exam';
+                  setSelectedType(newType);
+                  const filtered = (examinations || []).filter(ex => {
+                    const isUni = ex.category === 'University Exam' || ex.category?.toLowerCase().includes('university');
+                    return newType === 'University Exam' ? isUni : !isUni;
+                  });
+                  if (filtered.length > 0) {
+                    const firstU = filtered[0].university_name || (newType === 'University Exam' ? filtered[0].name : 'National Testing Authority');
+                    setSelectedUni(firstU);
+                    onSelectExamId?.(filtered[0].id);
+                    setPaperSubject(filtered[0].subject || filtered[0].name);
+                    setPaperCategory(filtered[0].category || newType);
+                  }
+                }}
+                className="w-full px-3 py-2.5 rounded-xl bg-white border-2 border-emerald-600 text-slate-900 font-bold text-xs focus:ring-2 focus:ring-emerald-400 focus:outline-none cursor-pointer shadow-2xs"
+              >
+                <option value="University Exam">🎓 University Examination</option>
+                <option value="Competitive Exam">⚡ Competitive Examination</option>
+              </select>
+            </div>
+
+            {/* Dropdown 2: University / Conducting Body Name */}
+            <div className="md:col-span-4">
+              <label className="block text-slate-700 font-bold mb-1">
+                2. {selectedType === 'University Exam' ? 'University Name *' : 'Authority / Exam Body *'}
+              </label>
+              <select
+                value={activeUni}
+                onChange={e => {
+                  const val = e.target.value;
+                  setSelectedUni(val);
+                  const matchingExams = typeFilteredExams.filter(ex => {
+                    const uName = ex.university_name || (selectedType === 'University Exam' ? ex.name : 'National Testing Authority');
+                    return uName === val;
+                  });
+                  if (matchingExams.length > 0) {
+                    onSelectExamId?.(matchingExams[0].id);
+                    setPaperSubject(matchingExams[0].subject || matchingExams[0].name);
+                    setPaperCategory(matchingExams[0].category || selectedType);
+                  }
+                }}
+                className="w-full px-3 py-2.5 rounded-xl bg-white border-2 border-emerald-600 text-slate-900 font-bold text-xs focus:ring-2 focus:ring-emerald-400 focus:outline-none cursor-pointer shadow-2xs"
+              >
+                {availableUniversities.length === 0 ? (
+                  <option value="">No {selectedType === 'University Exam' ? 'universities' : 'authorities'} found — Create Exam</option>
+                ) : (
+                  availableUniversities.map(u => (
+                    <option key={u} value={u}>
+                      {u}
+                    </option>
+                  ))
+                )}
+              </select>
+            </div>
+
+            {/* Dropdown 3: Subject Name (Supports Multiple Subjects under that University) */}
+            <div className="md:col-span-5">
+              <label className="block text-slate-700 font-bold mb-1">3. Examination Subject *</label>
+              <select
+                value={currentSelectedExam?.id || ''}
+                onChange={e => {
+                  const val = e.target.value;
+                  onSelectExamId?.(val);
+                  const chosen = examinations?.find(x => x.id === val);
+                  if (chosen) {
+                    setPaperSubject(chosen.subject || chosen.name);
+                    setPaperCategory(chosen.category || selectedType);
+                  }
+                }}
+                className="w-full px-3 py-2.5 rounded-xl bg-white border-2 border-emerald-600 text-slate-900 font-bold text-xs focus:ring-2 focus:ring-emerald-400 focus:outline-none cursor-pointer shadow-2xs"
+              >
+                {universityFilteredExams.length === 0 ? (
+                  <option value="">No subjects found for this selection</option>
+                ) : (
+                  universityFilteredExams.map(ex => (
+                    <option key={ex.id} value={ex.id}>
+                      {ex.subject} ({ex.total_marks}M | {ex.total_questions} Qs - {ex.exam_type})
+                    </option>
+                  ))
+                )}
+              </select>
+            </div>
           </div>
+
+          {currentSelectedExam && (
+            <div className="pt-2.5 border-t border-emerald-200/70 flex flex-wrap items-center gap-x-4 gap-y-1.5 text-[11px] text-slate-600">
+              <div>
+                <span className="font-semibold text-slate-500">Category:</span>{' '}
+                <strong className="text-slate-900">{currentSelectedExam.category}</strong>
+              </div>
+              <div className="text-slate-300">•</div>
+              <div>
+                <span className="font-semibold text-slate-500">Pattern:</span>{' '}
+                <strong className="text-emerald-800">{currentSelectedExam.exam_type} ({currentSelectedExam.mcq_count || 0} MCQs + {currentSelectedExam.theory_count || 0} Theory)</strong>
+              </div>
+              <div className="text-slate-300">•</div>
+              <div>
+                <span className="font-semibold text-slate-500">Total Marks:</span>{' '}
+                <strong className="text-slate-900">{currentSelectedExam.total_marks} M</strong>
+              </div>
+              <div className="text-slate-300">•</div>
+              <div>
+                <span className="font-semibold text-slate-500">Duration:</span>{' '}
+                <strong className="text-slate-900">{currentSelectedExam.duration_minutes} Mins</strong>
+              </div>
+              {currentSelectedExam.marking_scheme && (
+                <>
+                  <div className="text-slate-300">•</div>
+                  <div className="text-slate-500 italic truncate max-w-[320px]" title={currentSelectedExam.marking_scheme}>
+                    {currentSelectedExam.marking_scheme}
+                  </div>
+                </>
+              )}
+            </div>
+          )}
         </div>
 
         {/* Drag and Drop Upload Area */}

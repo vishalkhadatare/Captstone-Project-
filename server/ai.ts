@@ -886,7 +886,7 @@ ${JSON.stringify(candidates)}`;
           { role: 'user', content: prompt },
         ],
       }),
-      signal: AbortSignal.timeout(120000),
+      signal: AbortSignal.timeout(5000),
     });
     if (!response.ok) return questions;
     const payload = await response.json() as { message?: { content?: string } };

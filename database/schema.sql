@@ -682,6 +682,48 @@ ALTER TABLE audit_events ADD COLUMN IF NOT EXISTS details_json TEXT;
 ALTER TABLE audit_events ADD COLUMN IF NOT EXISTS created_at TEXT;
 
 -- ==============================================================================
+-- 38. QUESTION PAPERS & PRESERVED PAGES
+-- ==============================================================================
+CREATE TABLE IF NOT EXISTS question_papers (
+    id TEXT PRIMARY KEY,
+    org_id TEXT NOT NULL,
+    exam_id TEXT,
+    original_filename TEXT NOT NULL,
+    subject TEXT,
+    examination_category TEXT,
+    processing_status TEXT NOT NULL DEFAULT 'PENDING',
+    page_count INTEGER NOT NULL DEFAULT 1,
+    question_count INTEGER NOT NULL DEFAULT 0,
+    auto_extracted_count INTEGER NOT NULL DEFAULT 0,
+    needs_review_count INTEGER NOT NULL DEFAULT 0,
+    manually_corrected_count INTEGER NOT NULL DEFAULT 0,
+    pages_dir TEXT,
+    cloudinary_url TEXT,
+    cloudinary_public_id TEXT,
+    uploaded_at TEXT NOT NULL
+);
+
+ALTER TABLE question_papers ADD COLUMN IF NOT EXISTS auto_extracted_count INTEGER DEFAULT 0;
+ALTER TABLE question_papers ADD COLUMN IF NOT EXISTS needs_review_count INTEGER DEFAULT 0;
+ALTER TABLE question_papers ADD COLUMN IF NOT EXISTS manually_corrected_count INTEGER DEFAULT 0;
+ALTER TABLE question_papers ADD COLUMN IF NOT EXISTS pages_dir TEXT;
+ALTER TABLE question_papers ADD COLUMN IF NOT EXISTS cloudinary_url TEXT;
+ALTER TABLE question_papers ADD COLUMN IF NOT EXISTS cloudinary_public_id TEXT;
+ALTER TABLE question_papers ADD COLUMN IF NOT EXISTS exam_id TEXT;
+
+CREATE TABLE IF NOT EXISTS question_paper_pages (
+    id TEXT PRIMARY KEY,
+    paper_id TEXT NOT NULL REFERENCES question_papers(id) ON DELETE CASCADE,
+    page_number INTEGER NOT NULL,
+    image_url TEXT NOT NULL,
+    width INTEGER NOT NULL,
+    height INTEGER NOT NULL,
+    dpi INTEGER NOT NULL DEFAULT 300,
+    disk_path TEXT,
+    created_at TEXT NOT NULL
+);
+
+-- ==============================================================================
 -- 39. DYNAMIC MULTI-PAPER GENERATOR TABLES
 -- ==============================================================================
 

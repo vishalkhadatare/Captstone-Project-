@@ -176,6 +176,10 @@ export interface AicteUniversity {
 export interface Examination {
   id: string;
   org_id: string;
+  code?: string;
+  paper_code?: string;
+  university_name?: string;
+  blueprint_pattern?: string;
   name: string;
   subject: string;
   category: ExamCategory;
@@ -201,6 +205,12 @@ export interface Examination {
   simulation_status?: 'NOT_STARTED' | 'IN_PROGRESS' | 'COMPLETED';
   simulated_at?: string;
   simulated_by?: string;
+  mcq_count?: number;
+  theory_count?: number;
+  mcq_marks?: number;
+  theory_marks?: number;
+  negative_marks?: number;
+  marking_scheme?: string;
 }
 
 export type BlueprintStatus = 'DRAFT' | 'ACTIVE' | 'INACTIVE';
@@ -253,6 +263,7 @@ export type QuestionStatus =
 export interface Question {
   id: string;
   org_id: string;
+  exam_id?: string;
   subject: string;
   topic: string;
   difficulty: 'EASY' | 'MEDIUM' | 'HARD';

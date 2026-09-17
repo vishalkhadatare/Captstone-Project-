@@ -17,7 +17,20 @@ export default defineConfig(() => {
       hmr: process.env.DISABLE_HMR !== 'true',
       // Disable file watching when DISABLE_HMR is true to save CPU during agent edits.
       watch: process.env.DISABLE_HMR === 'true' ? null : {
-        ignored: ['**/models/**', '**/NaviDC-OCR/**', '**/*.safetensors', '**/*.bin', '**/outputs/**'],
+        ignored: [
+          '**/models/**',
+          '**/NaviDC-OCR/**',
+          '**/*.safetensors',
+          '**/*.bin',
+          '**/outputs/**',
+          '**/output/**',
+          '**/test_results/**',
+          '**/tests/**',
+          '**/scratch/**',
+          '**/public/uploads/**',
+          '**/*.sqlite*',
+          '**/*.log',
+        ],
       },
     },
   };

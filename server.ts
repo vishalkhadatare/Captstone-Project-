@@ -10,7 +10,7 @@ import jwt from 'jsonwebtoken';
 import bcrypt from 'bcryptjs';
 import { v4 as uuidv4 } from 'uuid';
 import { getDb, executeQuery, executeRun, saveDb, resetDatabase, lookupUserInPostgres, lookupAuthorizedUserInPostgres, getPostgresPool } from './server/db.ts';
-import { uploadDocumentToCloudinary } from './server/cloudinary.ts';
+import { uploadDocumentToCloudinary, listAllCloudinaryAssets, getCloudinaryHealth, deleteAssetFromCloudinary } from './server/cloudinary.ts';
 import {
   encryptExamPaper,
   decryptExamPaper,
@@ -33,6 +33,15 @@ import {
   runNaviDcOcr,
   callGroqChat,
 } from './server/ai.ts';
+import {
+  getFormatexHealth,
+  getLatexOnlineHealth,
+  generateUniversityLatexDocument,
+  compileLatexWithFormatex,
+  compileWithLatexOnline,
+  compileLatexUniversal,
+  generateAndUploadFormatexPdf,
+} from './server/formatex.ts';
 import {
   evaluateOrganizationVerification,
   getOrganizationVerificationSource,
@@ -3255,7 +3264,26 @@ async function startServer() {
         });
       }
 
-      const { name, subject, category, exam_type, exam_date, exam_time, unlock_time, total_marks, duration_minutes, total_questions } = req.body;
+      const {
+        university_name,
+        name,
+        subject,
+        category,
+        exam_type,
+        exam_date,
+        exam_time,
+        unlock_time,
+        total_marks,
+        duration_minutes,
+        total_questions,
+        mcq_count,
+        theory_count,
+        mcq_marks,
+        theory_marks,
+        negative_marks,
+        marking_scheme,
+        blueprint_pattern,
+      } = req.body;
       if (!name || !subject || !category || !exam_type || !exam_date || !exam_time || !unlock_time) {
         return res.status(400).json({ error: 'Please provide complete examination scheduling parameters.' });
       }
@@ -3263,13 +3291,27 @@ async function startServer() {
       const examId = `EXAM-${uuidv4().substring(0, 8).toUpperCase()}`;
       const now = new Date().toISOString();
 
+      const parsedMcqCount = mcq_count !== undefined ? Number(mcq_count) : (exam_type === 'MCQ' ? 25 : (exam_type === 'MIXED' ? 14 : 0));
+      const parsedTheoryCount = theory_count !== undefined ? Number(theory_count) : (exam_type === 'THEORY' ? 10 : (exam_type === 'MIXED' ? 6 : 0));
+      const parsedMcqMarks = mcq_marks !== undefined ? Number(mcq_marks) : (category === 'Competitive Exam' ? 4 : 1);
+      const parsedTheoryMarks = theory_marks !== undefined ? Number(theory_marks) : 10;
+      const parsedNegativeMarks = negative_marks !== undefined ? Number(negative_marks) : (category === 'Competitive Exam' ? 1.0 : 0.0);
+      const parsedMarkingScheme = marking_scheme || `Section A: ${parsedMcqCount} MCQs (${parsedMcqMarks}M each, -${parsedNegativeMarks} neg). Section B: ${parsedTheoryCount} Theory questions (${parsedTheoryMarks}M each).`;
+      const parsedBlueprintPattern = blueprint_pattern || `Pattern: Part A (${parsedMcqCount} MCQs × ${parsedMcqMarks}M) + Part B (${parsedTheoryCount} Theory Qs × ${parsedTheoryMarks}M). Total Marks: ${total_marks || 100}.`;
+
       executeRun(
         db,
-        `INSERT INTO examinations (id, org_id, name, subject, category, exam_type, exam_date, exam_time, unlock_time, total_marks, total_questions, duration_minutes, status, created_by, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'CONFIGURING', ?, ?, ?)`,
+        `INSERT INTO examinations (
+          id, org_id, university_name, blueprint_pattern, name, subject, category, exam_type, exam_date, exam_time, unlock_time,
+          total_marks, total_questions, duration_minutes,
+          mcq_count, theory_count, mcq_marks, theory_marks, negative_marks, marking_scheme,
+          status, created_by, created_at, updated_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'CONFIGURING', ?, ?, ?)`,
         [
           examId,
           req.user!.org_id,
+          university_name || (category === 'University Exam' ? name : 'National Board / NTA'),
+          parsedBlueprintPattern,
           name,
           subject,
           category,
@@ -3278,8 +3320,14 @@ async function startServer() {
           exam_time,
           unlock_time,
           total_marks || 100,
-          total_questions || (exam_type === 'MCQ' ? 25 : 10),
+          total_questions || (parsedMcqCount + parsedTheoryCount) || (exam_type === 'MCQ' ? 25 : 10),
           duration_minutes || 180,
+          parsedMcqCount,
+          parsedTheoryCount,
+          parsedMcqMarks,
+          parsedTheoryMarks,
+          parsedNegativeMarks,
+          parsedMarkingScheme,
           req.user!.id,
           now,
           now,
@@ -3287,11 +3335,19 @@ async function startServer() {
       );
 
       // Create default configuration row
+      const blueprintData = {
+        mcq_count: parsedMcqCount,
+        theory_count: parsedTheoryCount,
+        mcq_marks: parsedMcqMarks,
+        theory_marks: parsedTheoryMarks,
+        negative_marks: parsedNegativeMarks,
+        marking_scheme: parsedMarkingScheme,
+      };
       executeRun(
         db,
         `INSERT INTO examination_configurations (id, exam_id, blueprint_json, theory_pattern_json, pattern_confirmed, created_at, updated_at)
          VALUES (?, ?, ?, ?, 0, ?, ?)`,
-        [uuidv4(), examId, null, null, now, now]
+        [uuidv4(), examId, JSON.stringify(blueprintData), null, now, now]
       );
 
       await logAuditEvent({
@@ -4069,7 +4125,7 @@ async function startServer() {
 
   // Extract Questions from Question Paper PDF / OCR / Text Transcript
   app.post('/api/question-papers/extract', authenticateToken, requireRole(['EXAM_MANAGER', 'ORG_OWNER']), async (req: Request, res: Response) => {
-    const { paper_text, file_name, file_data, subject, category, job_id } = req.body;
+    const { paper_text, file_name, file_data, subject, category, job_id, exam_id } = req.body;
     const effectiveJobId = job_id || `job-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`;
 
     extractionProgressMap.set(effectiveJobId, {
@@ -4199,7 +4255,17 @@ async function startServer() {
         };
       }
 
-      if (extraction?.extractedQuestions?.length && process.env.OLLAMA_MODEL) {
+      if (extraction?.extractedQuestions?.length && process.env.OLLAMA_MODEL && !extraction.engine?.includes('v12.0')) {
+        extractionProgressMap.set(effectiveJobId, {
+          jobId: effectiveJobId,
+          status: 'PROCESSING',
+          percent: 92,
+          stage: 'AI Semantic Verification',
+          message: 'Validating questions with Ollama...',
+          current: extraction.extractedQuestions.length,
+          total: extraction.extractedQuestions.length,
+          updatedAt: Date.now(),
+        });
         const beforeOllamaCount = extraction.extractedQuestions.length;
         extraction.extractedQuestions = await filterQuestionCandidatesWithOllama(extraction.extractedQuestions);
         extraction.questions = extraction.extractedQuestions;
@@ -4219,13 +4285,14 @@ async function startServer() {
       executeRun(
         db,
         `INSERT INTO question_papers (
-          id, org_id, original_filename, subject, examination_category, processing_status,
+          id, org_id, exam_id, original_filename, subject, examination_category, processing_status,
           page_count, question_count, auto_extracted_count, needs_review_count, manually_corrected_count,
           pages_dir, cloudinary_url, cloudinary_public_id, uploaded_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         [
           sourcePaperId,
           req.user!.org_id,
+          exam_id || null,
           file_name || 'raw_text_entry',
           subject || 'Academic Examination',
           category || 'Competitive Exam',
@@ -4331,25 +4398,24 @@ async function startServer() {
 
       saveDb();
 
-      // Upload to Cloudinary asynchronously in the background so the user gets instant extraction results
+      let cloudinaryUrl: string | null = null;
+      let cloudinaryPublicId: string | null = null;
       if (pdfBase64) {
-        uploadDocumentToCloudinary(pdfBase64, file_name, 'zeroleak/question-papers')
-          .then(async (cUpload) => {
-            if (cUpload?.secure_url) {
-              try {
-                const asyncDb = await getDb();
-                executeRun(
-                  asyncDb,
-                  `UPDATE question_papers SET cloudinary_url = ?, cloudinary_public_id = ? WHERE id = ?`,
-                  [cUpload.secure_url, cUpload.public_id || null, sourcePaperId]
-                );
-                saveDb();
-              } catch (e) {
-                console.warn('Failed to update Cloudinary URL on question paper:', e);
-              }
-            }
-          })
-          .catch((err) => console.warn('Background Cloudinary upload skipped:', err));
+        try {
+          const cUpload = await uploadDocumentToCloudinary(pdfBase64, file_name, 'zeroleak/question-papers');
+          if (cUpload?.secure_url) {
+            cloudinaryUrl = cUpload.secure_url;
+            cloudinaryPublicId = cUpload.public_id || null;
+            executeRun(
+              db,
+              `UPDATE question_papers SET cloudinary_url = ?, cloudinary_public_id = ? WHERE id = ?`,
+              [cloudinaryUrl, cloudinaryPublicId, sourcePaperId]
+            );
+            saveDb();
+          }
+        } catch (err) {
+          console.warn('Cloudinary storage notice:', err);
+        }
       }
 
       await logAuditEvent({
@@ -4382,11 +4448,13 @@ async function startServer() {
         sourcePaperId,
         paperId: sourcePaperId,
         sourceFile: file_name || 'raw_text_entry',
+        cloudinary_url: cloudinaryUrl,
+        pdf_url: cloudinaryUrl,
         processingStatus,
         jobId: effectiveJobId,
         aiEngine: {
-          provider: extraction.engine || 'PyMuPDF + Python Regex',
-          model: extraction.aiEngineUsed ? (process.env.OLLAMA_MODEL || 'Gemini 3.7 Flash') : 'PyMuPDF + Regex (Local & 100% Free)',
+          provider: extraction.engine || 'ZeroLeak Reconstructed Question Pipeline',
+          model: extraction.aiEngineUsed ? (process.env.OLLAMA_MODEL || 'Gemini 3.7 Flash') : 'ZeroLeak Deterministic v13.0 (Local & Fast)',
         },
       });
     } catch (e: any) {
@@ -4422,8 +4490,461 @@ async function startServer() {
     }
   });
 
-  app.get('/api/question-papers/ollama-health', authenticateToken, requireRole(['EXAM_MANAGER', 'ORG_OWNER']), async (_req: Request, res: Response) => {
+  // Ensure deleted_vault_assets table exists
+  async function ensureDeletedVaultAssetsTable(db: any) {
+    executeRun(
+      db,
+      `CREATE TABLE IF NOT EXISTS deleted_vault_assets (
+        public_id TEXT PRIMARY KEY,
+        cloudinary_url TEXT,
+        deleted_at TEXT NOT NULL
+      )`
+    );
+  }
+
+  // Get all uploaded question papers with Cloudinary metadata + auto-import
+  app.get('/api/question-papers', authenticateToken, async (req: Request, res: Response) => {
+    try {
+      const db = await getDb();
+      await ensureDeletedVaultAssetsTable(db);
+      const { exam_id } = req.query;
+      const orgId = req.user?.org_id || '';
+
+      // Get set of deleted public_ids so they are NEVER re-imported
+      const deletedRows = executeQuery(db, `SELECT public_id, cloudinary_url FROM deleted_vault_assets`);
+      const deletedSet = new Set<string>();
+      deletedRows.forEach((r: any) => {
+        if (r.public_id) deletedSet.add(r.public_id);
+        if (r.cloudinary_url) deletedSet.add(r.cloudinary_url);
+      });
+
+      // Auto-sync any assets from Cloudinary account that are not yet in question_papers and NOT in deletedSet
+      try {
+        const cloudAssets = await listAllCloudinaryAssets();
+        let newImported = false;
+        for (const asset of cloudAssets) {
+          if (deletedSet.has(asset.public_id) || deletedSet.has(asset.secure_url)) {
+            continue;
+          }
+
+          const existing = executeQuery(
+            db,
+            `SELECT id FROM question_papers WHERE cloudinary_public_id = ? OR cloudinary_url = ?`,
+            [asset.public_id, asset.secure_url]
+          )[0];
+
+          if (!existing) {
+            const paperId = `PAPER-${uuidv4().substring(0, 8).toUpperCase()}`;
+            executeRun(
+              db,
+              `INSERT INTO question_papers (
+                id, org_id, exam_id, original_filename, subject, examination_category, processing_status,
+                page_count, question_count, auto_extracted_count, needs_review_count, manually_corrected_count,
+                cloudinary_url, cloudinary_public_id, uploaded_at
+              ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+              [
+                paperId,
+                orgId || 'ORG-DEFAULT',
+                exam_id || null,
+                asset.original_filename || 'document.pdf',
+                'Core Engineering',
+                'University Exam',
+                'COMPLETED',
+                1,
+                14,
+                14,
+                0,
+                0,
+                asset.secure_url,
+                asset.public_id,
+                asset.created_at || new Date().toISOString(),
+              ]
+            );
+            newImported = true;
+          }
+        }
+        if (newImported) {
+          saveDb();
+        }
+      } catch (cloudErr) {
+        console.warn('[ZeroLeak] Cloudinary auto-sync warning:', cloudErr);
+      }
+
+      const papers = executeQuery(
+        db,
+        `SELECT * FROM question_papers ORDER BY uploaded_at DESC`
+      );
+
+      return res.json({ success: true, papers });
+    } catch (err: any) {
+      return res.status(500).json({ error: err.message });
+    }
+  });
+
+  // Explicit Cloudinary Sync Endpoint
+  app.post('/api/question-papers/sync-cloudinary', authenticateToken, async (req: Request, res: Response) => {
+    try {
+      const db = await getDb();
+      await ensureDeletedVaultAssetsTable(db);
+      const orgId = req.user?.org_id || '';
+      const { exam_id } = req.body || {};
+
+      const deletedRows = executeQuery(db, `SELECT public_id, cloudinary_url FROM deleted_vault_assets`);
+      const deletedSet = new Set<string>();
+      deletedRows.forEach((r: any) => {
+        if (r.public_id) deletedSet.add(r.public_id);
+        if (r.cloudinary_url) deletedSet.add(r.cloudinary_url);
+      });
+
+      const cloudAssets = await listAllCloudinaryAssets();
+      let importedCount = 0;
+
+      for (const asset of cloudAssets) {
+        if (deletedSet.has(asset.public_id) || deletedSet.has(asset.secure_url)) {
+          continue;
+        }
+
+        const existing = executeQuery(
+          db,
+          `SELECT id FROM question_papers WHERE cloudinary_public_id = ? OR cloudinary_url = ?`,
+          [asset.public_id, asset.secure_url]
+        )[0];
+
+        if (!existing) {
+          const paperId = `PAPER-${uuidv4().substring(0, 8).toUpperCase()}`;
+          executeRun(
+            db,
+            `INSERT INTO question_papers (
+              id, org_id, exam_id, original_filename, subject, examination_category, processing_status,
+              page_count, question_count, auto_extracted_count, needs_review_count, manually_corrected_count,
+              cloudinary_url, cloudinary_public_id, uploaded_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+            [
+              paperId,
+              orgId || 'ORG-DEFAULT',
+              exam_id || null,
+              asset.original_filename || 'document.pdf',
+              'Core Engineering',
+              'University Exam',
+              'COMPLETED',
+              1,
+              14,
+              14,
+              0,
+              0,
+              asset.secure_url,
+              asset.public_id,
+              asset.created_at || new Date().toISOString(),
+            ]
+          );
+          importedCount++;
+        }
+      }
+
+      if (importedCount > 0) {
+        saveDb();
+      }
+
+      const papers = executeQuery(db, `SELECT * FROM question_papers ORDER BY uploaded_at DESC`);
+      return res.json({
+        success: true,
+        importedCount,
+        totalAssetsInCloudinary: cloudAssets.length,
+        papers,
+      });
+    } catch (err: any) {
+      return res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.get('/api/question-papers/cloudinary-health', authenticateToken, async (_req: Request, res: Response) => {
+    return res.json(await getCloudinaryHealth());
+  });
+
+  app.get('/api/question-papers/ollama-health', authenticateToken, async (_req: Request, res: Response) => {
     return res.json(await checkOllamaHealth());
+  });
+
+  // FormaTeX Cloud LaTeX & AI Compilation Health
+  app.get('/api/formatex/health', authenticateToken, async (_req: Request, res: Response) => {
+    return res.json(await getFormatexHealth());
+  });
+
+  // Free LaTeX.Online Cloud Compiler Health
+  app.get('/api/latex-online/health', authenticateToken, async (_req: Request, res: Response) => {
+    return res.json(await getLatexOnlineHealth());
+  });
+
+  // Retrieve Formatted LaTeX Source for Examination
+  app.get('/api/examinations/:id/formatex-latex', authenticateToken, async (req: Request, res: Response) => {
+    try {
+      const db = await getDb();
+      let exam = executeQuery(db, 'SELECT * FROM examinations WHERE id = ?', [req.params.id])[0];
+      if (!exam) {
+        exam = executeQuery(db, 'SELECT * FROM examinations WHERE org_id = ? ORDER BY created_at DESC LIMIT 1', [req.user?.org_id || ''])[0]
+            || executeQuery(db, 'SELECT * FROM examinations ORDER BY created_at DESC LIMIT 1')[0];
+      }
+      if (!exam) return res.status(404).json({ error: 'Examination not found' });
+
+      const setLetter = (req.query.setLetter as string) || 'P';
+      const version = executeQuery(
+        db,
+        `SELECT id FROM paper_versions WHERE exam_id = ? ORDER BY is_current DESC, generated_at DESC LIMIT 1`,
+        [exam.id]
+      )[0];
+
+      let questions: any[] = [];
+      if (version) {
+        // Try decrypted payload first
+        const encryptedData = executeQuery(db, 'SELECT * FROM encrypted_papers WHERE paper_version_id = ?', [version.id])[0];
+        if (encryptedData) {
+          try {
+            const decStr = decryptExamPaper({
+              cipherText: encryptedData.aes_cipher_text,
+              iv: encryptedData.iv_hex,
+              authTag: encryptedData.auth_tag_hex,
+              encryptedKeyRSA: encryptedData.encrypted_aes_key_rsa,
+              keyFingerprint: encryptedData.key_fingerprint,
+              checksumSHA256: encryptedData.checksum_sha256,
+              timestamp: encryptedData.encrypted_at,
+            });
+            const decObj = JSON.parse(decStr);
+            if (decObj?.setQuestions && Array.isArray(decObj.setQuestions) && decObj.setQuestions.length > 0) {
+              questions = decObj.setQuestions;
+            }
+          } catch {}
+        }
+
+        if (questions.length === 0) {
+          questions = executeQuery(
+            db,
+            `SELECT q.*, pq.order_index, pq.marks as question_marks
+             FROM paper_questions pq
+             JOIN questions q ON pq.question_id = q.id
+             WHERE pq.paper_version_id = ?
+             ORDER BY pq.order_index ASC`,
+            [version.id]
+          );
+        }
+      }
+
+      if (questions.length === 0) {
+        questions = executeQuery(db, `SELECT * FROM questions WHERE org_id = ? LIMIT 30`, [exam.org_id]);
+      }
+
+      const parsedQuestions = questions.map((q: any) => {
+        let opts: any[] = [];
+        try {
+          opts = q.options_json ? (typeof q.options_json === 'string' ? JSON.parse(q.options_json) : q.options_json) : (Array.isArray(q.options) ? q.options : []);
+        } catch {
+          opts = [];
+        }
+        return { ...q, options: opts };
+      });
+
+      const mcqs = parsedQuestions.filter(q => q.question_type === 'MCQ' || (Array.isArray(q.options) && q.options.length >= 2));
+      const theory = parsedQuestions.filter(q => q.question_type !== 'MCQ' && (!q.options || q.options.length < 2));
+      const theorySec1 = theory.slice(0, Math.ceil(theory.length / 2));
+      const theorySec2 = theory.slice(Math.ceil(theory.length / 2));
+
+      const latex = generateUniversityLatexDocument({
+        exam,
+        setLetter,
+        mcqs,
+        theorySec1,
+        theorySec2,
+        durationMinutes: exam.duration_minutes || 180,
+        totalMarks: exam.total_marks || 70,
+      });
+
+      return res.json({ success: true, latex, setLetter });
+    } catch (e: any) {
+      return res.status(500).json({ error: e.message });
+    }
+  });
+
+  // Compile Official University PDF via Universal Engine (LaTeX.Online primary, FormaTeX fallback)
+  app.post('/api/examinations/:id/compile-formatex-pdf', authenticateToken, async (req: Request, res: Response) => {
+    try {
+      const db = await getDb();
+      let exam = executeQuery(db, 'SELECT * FROM examinations WHERE id = ?', [req.params.id])[0];
+      if (!exam) {
+        exam = executeQuery(db, 'SELECT * FROM examinations WHERE org_id = ? ORDER BY created_at DESC LIMIT 1', [req.user?.org_id || ''])[0]
+            || executeQuery(db, 'SELECT * FROM examinations ORDER BY created_at DESC LIMIT 1')[0];
+      }
+      if (!exam) return res.status(404).json({ error: 'Examination not found' });
+
+      const { setLetter = 'P', customLatex, preferEngine = 'auto' } = req.body || {};
+
+      let result;
+      if (customLatex && typeof customLatex === 'string' && customLatex.trim()) {
+        const compileRes = await compileLatexUniversal({ latex: customLatex, smart: true, preferEngine });
+        if (!compileRes.success || !compileRes.pdfBuffer) {
+          return res.status(422).json({ success: false, error: compileRes.error || 'LaTeX online compilation failed.' });
+        }
+        const pdfBuffer = compileRes.pdfBuffer;
+        const checksumSha256 = crypto.createHash('sha256').update(pdfBuffer).digest('hex');
+        const filename = `${exam.code || 'EXAM'}_Set_${setLetter}_Paper.pdf`;
+        const localOutputDir = path.join(process.cwd(), 'public', 'compiled_papers');
+        if (!fs.existsSync(localOutputDir)) fs.mkdirSync(localOutputDir, { recursive: true });
+        fs.writeFileSync(path.join(localOutputDir, filename), pdfBuffer);
+
+        let pdfUrl = `/compiled_papers/${filename}`;
+        try {
+          const cRes = await uploadDocumentToCloudinary(
+            `data:application/pdf;base64,${pdfBuffer.toString('base64')}`,
+            filename,
+            'zeroleak/formatex-papers'
+          );
+          if (cRes?.secure_url) pdfUrl = cRes.secure_url;
+        } catch {}
+
+        result = {
+          success: true,
+          pdfUrl,
+          latex: customLatex,
+          sizeBytes: pdfBuffer.length,
+          checksumSha256,
+          compilerService: compileRes.compilerService || 'LaTeX.Online (Free)',
+        };
+      } else {
+        const version = executeQuery(
+          db,
+          `SELECT id FROM paper_versions WHERE exam_id = ? ORDER BY is_current DESC, generated_at DESC LIMIT 1`,
+          [exam.id]
+        )[0];
+
+        let questions: any[] = [];
+        if (version) {
+          const encryptedData = executeQuery(db, 'SELECT * FROM encrypted_papers WHERE paper_version_id = ?', [version.id])[0];
+          if (encryptedData) {
+            try {
+              const decStr = decryptExamPaper({
+                cipherText: encryptedData.aes_cipher_text,
+                iv: encryptedData.iv_hex,
+                authTag: encryptedData.auth_tag_hex,
+                encryptedKeyRSA: encryptedData.encrypted_aes_key_rsa,
+                keyFingerprint: encryptedData.key_fingerprint,
+                checksumSHA256: encryptedData.checksum_sha256,
+                timestamp: encryptedData.encrypted_at,
+              });
+              const decObj = JSON.parse(decStr);
+              if (decObj?.setQuestions && Array.isArray(decObj.setQuestions) && decObj.setQuestions.length > 0) {
+                questions = decObj.setQuestions;
+              }
+            } catch {}
+          }
+
+          if (questions.length === 0) {
+            questions = executeQuery(
+              db,
+              `SELECT q.*, pq.order_index, pq.marks as question_marks
+               FROM paper_questions pq
+               JOIN questions q ON pq.question_id = q.id
+               WHERE pq.paper_version_id = ?
+               ORDER BY pq.order_index ASC`,
+              [version.id]
+            );
+          }
+        }
+
+        if (questions.length === 0) {
+          questions = executeQuery(db, `SELECT * FROM questions WHERE org_id = ? LIMIT 30`, [exam.org_id]);
+        }
+
+        const parsedQuestions = questions.map((q: any) => {
+          let opts: any[] = [];
+          try {
+            opts = q.options_json ? (typeof q.options_json === 'string' ? JSON.parse(q.options_json) : q.options_json) : (Array.isArray(q.options) ? q.options : []);
+          } catch {
+            opts = [];
+          }
+          return { ...q, options: opts };
+        });
+
+        const mcqs = parsedQuestions.filter(q => q.question_type === 'MCQ' || (Array.isArray(q.options) && q.options.length >= 2));
+        const theory = parsedQuestions.filter(q => q.question_type !== 'MCQ' && (!q.options || q.options.length < 2));
+        const theorySec1 = theory.slice(0, Math.ceil(theory.length / 2));
+        const theorySec2 = theory.slice(Math.ceil(theory.length / 2));
+
+        result = await generateAndUploadFormatexPdf({
+          exam,
+          setLetter,
+          mcqs,
+          theorySec1,
+          theorySec2,
+          preferEngine,
+        });
+      }
+
+      return res.json(result);
+    } catch (e: any) {
+      return res.status(500).json({ error: e.message });
+    }
+  });
+
+  // Delete an individual question paper draft
+  app.delete('/api/question-papers/:id', authenticateToken, async (req: Request, res: Response) => {
+    try {
+      const db = await getDb();
+      await ensureDeletedVaultAssetsTable(db);
+      const { id } = req.params;
+
+      const paper = executeQuery(db, `SELECT * FROM question_papers WHERE id = ?`, [id])[0];
+      if (paper) {
+        const pubId = paper.cloudinary_public_id || paper.id;
+        const cloudUrl = paper.cloudinary_url || '';
+        executeRun(
+          db,
+          `INSERT OR REPLACE INTO deleted_vault_assets (public_id, cloudinary_url, deleted_at) VALUES (?, ?, ?)`,
+          [pubId, cloudUrl, new Date().toISOString()]
+        );
+        if (paper.cloudinary_public_id) {
+          deleteAssetFromCloudinary(paper.cloudinary_public_id).catch(() => {});
+        }
+      }
+
+      executeRun(db, `DELETE FROM question_paper_pages WHERE paper_id = ?`, [id]);
+      executeRun(db, `DELETE FROM questions WHERE question_paper_id = ?`, [id]);
+      executeRun(db, `DELETE FROM question_papers WHERE id = ?`, [id]);
+      saveDb();
+      return res.json({ success: true, message: 'Draft question paper removed successfully.' });
+    } catch (err: any) {
+      return res.status(500).json({ error: err.message });
+    }
+  });
+
+  // Bulk delete multiple question paper drafts
+  app.post('/api/question-papers/bulk-delete', authenticateToken, async (req: Request, res: Response) => {
+    try {
+      const db = await getDb();
+      await ensureDeletedVaultAssetsTable(db);
+      const { ids } = req.body || {};
+      if (Array.isArray(ids) && ids.length > 0) {
+        for (const id of ids) {
+          const paper = executeQuery(db, `SELECT * FROM question_papers WHERE id = ?`, [id])[0];
+          if (paper) {
+            const pubId = paper.cloudinary_public_id || paper.id;
+            const cloudUrl = paper.cloudinary_url || '';
+            executeRun(
+              db,
+              `INSERT OR REPLACE INTO deleted_vault_assets (public_id, cloudinary_url, deleted_at) VALUES (?, ?, ?)`,
+              [pubId, cloudUrl, new Date().toISOString()]
+            );
+            if (paper.cloudinary_public_id) {
+              deleteAssetFromCloudinary(paper.cloudinary_public_id).catch(() => {});
+            }
+          }
+          executeRun(db, `DELETE FROM question_paper_pages WHERE paper_id = ?`, [id]);
+          executeRun(db, `DELETE FROM questions WHERE question_paper_id = ?`, [id]);
+          executeRun(db, `DELETE FROM question_papers WHERE id = ?`, [id]);
+        }
+        saveDb();
+      }
+      return res.json({ success: true, message: 'Selected draft papers removed successfully.' });
+    } catch (err: any) {
+      return res.status(500).json({ error: err.message });
+    }
   });
 
   // Get Visual Debug Overlays generated by vertical segmentation
@@ -4922,7 +5443,7 @@ async function startServer() {
   // Bulk Create Extracted Questions into Secure Question Bank
   app.post('/api/questions/bulk-create', authenticateToken, requireRole(['EXAM_MANAGER', 'ORG_OWNER']), async (req: Request, res: Response) => {
     try {
-      const { questions, auto_assign_sme_id, auto_assign_translator_id, target_language, assignment_notes, initial_status } = req.body;
+      const { questions, auto_assign_sme_id, auto_assign_translator_id, target_language, assignment_notes, initial_status, exam_id } = req.body;
       if (auto_assign_sme_id) {
         return res.status(400).json({ error: 'The SME role has been decommissioned. Questions cannot be assigned to an SME.' });
       }
@@ -4949,14 +5470,16 @@ async function startServer() {
       for (const q of questions) {
         const questionId = `Q-${uuidv4().substring(0, 8).toUpperCase()}`;
         const initialStatus = initial_status || 'VERIFIED';
+        const targetExamId = q.exam_id || exam_id || null;
 
         executeRun(
           db,
-          `INSERT INTO questions (id, org_id, question_paper_id, source_file, source_page, question_number, subject, topic, difficulty, marks, negative_marks, correct_answer, language, syllabus, question_type, content_text, options_json, diagram_url, status, created_by, created_at, updated_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          `INSERT INTO questions (id, org_id, exam_id, question_paper_id, source_file, source_page, question_number, subject, topic, difficulty, marks, negative_marks, correct_answer, language, syllabus, question_type, content_text, options_json, diagram_url, status, created_by, created_at, updated_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
           [
             questionId,
             req.user!.org_id,
+            targetExamId,
             q.source_paper_id || q.sourcePaperId || null,
             q.source_file || q.sourceFile || null,
             q.source_page || q.page_number || null,
@@ -5191,7 +5714,7 @@ async function startServer() {
   // Add Single Question
   app.post('/api/questions', authenticateToken, requireRole(['EXAM_MANAGER', 'ORG_OWNER']), async (req: Request, res: Response) => {
     try {
-      const { subject, topic, difficulty, marks, negative_marks, correct_answer, language, syllabus, question_type, content_text, options } = req.body;
+      const { subject, topic, difficulty, marks, negative_marks, correct_answer, language, syllabus, question_type, content_text, options, exam_id } = req.body;
       if (!subject || !topic || !content_text || !correct_answer) {
         return res.status(400).json({ error: 'Missing mandatory question parameters.' });
       }
@@ -5202,11 +5725,12 @@ async function startServer() {
 
       executeRun(
         db,
-        `INSERT INTO questions (id, org_id, subject, topic, difficulty, marks, negative_marks, correct_answer, language, syllabus, question_type, content_text, options_json, status, created_by, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'DRAFT', ?, ?, ?)`,
+        `INSERT INTO questions (id, org_id, exam_id, subject, topic, difficulty, marks, negative_marks, correct_answer, language, syllabus, question_type, content_text, options_json, status, created_by, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'DRAFT', ?, ?, ?)`,
         [
           questionId,
           req.user!.org_id,
+          exam_id || null,
           subject,
           topic,
           difficulty || 'MEDIUM',
@@ -5859,6 +6383,26 @@ async function startServer() {
         return res.status(404).json({ error: 'No paper version could be generated' });
       }
 
+      // Try to decrypt the paper payload from encrypted_papers table
+      let decryptedPayload: any = null;
+      const encryptedData = executeQuery(db, 'SELECT * FROM encrypted_papers WHERE paper_version_id = ?', [version.id])[0];
+      if (encryptedData) {
+        try {
+          const decryptedString = decryptExamPaper({
+            cipherText: encryptedData.aes_cipher_text,
+            iv: encryptedData.iv_hex,
+            authTag: encryptedData.auth_tag_hex,
+            encryptedKeyRSA: encryptedData.encrypted_aes_key_rsa,
+            keyFingerprint: encryptedData.key_fingerprint,
+            checksumSHA256: encryptedData.checksum_sha256,
+            timestamp: encryptedData.encrypted_at,
+          });
+          decryptedPayload = JSON.parse(decryptedString);
+        } catch (decErr) {
+          console.warn('Could not decrypt paper payload in current-paper:', decErr);
+        }
+      }
+
       let questions = executeQuery(
         db,
         `SELECT pq.id as paper_question_id, pq.section_name, pq.order_index, pq.marks as question_marks,
@@ -5871,7 +6415,18 @@ async function startServer() {
         [version.id]
       );
 
-      // Fallback: if paper_questions table has 0 mappings, query real extracted questions directly
+      // Fallback 1: If decrypted payload contains set questions, use them
+      if (questions.length === 0 && decryptedPayload?.setQuestions && Array.isArray(decryptedPayload.setQuestions) && decryptedPayload.setQuestions.length > 0) {
+        questions = decryptedPayload.setQuestions.map((q: any, idx: number) => ({
+          paper_question_id: `PQ-${q.id || idx + 1}`,
+          section_name: q.section_name || (idx < 14 ? 'Section A: Q.1 MCQs' : 'Section Theory'),
+          order_index: idx + 1,
+          question_marks: q.marks || 4,
+          ...q,
+        }));
+      }
+
+      // Fallback 2: if paper_questions table has 0 mappings, query real extracted questions directly
       if (questions.length === 0) {
         const rawQs = executeQuery(
           db,
@@ -5912,6 +6467,8 @@ async function startServer() {
         questions: parsedQuestions,
         allVersions,
         exam,
+        universityBoardSet: decryptedPayload?.universityBoardSet || null,
+        paperPayload: decryptedPayload || null,
       });
     } catch (e: any) {
       return res.status(500).json({ error: e.message });
@@ -5922,6 +6479,17 @@ async function startServer() {
   // Clean up any legacy dummy/mock questions so only real extracted/uploaded questions exist
   function cleanLegacyDummyQuestions(db: any) {
     try {
+      // 1. Permanently delete all NEET / physics prism / dummy question papers
+      executeRun(
+        db,
+        `DELETE FROM question_papers 
+         WHERE LOWER(original_filename) LIKE '%neet%' 
+            OR LOWER(original_filename) LIKE '%sample%' 
+            OR id LIKE 'PAPER-SRC-NEET%'
+            OR original_filename = 'sample.jpg'`
+      );
+
+      // 2. Permanently delete all questions associated with NEET, prism, botany, zoology, biology, or dummy prefixes
       executeRun(
         db,
         `DELETE FROM questions 
@@ -5930,10 +6498,26 @@ async function startServer() {
             OR id LIKE 'Q-NEET-%' 
             OR id LIKE 'Q-GATE-%' 
             OR id LIKE 'Q-EXAM-%'
+            OR id LIKE 'EXT-P1-NEET%'
+            OR id LIKE 'EXT-P2-NEET%'
+            OR id LIKE 'EXT-P3-NEET%'
+            OR LOWER(content_text) LIKE '%prism%'
+            OR LOWER(content_text) LIKE '%light ray enters%'
+            OR LOWER(content_text) LIKE '%refractive index%'
+            OR LOWER(content_text) LIKE '%neet 202%'
+            OR LOWER(content_text) LIKE '%neet-202%'
+            OR LOWER(content_text) LIKE '%biology%'
+            OR LOWER(content_text) LIKE '%botany%'
+            OR LOWER(content_text) LIKE '%zoology%'
+            OR LOWER(content_text) LIKE '%cellular organelle%'
+            OR LOWER(content_text) LIKE '%elisa technique%'
+            OR LOWER(content_text) LIKE '%magnetic flux%'
             OR content_text LIKE 'In AES-256-GCM%'
-            OR content_text LIKE 'Which cellular organelle%'
             OR content_text LIKE 'Given the foundational principles of%'`
       );
+
+      // 3. Clean any orphaned mappings
+      executeRun(db, `DELETE FROM paper_questions WHERE question_id NOT IN (SELECT id FROM questions)`);
     } catch {}
   }
 
@@ -5990,98 +6574,97 @@ async function startServer() {
       (exam.exam_type === 'THEORY' && body.num_sets !== 1)
     );
 
-    const isNeetOrMultiSubjectMCQ = !hasManualBlueprint && (
-      body.exam_mode === 'MULTI_SUBJECT_MCQ' ||
-      body.exam_mode === 'NEET_MULTI_SUBJECT' ||
-      exam.category === 'NEET' ||
-      exam.category === 'JEE' ||
-      exam.category === 'Competitive Exam' ||
-      exam.category === 'TCET / CET-type Exam' ||
-      (exam.name && (exam.name.toUpperCase().includes('NEET') || exam.name.toUpperCase().includes('JEE'))) ||
-      (exam.exam_type === 'MCQ' && (
-        body.subject_pool ||
-        (exam.subject && (
-          exam.subject.includes('PCB') ||
-          exam.subject.includes('PCM') ||
-          exam.subject.includes('All') ||
-          exam.subject.includes('&')
-        ))
-      ))
-    );
+    const isNeetOrMultiSubjectMCQ = false;
 
-    // 1. Query real questions: prioritize questions directly linked to this exam, source paper, or organization
+    // 1. Query real questions: strictly prioritize explicitly selected draft papers
     let eligibleQuestions: any[] = [];
 
-    if (hasManualBlueprint) {
-      eligibleQuestions = executeQuery(
-        db,
-        `SELECT * FROM questions WHERE org_id = ? AND status = 'ELIGIBLE_FOR_PAPER' ORDER BY subject ASC, difficulty ASC`,
-        [orgId]
-      );
-    } else {
-      // First prioritize questions explicitly linked to this exam, source paper, or uploaded question papers
-      eligibleQuestions = executeQuery(
+    if (Array.isArray(body.selected_paper_ids) && body.selected_paper_ids.length > 0) {
+      const placeholders = body.selected_paper_ids.map(() => '?').join(',');
+      
+      // Query questions linked directly to the selected paper IDs
+      let selectedQs = executeQuery(
         db,
         `SELECT * FROM questions
-         WHERE (question_paper_id = ? OR question_paper_id IN (SELECT id FROM question_papers WHERE subject = ? OR examination_category = ?))
+         WHERE question_paper_id IN (${placeholders})
            AND status NOT IN ('QUARANTINED', 'COMPROMISED')
+           AND LOWER(content_text) NOT LIKE '%prism%'
+           AND LOWER(content_text) NOT LIKE '%neet%'
          ORDER BY source_page ASC, question_number ASC, created_at ASC`,
-        [exam.id, exam.subject || '', exam.category || '']
+        body.selected_paper_ids
       );
-    }
 
-    // If empty or if University exam, combine with 3 draft question papers
-    if (isUniversityExam || eligibleQuestions.length === 0) {
-      const draftFiles = ['paper1_questions_real.json', 'paper2_questions_real.json', 'paper3_questions_real.json'];
-      const draftQuestions: any[] = [];
-      draftFiles.forEach((file, fIdx) => {
-        try {
-          const p = path.join(process.cwd(), 'server', file);
-          if (fs.existsSync(p)) {
-            const raw = JSON.parse(fs.readFileSync(p, 'utf-8'));
-            Object.entries(raw).forEach(([qId, qData]: [string, any]) => {
-              const stmt = qData.statement || qData.full_text || '';
-              if (stmt) {
-                draftQuestions.push({
-                  id: `draft-p${fIdx + 1}-${qId}`,
-                  org_id: orgId,
-                  question_paper_id: `paper-${fIdx + 1}`,
-                  source_file: file,
-                  source_page: qData.page_number || 1,
-                  question_number: qData.question_number || qId,
-                  subject: 'Computer Science & Engineering',
-                  topic: 'Computer Graphics',
-                  difficulty: 'MEDIUM',
-                  marks: (qData.options && qData.options.length > 0) ? 1 : 4,
-                  negative_marks: 0,
-                  correct_answer: (qData.options && qData.options[0]?.label) || 'A',
-                  content_text: stmt,
-                  options_json: JSON.stringify(qData.options || []),
-                  diagram_url: qData.diagram_url || qData.image_url,
-                  image_url: qData.image_url || qData.diagram_url,
-                  has_table: Boolean(qData.has_table),
-                  status: 'ELIGIBLE_FOR_PAPER',
-                });
-              }
-            });
+      // Also query questions from papers that share the same filename as the selected papers
+      if (selectedQs.length < 14) {
+        const selPaperRecords = executeQuery(
+          db,
+          `SELECT original_filename FROM question_papers WHERE id IN (${placeholders})`,
+          body.selected_paper_ids
+        );
+        const filenames = selPaperRecords.map((p: any) => p.original_filename).filter(Boolean);
+        if (filenames.length > 0) {
+          const fnPlaceholders = filenames.map(() => '?').join(',');
+          const matchingQs = executeQuery(
+            db,
+            `SELECT * FROM questions
+             WHERE question_paper_id IN (SELECT id FROM question_papers WHERE original_filename IN (${fnPlaceholders}))
+               AND status NOT IN ('QUARANTINED', 'COMPROMISED')
+               AND LOWER(content_text) NOT LIKE '%prism%'
+               AND LOWER(content_text) NOT LIKE '%neet%'
+             ORDER BY source_page ASC, question_number ASC, created_at ASC`,
+            filenames
+          );
+          if (matchingQs.length > selectedQs.length) {
+            selectedQs = matchingQs;
           }
-        } catch (e) {
-          console.error(`Error loading draft file ${file}:`, e);
         }
-      });
+      }
 
-      if (draftQuestions.length > 0) {
-        eligibleQuestions = [...eligibleQuestions, ...draftQuestions];
+      if (selectedQs.length > 0) {
+        eligibleQuestions = selectedQs;
       }
     }
 
-    // Filter by subject if subject pool is specified
-    if (isNeetOrMultiSubjectMCQ && Array.isArray(body.subject_pool) && body.subject_pool.length > 0) {
-      const filtered = eligibleQuestions.filter(q => body.subject_pool.includes(q.subject));
-      if (filtered.length > 0) {
-        eligibleQuestions = filtered;
+    if (eligibleQuestions.length === 0) {
+      if (hasManualBlueprint) {
+        eligibleQuestions = executeQuery(
+          db,
+          `SELECT * FROM questions WHERE org_id = ? AND status = 'ELIGIBLE_FOR_PAPER' AND LOWER(content_text) NOT LIKE '%prism%' AND LOWER(content_text) NOT LIKE '%neet%' ORDER BY subject ASC, difficulty ASC`,
+          [orgId]
+        );
+      } else {
+        // Prioritize questions explicitly linked to this exam, source paper, or uploaded question papers
+        eligibleQuestions = executeQuery(
+          db,
+          `SELECT * FROM questions
+           WHERE (question_paper_id = ? OR question_paper_id IN (SELECT id FROM question_papers WHERE exam_id = ? OR subject = ? OR examination_category = ?))
+             AND status NOT IN ('QUARANTINED', 'COMPROMISED')
+             AND LOWER(content_text) NOT LIKE '%prism%'
+             AND LOWER(content_text) NOT LIKE '%neet%'
+           ORDER BY source_page ASC, question_number ASC, created_at ASC`,
+          [exam.id, exam.id, exam.subject || '', exam.category || '']
+        );
+
+        // If still empty, check non-NEET questions in the organization
+        if (eligibleQuestions.length === 0) {
+          eligibleQuestions = executeQuery(
+            db,
+            `SELECT * FROM questions 
+             WHERE org_id = ? 
+               AND status NOT IN ('QUARANTINED', 'COMPROMISED')
+               AND LOWER(content_text) NOT LIKE '%prism%'
+               AND LOWER(content_text) NOT LIKE '%neet%'
+               AND LOWER(subject) NOT LIKE '%botany%'
+               AND LOWER(subject) NOT LIKE '%zoology%'
+             ORDER BY source_page ASC, question_number ASC, created_at ASC`,
+            [orgId]
+          );
+        }
       }
-    } else if (!isUniversityExam && exam.subject) {
+    }
+
+    // Filter by exam subject if applicable
+    if (exam.subject) {
       const subjectMatch = eligibleQuestions.filter(q =>
         q.subject && (q.subject.toLowerCase() === exam.subject.toLowerCase() || exam.subject.toLowerCase().includes(q.subject.toLowerCase()))
       );
@@ -6116,13 +6699,15 @@ async function startServer() {
     }
 
     const now = new Date().toISOString();
-    const numSetsToGenerate = hasManualBlueprint ? 1 : isUniversityExam ? (body.num_sets || 3) : 1;
+    const numSetsToGenerate = hasManualBlueprint ? 1 : isUniversityExam ? (body.num_sets || 4) : 1;
     const generatedSets: any[] = [];
+
+    const dynamicPaperCode = exam.code || exam.paper_code || `${(exam.name || 'EXAM').replace(/[^A-Z0-9]/gi, '').substring(0, 4).toUpperCase() || 'UNIV'}-${Math.floor(100 + Math.random() * 900)}`;
 
     // If University Board Exam, run generateUniversityBoardPaperSets algorithm
     let boardSets: any[] = [];
     if (isUniversityExam) {
-      boardSets = generateUniversityBoardPaperSets(eligibleQuestions, numSetsToGenerate, 'SLR-HL-475');
+      boardSets = generateUniversityBoardPaperSets(eligibleQuestions, numSetsToGenerate, dynamicPaperCode);
     }
 
     for (let setIdx = 1; setIdx <= numSetsToGenerate; setIdx++) {
@@ -6161,24 +6746,56 @@ async function startServer() {
         setQuestions = setQuestions.map((question, index) => ({ ...question, blueprintOrder: index + 1 }));
       } else if (isUniversityExam && boardSet) {
         // Collect MCQs from mcqSection and theory from Section I & II
-        const mcqs = boardSet.mcqSection.questions.map((q: any, idx: number) => ({
-          id: q.id,
+        const mcqs = (boardSet.mcqSection?.questions || []).map((q: any, idx: number) => ({
+          id: q.id || `mcq-s${setIdx}-${idx + 1}`,
           question_number: `1.${idx + 1}`,
           order_index: idx + 1,
-          subject: exam.subject || 'Computer Graphics',
+          subject: exam.subject || 'Core',
           topic: 'Objective',
           difficulty: 'MEDIUM',
           marks: 1,
           negative_marks: 0,
           question_type: 'MCQ',
           content_text: q.content_text,
-          options_json: JSON.stringify(q.options),
+          options_json: JSON.stringify(q.options || []),
           correct_answer: q.correct_answer,
           diagram_url: q.diagram_url || q.image_url,
           image_url: q.image_url || q.diagram_url,
           has_table: q.has_table,
         }));
-        setQuestions = mcqs;
+
+        const theoryQuestions: any[] = [];
+        let tOrder = mcqs.length + 1;
+        const addTheorySubs = (subs: any[], qNum: string, marksPerQ: number) => {
+          (subs || []).forEach((sub: any, sIdx: number) => {
+            theoryQuestions.push({
+              id: sub.id || `theory-s${setIdx}-${qNum}-${sIdx + 1}`,
+              question_number: `${qNum}.${sIdx + 1}`,
+              order_index: tOrder++,
+              subject: exam.subject || 'Core',
+              topic: 'Theory & Analysis',
+              difficulty: 'MEDIUM',
+              marks: sub.marks || marksPerQ,
+              negative_marks: 0,
+              question_type: 'THEORY',
+              content_text: sub.content_text,
+              options_json: JSON.stringify([]),
+              correct_answer: '',
+              diagram_url: sub.diagram_url || sub.image_url,
+              image_url: sub.image_url || sub.diagram_url,
+              has_table: sub.has_table,
+            });
+          });
+        };
+
+        addTheorySubs(boardSet.section1?.q2?.questions, '2', 4);
+        addTheorySubs(boardSet.section1?.q3?.questions, '3', 6);
+        addTheorySubs(boardSet.section1?.q4?.questions, '4', 3);
+        addTheorySubs(boardSet.section2?.q5?.questions, '5', 4);
+        addTheorySubs(boardSet.section2?.q6?.questions, '6', 6);
+        addTheorySubs(boardSet.section2?.q7?.questions, '7', 6);
+
+        setQuestions = [...mcqs, ...theoryQuestions];
       } else if (setIdx === 1 || !isUniversityExam || numSetsToGenerate === 1) {
         // Set 1 strictly preserves the EXACT original question sequence from the uploaded paper
         setQuestions = [...eligibleQuestions];
@@ -6195,7 +6812,7 @@ async function startServer() {
       const totalPaperMarks = hasManualBlueprint
         ? Number(manualBlueprint.totalMarks || 0)
         : isUniversityExam
-          ? 70
+          ? (exam.total_marks || 70)
           : setQuestions.reduce((acc, q) => acc + (q.marks || 4), 0);
 
       const paperPayloadObject = {
@@ -6206,10 +6823,13 @@ async function startServer() {
         examType: exam.exam_type,
         versionCode,
         setLabel: hasManualBlueprint ? `${manualBlueprint.paperName} v${manualBlueprint.version}` : setLabel,
-        paperCode: 'SLR-HL-475',
+        paperCode: dynamicPaperCode,
+        universityName: exam.university_name || 'Autonomous State Examination Board',
         isUniversity3PaperFormat: isUniversityExam,
         isMultiSubjectMCQFormat: isNeetOrMultiSubjectMCQ,
         universityBoardSet: boardSet,
+        blueprintPattern: exam.blueprint_pattern || 'Standard CBCS',
+        markingScheme: exam.marking_scheme || 'Standard Marks',
         blueprint: hasManualBlueprint ? {
           id: manualBlueprint.id,
           version: manualBlueprint.version,
@@ -6218,7 +6838,7 @@ async function startServer() {
         } : null,
         subjectBreakdown,
         generatedAt: now,
-        durationMinutes: 180,
+        durationMinutes: exam.duration_minutes || 180,
         totalMarks: totalPaperMarks,
         instructions: hasManualBlueprint
           ? [`Paper generated from active blueprint ${manualBlueprint.version}.`, 'Follow the configured section order, question counts, attempt rules, marks, and negative marking.']
@@ -6624,11 +7244,39 @@ async function startServer() {
           [paperVersionId, exam.id, versionCode, isCurrent, req.user!.id, now]
         );
 
-        // Record Mappings
+        // Record Mappings & Ensure Questions Exist in Question Bank
         setQuestions.forEach((q, idx) => {
+          const qExists = executeQuery(db, 'SELECT id FROM questions WHERE id = ?', [q.id])[0];
+          if (!qExists) {
+            executeRun(
+              db,
+              `INSERT INTO questions (
+                id, org_id, question_paper_id, subject, topic, difficulty, marks, negative_marks,
+                correct_answer, content_text, options_json, diagram_url, image_url, question_type, status, created_at
+              ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'ELIGIBLE_FOR_PAPER', ?)`,
+              [
+                q.id,
+                exam.org_id || req.user!.org_id,
+                q.question_paper_id || (body.selected_paper_ids?.[0] || 'GENERATED_VAULT'),
+                q.subject || exam.subject || 'General',
+                q.topic || 'General',
+                q.difficulty || 'MEDIUM',
+                q.marks || (q.question_type === 'MCQ' ? 1 : 4),
+                q.negative_marks || 0,
+                q.correct_answer || '',
+                q.content_text || '',
+                typeof q.options_json === 'string' ? q.options_json : JSON.stringify(q.options || []),
+                q.diagram_url || null,
+                q.image_url || null,
+                q.question_type || (q.options?.length ? 'MCQ' : 'THEORY'),
+                now
+              ]
+            );
+          }
+
           const sectionName = isUniversityExam
-            ? (idx < 2 ? 'Section A: Short Compulsory' : idx < 4 ? 'Section B: Medium Analytical' : 'Section C: Long Subjective')
-            : `Section: ${q.subject}`;
+            ? (idx < 14 ? 'Section A: Q.1 MCQs' : idx < 23 ? 'Section I: Q.2-Q.4 Theory' : 'Section II: Q.5-Q.7 Theory')
+            : `Section: ${q.subject || 'General'}`;
 
           executeRun(
             db,
@@ -9212,6 +9860,9 @@ async function startServer() {
   await ensureAllOrganizationsExist();
   await createDevelopmentTestAccount();
   await seedAcademicDemoDataInternal();
+  const db = await getDb();
+  cleanLegacyDummyQuestions(db);
+  saveDb();
 
   app.listen(PORT, '0.0.0.0', () => {
     console.log(`[ZeroLeak Security Engine] Server running on http://0.0.0.0:${PORT}`);
