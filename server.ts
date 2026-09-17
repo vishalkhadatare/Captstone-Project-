@@ -6925,7 +6925,7 @@ async function startServer() {
     // If University Board Exam, run generateUniversityBoardPaperSets algorithm
     let boardSets: any[] = [];
     if (isUniversityExam) {
-      boardSets = generateUniversityBoardPaperSets(eligibleQuestions, numSetsToGenerate, dynamicPaperCode);
+      boardSets = generateUniversityBoardPaperSets(eligibleQuestions, numSetsToGenerate, dynamicPaperCode, exam.subject || 'Core Engineering');
     }
 
     for (let setIdx = 1; setIdx <= numSetsToGenerate; setIdx++) {
@@ -7006,12 +7006,15 @@ async function startServer() {
           });
         };
 
-        addTheorySubs(boardSet.section1?.q2?.questions, '2', 4);
-        addTheorySubs(boardSet.section1?.q3?.questions, '3', 6);
-        addTheorySubs(boardSet.section1?.q4?.questions, '4', 3);
-        addTheorySubs(boardSet.section2?.q5?.questions, '5', 4);
-        addTheorySubs(boardSet.section2?.q6?.questions, '6', 6);
-        addTheorySubs(boardSet.section2?.q7?.questions, '7', 6);
+        const sec1Qs = boardSet.section1?.questions || [];
+        const sec2Qs = boardSet.section2?.questions || [];
+
+        addTheorySubs(sec1Qs[0]?.subQuestions, '2', 4);
+        addTheorySubs(sec1Qs[1]?.subQuestions, '3', 6);
+        addTheorySubs(sec1Qs[2]?.subQuestions, '4', 3);
+        addTheorySubs(sec2Qs[0]?.subQuestions, '5', 4);
+        addTheorySubs(sec2Qs[1]?.subQuestions, '6', 6);
+        addTheorySubs(sec2Qs[2]?.subQuestions, '7', 6);
 
         setQuestions = [...mcqs, ...theoryQuestions];
       } else if (setIdx === 1 || !isUniversityExam || numSetsToGenerate === 1) {

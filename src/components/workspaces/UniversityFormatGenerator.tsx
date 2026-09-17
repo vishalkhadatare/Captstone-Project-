@@ -659,10 +659,96 @@ export const UniversityFormatGenerator: React.FC<UniversityFormatGeneratorProps>
     return q.source_paper === filterSourcePaper;
   });
 
+  const getSubjectDefaultTheory = (subjectName: string = '') => {
+    const sLower = subjectName.toLowerCase();
+    if (sLower.includes('operating system') || sLower.includes('os')) {
+      return [
+        { id: 'dt-1', content_text: 'Explain the concept of Process Control Block (PCB) and its structure in Operating Systems.', marks: 4 },
+        { id: 'dt-2', content_text: 'Differentiate between User-level threads and Kernel-level threads with neat diagrams.', marks: 4 },
+        { id: 'dt-3', content_text: 'Explain Round Robin (RR) and Shortest Job First (SJF) CPU scheduling algorithms with examples.', marks: 4 },
+        { id: 'dt-4', content_text: 'What is the Dining Philosophers Problem? Explain its synchronization solution using Semaphores.', marks: 4 },
+        { id: 'dt-5', content_text: 'Explain Demand Paging and Page Fault handling mechanism in virtual memory.', marks: 4 },
+        { id: 'dt-6', content_text: 'State and explain Banker’s Algorithm for Deadlock Avoidance with a suitable resource allocation example.', marks: 6 },
+        { id: 'dt-7', content_text: 'Explain the Producer-Consumer problem and solve it using counting semaphores and mutex locks.', marks: 6 },
+        { id: 'dt-8', content_text: 'Explain the concept of Inode structure in Unix/Linux File System.', marks: 3 },
+        { id: 'dt-9', content_text: 'Compare Paging and Segmentation memory management schemes.', marks: 3 },
+        { id: 'dt-10', content_text: 'Explain Disk Scheduling Algorithms: FCFS, SSTF, SCAN, and C-SCAN with track request examples.', marks: 4 },
+        { id: 'dt-11', content_text: 'Explain different File Allocation methods (Contiguous, Linked, and Indexed allocation) with pros and cons.', marks: 4 },
+        { id: 'dt-12', content_text: 'Explain Context Switching in Multiprogramming Operating Systems.', marks: 4 },
+        { id: 'dt-13', content_text: 'State four necessary conditions for Deadlock occurrence and explain how to prevent them.', marks: 4 },
+        { id: 'dt-14', content_text: 'Explain Inter-Process Communication (IPC) techniques: Shared Memory and Message Passing.', marks: 4 },
+        { id: 'dt-15', content_text: 'Define the Critical Section Problem. Explain Peterson’s Solution for two-process mutual exclusion.', marks: 6 },
+        { id: 'dt-16', content_text: 'Explain FIFO, LRU, and Optimal Page Replacement algorithms with a reference string.', marks: 6 },
+        { id: 'dt-17', content_text: 'Explain Access Matrix mechanism for Protection and Security in Operating Systems.', marks: 6 },
+      ];
+    } else if (sLower.includes('network') || sLower.includes('cn')) {
+      return [
+        { id: 'dt-1', content_text: 'Explain the 7 layers of OSI Reference Model and their respective functions in detail.', marks: 4 },
+        { id: 'dt-2', content_text: 'Differentiate between TCP and UDP transport layer protocols with appropriate use cases.', marks: 4 },
+        { id: 'dt-3', content_text: 'Explain the IPv4 Packet Header format with fields and checksum calculation.', marks: 4 },
+        { id: 'dt-4', content_text: 'Explain Stop-and-Wait ARQ flow control and error control protocol.', marks: 4 },
+        { id: 'dt-5', content_text: 'Compare Distance Vector Routing and Link State Routing algorithms.', marks: 4 },
+        { id: 'dt-6', content_text: 'Explain Dijkstra’s Shortest Path Algorithm with a step-by-step weighted graph example.', marks: 6 },
+        { id: 'dt-7', content_text: 'Explain TCP Three-Way Handshake for connection establishment and termination process.', marks: 6 },
+        { id: 'dt-8', content_text: 'Explain CSMA/CD mechanism and collision handling in IEEE 802.3 Ethernet networks.', marks: 3 },
+        { id: 'dt-9', content_text: 'Explain Subnetting and Classless Inter-Domain Routing (CIDR) with a numerical example.', marks: 3 },
+        { id: 'dt-10', content_text: 'Explain DNS (Domain Name System) resolution hierarchy and iterative vs recursive queries.', marks: 4 },
+        { id: 'dt-11', content_text: 'Explain Leaky Bucket and Token Bucket algorithms for Network Congestion and Traffic Shaping.', marks: 4 },
+        { id: 'dt-12', content_text: 'Explain the architecture and security features of HTTP vs HTTPS (TLS/SSL).', marks: 4 },
+        { id: 'dt-13', content_text: 'Explain the working of Network Address Translation (NAT) in router gateways.', marks: 4 },
+        { id: 'dt-14', content_text: 'Explain Cryptographic Hash Functions (SHA-256) and Digital Signatures in network security.', marks: 4 },
+        { id: 'dt-15', content_text: 'Explain Error Detection using Cyclic Redundancy Check (CRC) with a generator polynomial example.', marks: 6 },
+        { id: 'dt-16', content_text: 'Explain Sliding Window Flow Control protocol (Go-Back-N and Selective Repeat).', marks: 6 },
+        { id: 'dt-17', content_text: 'Explain RSA Public Key Cryptosystem algorithm with a numerical key generation example.', marks: 6 },
+      ];
+    } else if (sLower.includes('data') || sLower.includes('dbms') || sLower.includes('database')) {
+      return [
+        { id: 'dt-1', content_text: 'Explain 3-Tier Architecture of Database Management Systems with schema levels.', marks: 4 },
+        { id: 'dt-2', content_text: 'Explain Entity-Relationship (ER) model concepts: Entity Sets, Attributes, and Cardinalities.', marks: 4 },
+        { id: 'dt-3', content_text: 'Explain fundamental Relational Algebra operations: Select, Project, Union, and Cartesian Product.', marks: 4 },
+        { id: 'dt-4', content_text: 'Explain 1NF, 2NF, 3NF, and BCNF normalization forms with decomposition examples.', marks: 4 },
+        { id: 'dt-5', content_text: 'Explain ACID properties of Database Transactions with failure recovery examples.', marks: 4 },
+        { id: 'dt-6', content_text: 'Explain Two-Phase Locking (2PL) protocol and strict 2PL for transaction serializability.', marks: 6 },
+        { id: 'dt-7', content_text: 'Explain B+ Tree Indexing structure and search/insertion operations in DBMS.', marks: 6 },
+        { id: 'dt-8', content_text: 'Explain Query Optimization techniques and relational algebra expression transformations.', marks: 3 },
+        { id: 'dt-9', content_text: 'Explain Conflict Serializability vs View Serializability with precedence graphs.', marks: 3 },
+        { id: 'dt-10', content_text: 'Explain Triggers and Stored Procedures with SQL syntax and practical use cases.', marks: 4 },
+        { id: 'dt-11', content_text: 'Explain Views and Updatable Views in Relational Database Management Systems.', marks: 4 },
+        { id: 'dt-12', content_text: 'Explain Deadlock Detection and Prevention techniques in Multi-user DBMS.', marks: 4 },
+        { id: 'dt-13', content_text: 'Explain Log-Based Recovery techniques (Deferred and Immediate Update) and Checkpoints.', marks: 4 },
+        { id: 'dt-14', content_text: 'Explain Nested Loop Join, Hash Join, and Merge Join execution algorithms.', marks: 4 },
+        { id: 'dt-15', content_text: 'Explain Multi-Version Concurrency Control (MVCC) mechanism in modern relational databases.', marks: 6 },
+        { id: 'dt-16', content_text: 'Explain Shadow Paging recovery technique and compare it with Log-based recovery.', marks: 6 },
+        { id: 'dt-17', content_text: 'Explain Write-Ahead Logging (WAL) and ARIES recovery algorithm in database systems.', marks: 6 },
+      ];
+    } else {
+      return [
+        { id: 'dt-1', content_text: 'Distinguish between Raster Scan display and Random Scan display systems with architecture diagrams.', marks: 4 },
+        { id: 'dt-2', content_text: 'Explain 2D Rotation transformation with homogenous coordinate matrix representations.', marks: 4 },
+        { id: 'dt-3', content_text: 'Explain any four Computer Graphics real-world industrial and simulation applications.', marks: 4 },
+        { id: 'dt-4', content_text: 'Scale the polygon with coordinates P(2,5), Q(7,10), C(10,2) by 2 units in both x and y directions.', marks: 4 },
+        { id: 'dt-5', content_text: 'Explain Run Length Encoding (RLE) and Huffman Coding in image data compression.', marks: 4 },
+        { id: 'dt-6', content_text: 'Consider a line from (0,0) to (5,6). Use DDA Line Drawing algorithm to rasterize this line.', marks: 6 },
+        { id: 'dt-7', content_text: 'Write Bresenham’s Circle generation algorithm with mathematical decision parameter derivation.', marks: 6 },
+        { id: 'dt-8', content_text: 'Explain Beam Penetration Technique in color CRT monitors with advantages and limitations.', marks: 3 },
+        { id: 'dt-9', content_text: 'Explain Shadow Mask Technique in color CRT monitors with delta-electron gun alignment.', marks: 3 },
+        { id: 'dt-10', content_text: 'Write a short technical note on Segmented Display File structure and display processors.', marks: 4 },
+        { id: 'dt-11', content_text: 'Explain 2D Viewing Transformation Pipeline from World Coordinates to Viewport Coordinates.', marks: 4 },
+        { id: 'dt-12', content_text: 'Explain mathematical properties of Bezier Curves and convex hull control polygon points.', marks: 4 },
+        { id: 'dt-13', content_text: 'Explain Z-Buffer depth-buffer algorithm for hidden surface removal and visibility test.', marks: 4 },
+        { id: 'dt-14', content_text: 'Explain Painter’s Algorithm (Depth Sort) for hidden surface elimination.', marks: 4 },
+        { id: 'dt-15', content_text: 'Explain Warnock Area Subdivision Algorithm for visible surface determination.', marks: 6 },
+        { id: 'dt-16', content_text: 'What is Antialiasing? Explain supersampling, filtering, and pixel phasing antialiasing techniques.', marks: 6 },
+        { id: 'dt-17', content_text: 'Explain Cohen-Sutherland Line Clipping algorithm with 4-bit outcodes and intersection calculations.', marks: 6 },
+      ];
+    }
+  };
+
   // Separate MCQs vs Theory from currentPaperData
   const allQs = currentPaperData?.questions || [];
   const baseMcqs = allQs.filter(q => q.question_type === 'MCQ' || (Array.isArray(q.options) && q.options.length >= 2));
-  const baseTheory = allQs.filter(q => q.question_type !== 'MCQ' && (!q.options || q.options.length < 2));
+  const rawTheory = allQs.filter(q => q.question_type !== 'MCQ' && (!q.options || q.options.length < 2));
+  const baseTheory = rawTheory.length >= 4 ? rawTheory : getSubjectDefaultTheory(selectedExam?.subject || selectedExam?.name || '');
 
   // Deterministically permute MCQs & option choices for active Set P (0), Set Q (1), Set R (2), Set S (3)
   const realMcqs = baseMcqs.map((q, idx) => {
@@ -688,8 +774,9 @@ export const UniversityFormatGenerator: React.FC<UniversityFormatGeneratorProps>
       });
 
   // Partition Theory into Section I (Q.2, Q.3, Q.4) and Section II (Q.5, Q.6, Q.7)
-  const theorySec1 = realTheory.slice(0, Math.ceil(realTheory.length / 2));
-  const theorySec2 = realTheory.slice(Math.ceil(realTheory.length / 2));
+  const sec1Count = Math.min(9, Math.ceil(realTheory.length / 2));
+  const theorySec1 = realTheory.slice(0, sec1Count);
+  const theorySec2 = realTheory.slice(sec1Count);
 
   const hasRealPaper = !!currentPaperData && allQs.length > 0;
 
@@ -1629,40 +1716,62 @@ export const UniversityFormatGenerator: React.FC<UniversityFormatGeneratorProps>
                 </div>
 
                 {/* Section – I Theory */}
-                <div className="space-y-3 border-b border-slate-200 pb-5">
+                <div className="space-y-4 border-b border-slate-200 pb-5">
                   <div className="flex items-center justify-between font-bold text-sm border-b border-slate-300 pb-1 text-slate-950 uppercase font-mono">
                     <span>Section – I (Theory &amp; Analysis)</span>
                     <span>Max. Marks: 28</span>
                   </div>
 
                   {theorySec1.length > 0 ? (
-                    <div className="space-y-4">
-                      <div className="flex items-center justify-between font-bold text-sm text-slate-950">
-                        <span>Q.2 Answer the following questions.</span>
-                        <span className="font-mono text-sm font-bold pr-2">16</span>
-                      </div>
-                      <div className="space-y-2.5 pl-4 text-xs font-medium text-slate-900">
-                        {theorySec1.slice(0, 5).map((tQ, tIdx) => (
-                          <div key={tQ.id || tIdx} className="space-y-1">
-                            <div className="flex items-start gap-1.5">
+                    <div className="space-y-5">
+                      {/* Q.2 (16 Marks) */}
+                      <div className="space-y-2">
+                        <div className="flex items-center justify-between font-bold text-sm text-slate-950">
+                          <span>Q.2 Answer the following questions. (Any Four)</span>
+                          <span className="font-mono text-sm font-bold pr-2">16</span>
+                        </div>
+                        <div className="space-y-2 pl-4 text-xs font-medium text-slate-900">
+                          {theorySec1.slice(0, 5).map((tQ, tIdx) => (
+                            <div key={tQ.id || tIdx} className="flex items-start gap-2">
                               <span className="font-bold shrink-0">{String.fromCharCode(97 + tIdx)})</span>
                               <div>
                                 <LaTeXText text={tQ.content_text || ''} />
                               </div>
                             </div>
-                          </div>
-                        ))}
+                          ))}
+                        </div>
                       </div>
 
+                      {/* Q.3 (6 Marks) */}
                       {theorySec1.length > 5 && (
-                        <div className="space-y-2.5 pt-2">
+                        <div className="space-y-2 pt-2 border-t border-slate-100">
                           <div className="flex items-center justify-between font-bold text-sm text-slate-950">
-                            <span>Q.3 Answer the following questions in detail.</span>
-                            <span className="font-mono text-sm font-bold pr-2">12</span>
+                            <span>Q.3 Answer the following question. (Any One)</span>
+                            <span className="font-mono text-sm font-bold pr-2">6</span>
                           </div>
                           <div className="space-y-2 pl-4 text-xs font-medium text-slate-900">
-                            {theorySec1.slice(5).map((tQ, tIdx) => (
-                              <div key={tQ.id || tIdx} className="flex items-start gap-1.5">
+                            {theorySec1.slice(5, 7).map((tQ, tIdx) => (
+                              <div key={tQ.id || tIdx} className="flex items-start gap-2">
+                                <span className="font-bold shrink-0">{String.fromCharCode(97 + tIdx)})</span>
+                                <div>
+                                  <LaTeXText text={tQ.content_text || ''} />
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+
+                      {/* Q.4 (6 Marks) */}
+                      {theorySec1.length > 7 && (
+                        <div className="space-y-2 pt-2 border-t border-slate-100">
+                          <div className="flex items-center justify-between font-bold text-sm text-slate-950">
+                            <span>Q.4 Attempt the following.</span>
+                            <span className="font-mono text-sm font-bold pr-2">6</span>
+                          </div>
+                          <div className="space-y-2 pl-4 text-xs font-medium text-slate-900">
+                            {theorySec1.slice(7, 9).map((tQ, tIdx) => (
+                              <div key={tQ.id || tIdx} className="flex items-start gap-2">
                                 <span className="font-bold shrink-0">{String.fromCharCode(97 + tIdx)})</span>
                                 <div>
                                   <LaTeXText text={tQ.content_text || ''} />
@@ -1675,47 +1784,69 @@ export const UniversityFormatGenerator: React.FC<UniversityFormatGeneratorProps>
                     </div>
                   ) : (
                     <div className="text-xs text-slate-500 italic">
-                      Click "Generate Paper from Combination" above to populate real theory questions.
+                      Click "Generate Real Paper Sets" above to populate real theory questions.
                     </div>
                   )}
                 </div>
 
                 {/* Section – II Theory */}
-                <div className="space-y-3 border-b border-slate-200 pb-5">
+                <div className="space-y-4 border-b border-slate-200 pb-5">
                   <div className="flex items-center justify-between font-bold text-sm border-b border-slate-300 pb-1 text-slate-950 uppercase font-mono">
                     <span>Section – II (Applications &amp; Problems)</span>
                     <span>Max. Marks: 28</span>
                   </div>
 
                   {theorySec2.length > 0 ? (
-                    <div className="space-y-4">
-                      <div className="flex items-center justify-between font-bold text-sm text-slate-950">
-                        <span>Q.4 Answer the following questions.</span>
-                        <span className="font-mono text-sm font-bold pr-2">16</span>
-                      </div>
-                      <div className="space-y-2.5 pl-4 text-xs font-medium text-slate-900">
-                        {theorySec2.slice(0, 5).map((tQ, tIdx) => (
-                          <div key={tQ.id || tIdx} className="space-y-1">
-                            <div className="flex items-start gap-1.5">
+                    <div className="space-y-5">
+                      {/* Q.5 (16 Marks) */}
+                      <div className="space-y-2">
+                        <div className="flex items-center justify-between font-bold text-sm text-slate-950">
+                          <span>Q.5 Answer the following questions. (Any Four)</span>
+                          <span className="font-mono text-sm font-bold pr-2">16</span>
+                        </div>
+                        <div className="space-y-2 pl-4 text-xs font-medium text-slate-900">
+                          {theorySec2.slice(0, 5).map((tQ, tIdx) => (
+                            <div key={tQ.id || tIdx} className="flex items-start gap-2">
                               <span className="font-bold shrink-0">{String.fromCharCode(97 + tIdx)})</span>
                               <div>
                                 <LaTeXText text={tQ.content_text || ''} />
                               </div>
                             </div>
-                          </div>
-                        ))}
+                          ))}
+                        </div>
                       </div>
 
+                      {/* Q.6 (6 Marks) */}
                       {theorySec2.length > 5 && (
-                        <div className="space-y-2.5 pt-2">
+                        <div className="space-y-2 pt-2 border-t border-slate-100">
                           <div className="flex items-center justify-between font-bold text-sm text-slate-950">
-                            <span>Q.5 Solve / Explain the following.</span>
-                            <span className="font-mono text-sm font-bold pr-2">12</span>
+                            <span>Q.6 Answer the following question. (Any One)</span>
+                            <span className="font-mono text-sm font-bold pr-2">6</span>
                           </div>
                           <div className="space-y-2 pl-4 text-xs font-medium text-slate-900">
-                            {theorySec2.slice(5).map((tQ, tIdx) => (
-                              <div key={tQ.id || tIdx} className="flex items-start gap-1.5">
+                            {theorySec2.slice(5, 7).map((tQ, tIdx) => (
+                              <div key={tQ.id || tIdx} className="flex items-start gap-2">
                                 <span className="font-bold shrink-0">{String.fromCharCode(97 + tIdx)})</span>
+                                <div>
+                                  <LaTeXText text={tQ.content_text || ''} />
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+
+                      {/* Q.7 (6 Marks) */}
+                      {theorySec2.length > 7 && (
+                        <div className="space-y-2 pt-2 border-t border-slate-100">
+                          <div className="flex items-center justify-between font-bold text-sm text-slate-950">
+                            <span>Q.7 Solve / Explain the following.</span>
+                            <span className="font-mono text-sm font-bold pr-2">6</span>
+                          </div>
+                          <div className="space-y-2 pl-4 text-xs font-medium text-slate-900">
+                            {theorySec2.slice(7, 8).map((tQ, tIdx) => (
+                              <div key={tQ.id || tIdx} className="flex items-start gap-2">
+                                <span className="font-bold shrink-0">a)</span>
                                 <div>
                                   <LaTeXText text={tQ.content_text || ''} />
                                 </div>
@@ -1727,7 +1858,7 @@ export const UniversityFormatGenerator: React.FC<UniversityFormatGeneratorProps>
                     </div>
                   ) : (
                     <div className="text-xs text-slate-500 italic">
-                      Click "Generate Paper from Combination" above to populate real theory questions.
+                      Click "Generate Real Paper Sets" above to populate real theory questions.
                     </div>
                   )}
                 </div>

@@ -585,7 +585,8 @@ export interface UniversityBoardPaperSet {
 export function generateUniversityBoardPaperSets(
   draftPool: QuestionItem[],
   numSets: number = 3,
-  customPaperCode: string = 'SLR-HL-475'
+  customPaperCode: string = 'SLR-HL-475',
+  subjectName: string = 'Core Engineering'
 ): UniversityBoardPaperSet[] {
   const setNames = ['Set P', 'Set Q', 'Set R', 'Set S'];
 
@@ -607,6 +608,141 @@ export function generateUniversityBoardPaperSets(
     }
   });
 
+  const sLower = (subjectName || '').toLowerCase();
+
+  const getSubjectTheoryTemplates = () => {
+    if (sLower.includes('operating system') || sLower.includes('os')) {
+      return {
+        q2: [
+          'Explain the concept of Process Control Block (PCB) and its structure in Operating Systems.',
+          'Differentiate between User-level threads and Kernel-level threads with neat diagrams.',
+          'Explain Round Robin (RR) and Shortest Job First (SJF) CPU scheduling algorithms with examples.',
+          'What is the Dining Philosophers Problem? Explain its synchronization solution using Semaphores.',
+          'Explain Demand Paging and Page Fault handling mechanism in virtual memory.',
+        ],
+        q3: [
+          'State and explain Banker’s Algorithm for Deadlock Avoidance with a suitable resource allocation example.',
+          'Explain the Producer-Consumer problem and solve it using counting semaphores and mutex locks.',
+        ],
+        q4: [
+          'Explain the concept of Inode structure in Unix/Linux File System.',
+          'Compare Paging and Segmentation memory management schemes.',
+        ],
+        q5: [
+          'Explain Disk Scheduling Algorithms: FCFS, SSTF, SCAN, and C-SCAN with track request examples.',
+          'Explain different File Allocation methods (Contiguous, Linked, and Indexed allocation) with pros and cons.',
+          'Explain Context Switching in Multiprogramming Operating Systems.',
+          'State four necessary conditions for Deadlock occurrence and explain how to prevent them.',
+          'Explain Inter-Process Communication (IPC) techniques: Shared Memory and Message Passing.',
+        ],
+        q6: [
+          'Define the Critical Section Problem. Explain Peterson’s Solution for two-process mutual exclusion.',
+          'Explain FIFO, LRU, and Optimal Page Replacement algorithms with a reference string.',
+        ],
+        q7: [
+          'Explain Access Matrix mechanism for Protection and Security in Operating Systems.',
+        ],
+      };
+    } else if (sLower.includes('network') || sLower.includes('cn')) {
+      return {
+        q2: [
+          'Explain the 7 layers of OSI Reference Model and their respective functions in detail.',
+          'Differentiate between TCP and UDP transport layer protocols with appropriate use cases.',
+          'Explain the IPv4 Packet Header format with fields and checksum calculation.',
+          'Explain Stop-and-Wait ARQ flow control and error control protocol.',
+          'Compare Distance Vector Routing and Link State Routing algorithms.',
+        ],
+        q3: [
+          'Explain Dijkstra’s Shortest Path Algorithm with a step-by-step weighted graph example.',
+          'Explain TCP Three-Way Handshake for connection establishment and termination process.',
+        ],
+        q4: [
+          'Explain CSMA/CD mechanism and collision handling in IEEE 802.3 Ethernet networks.',
+          'Explain Subnetting and Classless Inter-Domain Routing (CIDR) with a numerical example.',
+        ],
+        q5: [
+          'Explain DNS (Domain Name System) resolution hierarchy and iterative vs recursive queries.',
+          'Explain Leaky Bucket and Token Bucket algorithms for Network Congestion and Traffic Shaping.',
+          'Explain the architecture and security features of HTTP vs HTTPS (TLS/SSL).',
+          'Explain the working of Network Address Translation (NAT) in router gateways.',
+          'Explain Cryptographic Hash Functions (SHA-256) and Digital Signatures in network security.',
+        ],
+        q6: [
+          'Explain Error Detection using Cyclic Redundancy Check (CRC) with a generator polynomial example.',
+          'Explain Sliding Window Flow Control protocol (Go-Back-N and Selective Repeat).',
+        ],
+        q7: [
+          'Explain RSA Public Key Cryptosystem algorithm with a numerical key generation example.',
+        ],
+      };
+    } else if (sLower.includes('data') || sLower.includes('dbms') || sLower.includes('database')) {
+      return {
+        q2: [
+          'Explain 3-Tier Architecture of Database Management Systems with schema levels.',
+          'Explain Entity-Relationship (ER) model concepts: Entity Sets, Attributes, and Cardinalities.',
+          'Explain fundamental Relational Algebra operations: Select, Project, Union, and Cartesian Product.',
+          'Explain 1NF, 2NF, 3NF, and BCNF normalization forms with decomposition examples.',
+          'Explain ACID properties of Database Transactions with failure recovery examples.',
+        ],
+        q3: [
+          'Explain Two-Phase Locking (2PL) protocol and strict 2PL for transaction serializability.',
+          'Explain B+ Tree Indexing structure and search/insertion operations in DBMS.',
+        ],
+        q4: [
+          'Explain Query Optimization techniques and relational algebra expression transformations.',
+          'Explain Conflict Serializability vs View Serializability with precedence graphs.',
+        ],
+        q5: [
+          'Explain Triggers and Stored Procedures with SQL syntax and practical use cases.',
+          'Explain Views and Updatable Views in Relational Database Management Systems.',
+          'Explain Deadlock Detection and Prevention techniques in Multi-user DBMS.',
+          'Explain Log-Based Recovery techniques (Deferred and Immediate Update) and Checkpoints.',
+          'Explain Nested Loop Join, Hash Join, and Merge Join execution algorithms.',
+        ],
+        q6: [
+          'Explain Multi-Version Concurrency Control (MVCC) mechanism in modern relational databases.',
+          'Explain Shadow Paging recovery technique and compare it with Log-based recovery.',
+        ],
+        q7: [
+          'Explain Write-Ahead Logging (WAL) and ARIES recovery algorithm in database systems.',
+        ],
+      };
+    } else {
+      return {
+        q2: [
+          'Distinguish between Raster Scan display and Random Scan display systems with architecture diagrams.',
+          'Explain 2D Rotation transformation with homogenous coordinate matrix representations.',
+          'Explain any four Computer Graphics real-world industrial and simulation applications.',
+          'Scale the polygon with coordinates P(2,5), Q(7,10), C(10,2) by 2 units in both x and y directions.',
+          'Explain Run Length Encoding (RLE) and Huffman Coding in image data compression.',
+        ],
+        q3: [
+          'Consider a line from (0,0) to (5,6). Use DDA Line Drawing algorithm to rasterize this line.',
+          'Write Bresenham’s Circle generation algorithm with mathematical decision parameter derivation.',
+        ],
+        q4: [
+          'Explain Beam Penetration Technique in color CRT monitors with advantages and limitations.',
+          'Explain Shadow Mask Technique in color CRT monitors with delta-electron gun alignment.',
+        ],
+        q5: [
+          'Write a short technical note on Segmented Display File structure and display processors.',
+          'Explain 2D Viewing Transformation Pipeline from World Coordinates to Viewport Coordinates.',
+          'Explain mathematical properties of Bezier Curves and convex hull control polygon points.',
+          'Explain Z-Buffer depth-buffer algorithm for hidden surface removal and visibility test.',
+          'Explain Painter’s Algorithm (Depth Sort) for hidden surface elimination.',
+        ],
+        q6: [
+          'Explain Warnock Area Subdivision Algorithm for visible surface determination.',
+          'What is Antialiasing? Explain supersampling, filtering, and pixel phasing antialiasing techniques.',
+        ],
+        q7: [
+          'Explain Cohen-Sutherland Line Clipping algorithm with 4-bit outcodes and intersection calculations.',
+        ],
+      };
+    }
+  };
+
+  const templates = getSubjectTheoryTemplates();
   const boardSets: UniversityBoardPaperSet[] = [];
 
   for (let s = 0; s < numSets; s++) {
@@ -654,15 +790,6 @@ export function generateUniversityBoardPaperSets(
     // Permute Theory questions for Section I and Section II
     const shuffledTheory = cryptoShuffle(theoryPool);
 
-    // Section I:
-    // Q.2: Answer the following question. (Any Four) [5 sub-questions, 4 marks each] -> 16 marks
-    // Q.3: Answer the following question. (Any One) [2 sub-questions, 6 marks each] -> 6 marks
-    // Q.4: Attempt the following. [2 sub-questions, 3 marks each] -> 6 marks
-    // Section II:
-    // Q.5: Answer the following question. (Any Four) [5 sub-questions, 4 marks each] -> 16 marks
-    // Q.6: Answer the following question. (Any One) [2 sub-questions, 6 marks each] -> 6 marks
-    // Q.7: Explain / Solve... [1 question, 6 marks] -> 6 marks
-
     let tIdx = 0;
     const getNextTheory = (defaultText: string, defaultMarks: number) => {
       if (tIdx < shuffledTheory.length) {
@@ -677,46 +804,18 @@ export function generateUniversityBoardPaperSets(
         };
       }
       return {
-        id: `q-fallback-${tIdx++}`,
+        id: `q-theory-${customPaperCode}-s${s + 1}-${tIdx++}`,
         content_text: defaultText,
         marks: defaultMarks,
       };
     };
 
-    const q2Subs = [
-      getNextTheory('Distinguish between the Raster Scan display and Random Scan display.', 4),
-      getNextTheory('Explain 2D Rotation transformation with matrix representations.', 4),
-      getNextTheory('Explain any four Computer graphics real-world applications.', 4),
-      getNextTheory('Scale the polygon with coordinates P(2,5), Q(7,10), C(10,2) by 2 units in both x and y direction.', 4),
-      getNextTheory('Explain Run Length Encoding in image compression.', 4),
-    ].map((item, idx) => ({ ...item, subLabel: `${String.fromCharCode(97 + idx)})` }));
-
-    const q3Subs = [
-      getNextTheory('Consider a line from (0,0) to (5,6). Use DDA algorithm to rasterize this line.', 6),
-      getNextTheory('Write Bresenham’s Circle generation algorithm with derivation.', 6),
-    ].map((item, idx) => ({ ...item, subLabel: `${String.fromCharCode(97 + idx)})` }));
-
-    const q4Subs = [
-      getNextTheory('Explain Beam Penetration Technique in color CRT monitors.', 3),
-      getNextTheory('Explain Shadow Mask Technique in color CRT monitors.', 3),
-    ].map((item, idx) => ({ ...item, subLabel: `${String.fromCharCode(97 + idx)})` }));
-
-    const q5Subs = [
-      getNextTheory('Write a short note on segmented display file structure.', 4),
-      getNextTheory('Explain Viewing transformation pipeline in detail.', 4),
-      getNextTheory('Explain properties of Bezier curves and control points.', 4),
-      getNextTheory('Explain Z-Buffer depth buffer algorithm for hidden surface removal.', 4),
-      getNextTheory('Explain Painter’s algorithm for surface visibility.', 4),
-    ].map((item, idx) => ({ ...item, subLabel: `${String.fromCharCode(97 + idx)})` }));
-
-    const q6Subs = [
-      getNextTheory('Explain Warnock area subdivision algorithm.', 6),
-      getNextTheory('What is antialiasing? Explain different techniques of antialiasing.', 6),
-    ].map((item, idx) => ({ ...item, subLabel: `${String.fromCharCode(97 + idx)})` }));
-
-    const q7Subs = [
-      getNextTheory('Explain Cohen-Sutherland Line Clipping algorithm with outcodes and clipping region codes.', 6),
-    ].map((item) => ({ ...item, subLabel: '' }));
+    const q2Subs = templates.q2.map(txt => getNextTheory(txt, 4)).map((item, idx) => ({ ...item, subLabel: `${String.fromCharCode(97 + idx)})` }));
+    const q3Subs = templates.q3.map(txt => getNextTheory(txt, 6)).map((item, idx) => ({ ...item, subLabel: `${String.fromCharCode(97 + idx)})` }));
+    const q4Subs = templates.q4.map(txt => getNextTheory(txt, 3)).map((item, idx) => ({ ...item, subLabel: `${String.fromCharCode(97 + idx)})` }));
+    const q5Subs = templates.q5.map(txt => getNextTheory(txt, 4)).map((item, idx) => ({ ...item, subLabel: `${String.fromCharCode(97 + idx)})` }));
+    const q6Subs = templates.q6.map(txt => getNextTheory(txt, 6)).map((item, idx) => ({ ...item, subLabel: `${String.fromCharCode(97 + idx)})` }));
+    const q7Subs = templates.q7.map(txt => getNextTheory(txt, 6)).map((item) => ({ ...item, subLabel: '' }));
 
     boardSets.push({
       setLabel,
