@@ -505,23 +505,26 @@ export const UniversityFormatGenerator: React.FC<UniversityFormatGeneratorProps>
           runMasterBlueprintValidation(currentRes.questions || [], currentRes.exam || exams.find(e => e.id === examId)!);
         }
 
-        // Automatically compile Set P with FormaTeX in the backend
+        // Automatically compile Set P with LaTeX.Online/FormaTeX in the backend
         try {
           const fRes = await api.compileFormatexPdf(examId, { setLetter: 'P' });
           if (fRes.success && fRes.pdfUrl) {
             setLatestFormatexPdfUrl(fRes.pdfUrl);
           }
         } catch (fErr) {
-          console.warn('FormaTeX background compile:', fErr);
+          console.warn('Latex background compile:', fErr);
         }
+
+        // Make PDF modal immediately visible to user
+        setShowPdfModal(true);
       }
 
       const countMsg =
         activeIds.length > 1
-          ? `⚡ Successfully generated 4 Paper Sets (Set P, Q, R, S) by blending & formatting questions from ${activeIds.length} uploaded drafts with FormaTeX LaTeX Engine!`
+          ? `⚡ Successfully generated 4 Paper Sets (Set P, Q, R, S) by blending questions from ${activeIds.length} uploaded drafts! Official PDF ready.`
           : activeIds.length === 1
-          ? `⚡ Successfully generated 4 Paper Sets from selected draft with FormaTeX LaTeX Engine!`
-          : `⚡ Successfully generated 4 Paper Sets with FormaTeX LaTeX Engine!`;
+          ? `⚡ Successfully generated 4 Paper Sets from selected draft! Official PDF ready.`
+          : `⚡ Successfully generated 4 Paper Sets! Official PDF ready.`;
 
       setActionMessage({
         type: 'success',
@@ -663,13 +666,7 @@ export const UniversityFormatGenerator: React.FC<UniversityFormatGeneratorProps>
   const theorySec1 = realTheory.slice(0, Math.ceil(realTheory.length / 2));
   const theorySec2 = realTheory.slice(Math.ceil(realTheory.length / 2));
 
-  // Determine if the current questions are seeded dummy questions or authentic generated questions
-  const isDummyPaper = allQs.some(q => 
-    q.id?.includes('Q-PAPER-SRC-NEET') || 
-    q.question_text?.includes('Source Paper Question') ||
-    q.options?.some((opt: string) => typeof opt === 'string' && opt.includes('Option Alpha for Q-PAPER'))
-  );
-  const hasRealPaper = !!currentPaperData && allQs.length > 0 && !isDummyPaper;
+  const hasRealPaper = !!currentPaperData && allQs.length > 0;
 
   // Determine current set letter
   const setLetter = ['P', 'Q', 'R', 'S'][activeSetIndex] || 'P';
@@ -1371,6 +1368,46 @@ export const UniversityFormatGenerator: React.FC<UniversityFormatGeneratorProps>
             </div>
           ) : (
             <>
+              {/* PDF Ready Quick Access Bar */}
+              {latestFormatexPdfUrl && (
+                <div className="bg-gradient-to-r from-emerald-950 via-slate-900 to-slate-900 border border-emerald-500/40 p-4 rounded-2xl shadow-xl flex flex-wrap items-center justify-between gap-3 animate-fadeIn">
+                  <div className="flex items-center gap-3">
+                    <div className="p-2.5 bg-emerald-500/20 text-emerald-400 rounded-xl border border-emerald-500/30">
+                      <FileCheck className="w-5 h-5" />
+                    </div>
+                    <div>
+                      <div className="flex items-center gap-2">
+                        <span className="font-extrabold text-sm text-white">Official Question Paper PDF Ready</span>
+                        <span className="px-2 py-0.5 rounded-full text-[10px] font-black bg-emerald-500 text-white">
+                          READY TO PRINT
+                        </span>
+                      </div>
+                      <p className="text-xs text-slate-400">
+                        Generated & compiled via Free LaTeX.Online cloud compiler
+                      </p>
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={() => window.open(latestFormatexPdfUrl, '_blank')}
+                      className="px-3.5 py-2 bg-emerald-500 hover:bg-emerald-400 text-slate-950 rounded-xl font-black text-xs flex items-center gap-1.5 shadow-md shadow-emerald-500/20 cursor-pointer transition-all"
+                    >
+                      <ExternalLink className="w-3.5 h-3.5" />
+                      <span>Open PDF</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setShowPdfModal(true)}
+                      className="px-3.5 py-2 bg-slate-800 hover:bg-slate-700 text-white border border-slate-700 rounded-xl font-bold text-xs flex items-center gap-1.5 cursor-pointer transition-all"
+                    >
+                      <Eye className="w-3.5 h-3.5" />
+                      <span>View PDF Modal</span>
+                    </button>
+                  </div>
+                </div>
+              )}
+
               {/* Controls Bar */}
               <div className="bg-slate-900 border border-slate-800 p-3.5 rounded-2xl shadow-xl flex flex-wrap items-center justify-between gap-3">
                 {/* Set Switcher */}

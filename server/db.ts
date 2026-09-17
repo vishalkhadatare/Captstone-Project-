@@ -158,28 +158,34 @@ export async function hydrateFromPostgres(db: Database): Promise<void> {
   ];
 
   let totalRowsLoaded = 0;
-  for (const table of coreTables) {
-    try {
-      const res = await pool.query(`SELECT * FROM ${table}`);
-      if (res.rows.length > 0) {
-        totalRowsLoaded += res.rows.length;
-        for (const row of res.rows) {
-          const keys = Object.keys(row);
-          const values = Object.values(row).map((v) => {
-            if (v === null || v === undefined) return null;
-            if (v instanceof Date) return v.toISOString();
-            if (typeof v === 'object') return JSON.stringify(v);
-            if (typeof v === 'boolean') return v ? 1 : 0;
-            return v;
-          });
-          const placeholders = keys.map(() => '?').join(', ');
-          const sql = `INSERT OR REPLACE INTO ${table} (${keys.join(', ')}) VALUES (${placeholders})`;
-          try {
-            db.run(sql, values as any[]);
-          } catch {}
+  try {
+    db.exec('BEGIN TRANSACTION;');
+    for (const table of coreTables) {
+      try {
+        const res = await pool.query(`SELECT * FROM ${table}`);
+        if (res.rows.length > 0) {
+          totalRowsLoaded += res.rows.length;
+          for (const row of res.rows) {
+            const keys = Object.keys(row);
+            const values = Object.values(row).map((v) => {
+              if (v === null || v === undefined) return null;
+              if (v instanceof Date) return v.toISOString();
+              if (typeof v === 'object') return JSON.stringify(v);
+              if (typeof v === 'boolean') return v ? 1 : 0;
+              return v;
+            });
+            const placeholders = keys.map(() => '?').join(', ');
+            const sql = `INSERT OR REPLACE INTO ${table} (${keys.join(', ')}) VALUES (${placeholders})`;
+            try {
+              db.run(sql, values as any[]);
+            } catch {}
+          }
         }
-      }
-    } catch {}
+      } catch {}
+    }
+    db.exec('COMMIT;');
+  } catch (tErr) {
+    try { db.exec('ROLLBACK;'); } catch {}
   }
   if (totalRowsLoaded > 0) {
     console.log(`✓ In-memory database hydrated with ${totalRowsLoaded} records from PostgreSQL`);
