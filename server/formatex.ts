@@ -5,6 +5,9 @@ import path from 'node:path';
 import { uploadDocumentToCloudinary } from './cloudinary.ts';
 
 const LATEX_ONLINE_BASE_URL = process.env.LATEX_ONLINE_BASE_URL || 'https://latexonline.cc';
+const LATEX_SERVICE_URL = process.env.LATEX_SERVICE_URL || 'http://127.0.0.1:3013';
+const TEXAPI_BASE_URL = process.env.TEXAPI_BASE_URL || 'https://texapi.ovh';
+const TEXAPI_API_KEY = process.env.TEXAPI_API_KEY || '';
 const FORMATEX_BASE_URL = process.env.FORMATEX_BASE_URL || 'https://api.formatex.io/api/v1';
 const FORMATEX_API_KEY = process.env.FORMATEX_API_KEY || 'fex_b908adc11e4806a1c4877fb32105c1bb19e533378b3f0b4fd866148f701b061c';
 
@@ -13,7 +16,7 @@ export interface FormatexCompileOptions {
   engine?: 'pdflatex' | 'xelatex' | 'lualatex' | 'latexmk';
   smart?: boolean;
   timeoutMs?: number;
-  preferEngine?: 'latexonline' | 'formatex' | 'auto';
+  preferEngine?: 'clsi' | 'texapi' | 'latexonline' | 'formatex' | 'auto';
 }
 
 export interface FormatexCompileResult {
@@ -25,7 +28,7 @@ export interface FormatexCompileResult {
   durationMs?: number;
   jobId?: string;
   compilationsRemaining?: number;
-  compilerService?: 'LaTeX.Online (Free)' | 'FormaTeX Cloud';
+  compilerService?: 'Self-Hosted LaTeX (CLSI)' | 'TexAPI Cloud' | 'LaTeX.Online (Free)' | 'FormaTeX Cloud';
 }
 
 /**
@@ -179,6 +182,294 @@ export async function compileWithLatexOnline(options: {
 }
 
 /**
+ * Compile LaTeX using the self-hosted latex-service container.
+ *
+ * Runs on the local Docker network via `latex-service/server.js`, which exposes
+ * a CLSI-shaped API. No quota, no API key, no third party - unlike the cloud
+ * engines this cannot be rate limited or hit a monthly ceiling.
+ */
+export async function compileWithLocalClsi(options: {
+  latex: string;
+  command?: 'pdflatex' | 'xelatex' | 'lualatex';
+  timeoutMs?: number;
+}): Promise<FormatexCompileResult> {
+  const { latex, command = 'pdflatex', timeoutMs = 60000 } = options;
+  if (!latex || !latex.trim()) {
+    return { success: false, error: 'No LaTeX source provided for compilation.' };
+  }
+
+  const startTime = Date.now();
+  try {
+    const res = await fetch(`${LATEX_SERVICE_URL}/compile`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        latex,
+        compiler: command,
+        timeout: Math.ceil(timeoutMs / 1000),
+      }),
+      signal: AbortSignal.timeout(timeoutMs + 5000),
+    });
+
+    const durationMs = Date.now() - startTime;
+
+    if (res.ok) {
+      const pdfBuffer = Buffer.from(await res.arrayBuffer());
+      // Trust the magic bytes, not the status code.
+      if (pdfBuffer.length > 0 && pdfBuffer.subarray(0, 5).toString('latin1') === '%PDF-') {
+        return {
+          success: true,
+          pdfBuffer,
+          engine: command,
+          compilerService: 'Self-Hosted LaTeX (CLSI)',
+          durationMs,
+        };
+      }
+      return {
+        success: false,
+        error: 'Self-hosted LaTeX service returned a non-PDF response.',
+        durationMs,
+        compilerService: 'Self-Hosted LaTeX (CLSI)',
+      };
+    }
+
+    const body: any = await res.json().catch(() => ({}));
+    return {
+      success: false,
+      error: `Self-hosted LaTeX compilation failed (${res.status}): ${String(body.error || '').slice(0, 300)}`,
+      log: body.log,
+      durationMs,
+      compilerService: 'Self-Hosted LaTeX (CLSI)',
+    };
+  } catch (err: any) {
+    return {
+      success: false,
+      error: err?.message || 'Self-hosted LaTeX service unreachable',
+      durationMs: Date.now() - startTime,
+      compilerService: 'Self-Hosted LaTeX (CLSI)',
+    };
+  }
+}
+
+/**
+ * Check connectivity of the self-hosted latex-service container.
+ */
+export async function getLocalClsiHealth(): Promise<{
+  connected: boolean;
+  service?: string;
+  url?: string;
+  compilers?: string[];
+  error?: string;
+}> {
+  try {
+    const res = await fetch(`${LATEX_SERVICE_URL}/health`, {
+      signal: AbortSignal.timeout(5000),
+    });
+    if (!res.ok) {
+      return { connected: false, url: LATEX_SERVICE_URL, error: `HTTP ${res.status}` };
+    }
+    const body: any = await res.json();
+    return {
+      connected: body?.status === 'ok',
+      service: 'Self-Hosted LaTeX (CLSI)',
+      url: LATEX_SERVICE_URL,
+      compilers: body?.compilers,
+    };
+  } catch (err: any) {
+    return {
+      connected: false,
+      url: LATEX_SERVICE_URL,
+      error: err?.message || 'unreachable',
+    };
+  }
+}
+
+/**
+ * Compile LaTeX via TexAPI Cloud (https://texapi.ovh).
+ *
+ * Uses the MULTIPART endpoint, not the JSON one. As of this writing
+ * `POST /api/latex/compile` (application/json) returns HTTP 500
+ * "internal-error" even for the example in TexAPI's own documentation, while
+ * `POST /api/latex/compile/file` works correctly. Verified against the live
+ * service: a valid key, the same LaTeX body, only the endpoint differing.
+ *
+ * Contract notes:
+ *  - Auth is the `X-API-KEY` header, not a Bearer token.
+ *  - A failed compile returns HTTP 200 with `status: "error"`, so the status
+ *    code alone is not a success signal - `status` and the artefact's magic
+ *    bytes are checked instead.
+ *  - Artefacts expire after 10 minutes, so the PDF is fetched immediately.
+ *  - Compiling costs two requests (compile + fetch) against a 20 req/min cap,
+ *    so this tier is rate-limited in practice to ~10 compiles/minute.
+ */
+export async function compileWithTexApi(options: {
+  latex: string;
+  command?: 'pdflatex' | 'xelatex' | 'lualatex';
+  timeoutMs?: number;
+}): Promise<FormatexCompileResult> {
+  const { latex, command = 'pdflatex', timeoutMs = 60000 } = options;
+
+  if (!TEXAPI_API_KEY) {
+    return {
+      success: false,
+      error: 'TEXAPI_API_KEY is not configured.',
+      compilerService: 'TexAPI Cloud',
+    };
+  }
+  if (!latex || !latex.trim()) {
+    return { success: false, error: 'No LaTeX source provided for compilation.' };
+  }
+
+  const startTime = Date.now();
+  const engine = (['pdflatex', 'xelatex', 'lualatex'] as const).includes(command as any)
+    ? command
+    : 'pdflatex';
+
+  try {
+    // Do NOT set Content-Type: fetch assigns the multipart boundary itself.
+    const form = new FormData();
+    form.append('files', new Blob([latex], { type: 'text/plain' }), 'main.tex');
+
+    const url = `${TEXAPI_BASE_URL}/api/latex/compile/file?compiler=${engine}&mainFile=main.tex`;
+    const res = await fetch(url, {
+      method: 'POST',
+      headers: { 'X-API-KEY': TEXAPI_API_KEY },
+      body: form,
+      signal: AbortSignal.timeout(timeoutMs),
+    });
+
+    const durationMs = Date.now() - startTime;
+
+    if (res.status === 401 || res.status === 403) {
+      return {
+        success: false,
+        error: `TexAPI rejected the API key (HTTP ${res.status}).`,
+        durationMs,
+        compilerService: 'TexAPI Cloud',
+      };
+    }
+    if (res.status === 429) {
+      return {
+        success: false,
+        error: 'TexAPI rate limit exceeded (20 requests/minute).',
+        durationMs,
+        compilerService: 'TexAPI Cloud',
+      };
+    }
+
+    // A streamed PDF is still accepted in case they fix the JSON endpoint.
+    if ((res.headers.get('content-type') || '').includes('application/pdf')) {
+      const pdfBuffer = Buffer.from(await res.arrayBuffer());
+      if (pdfBuffer.subarray(0, 5).toString('latin1') === '%PDF-') {
+        return { success: true, pdfBuffer, engine, compilerService: 'TexAPI Cloud', durationMs };
+      }
+    }
+
+    const body: any = await res.json().catch(() => null);
+    if (!body) {
+      return {
+        success: false,
+        error: `TexAPI returned an unreadable response (HTTP ${res.status}).`,
+        durationMs,
+        compilerService: 'TexAPI Cloud',
+      };
+    }
+
+    const errors = Array.isArray(body.errors) ? body.errors.join('; ') : '';
+
+    // HTTP 200 does NOT imply success here.
+    if (body.status !== 'success' || !body.resultPath) {
+      return {
+        success: false,
+        error: `TexAPI compilation failed: ${errors || `no detail (HTTP ${res.status})`}`,
+        log: errors,
+        durationMs,
+        compilerService: 'TexAPI Cloud',
+      };
+    }
+
+    // Fetch the artefact before it expires (10 minute retention).
+    const fileRes = await fetch(`${TEXAPI_BASE_URL}${body.resultPath}`, {
+      headers: { 'X-API-KEY': TEXAPI_API_KEY },
+      signal: AbortSignal.timeout(timeoutMs),
+    });
+    const pdfBuffer = Buffer.from(await fileRes.arrayBuffer());
+
+    if (pdfBuffer.subarray(0, 5).toString('latin1') !== '%PDF-') {
+      return {
+        success: false,
+        error: `TexAPI artefact fetch did not return a PDF (HTTP ${fileRes.status}).`,
+        durationMs,
+        compilerService: 'TexAPI Cloud',
+      };
+    }
+
+    return {
+      success: true,
+      pdfBuffer,
+      engine,
+      compilerService: 'TexAPI Cloud',
+      durationMs: Date.now() - startTime,
+    };
+  } catch (err: any) {
+    return {
+      success: false,
+      error: err?.message || 'TexAPI request failed',
+      durationMs: Date.now() - startTime,
+      compilerService: 'TexAPI Cloud',
+    };
+  }
+}
+
+/**
+ * Check connectivity and API key validity for TexAPI Cloud.
+ */
+export async function getTexApiHealth(): Promise<{
+  connected: boolean;
+  service?: string;
+  url?: string;
+  error?: string;
+}> {
+  if (!TEXAPI_API_KEY) {
+    return { connected: false, url: TEXAPI_BASE_URL, error: 'TEXAPI_API_KEY is not configured.' };
+  }
+  try {
+    const probe = '\\documentclass{article}\\begin{document}ZeroLeak Health Check\\end{document}';
+    const form = new FormData();
+    form.append('files', new Blob([probe], { type: 'text/plain' }), 'main.tex');
+
+    const res = await fetch(
+      `${TEXAPI_BASE_URL}/api/latex/compile/file?compiler=pdflatex&mainFile=main.tex`,
+      {
+        method: 'POST',
+        headers: { 'X-API-KEY': TEXAPI_API_KEY },
+        body: form,
+        signal: AbortSignal.timeout(30000),
+      }
+    );
+
+    if (res.status === 401 || res.status === 403) {
+      return { connected: false, url: TEXAPI_BASE_URL, error: `API key rejected (HTTP ${res.status}).` };
+    }
+    if (res.status === 429) {
+      return { connected: false, url: TEXAPI_BASE_URL, error: 'Rate limit exceeded (20 req/min).' };
+    }
+
+    const body: any = await res.json().catch(() => null);
+    if (body?.status === 'success') {
+      return { connected: true, service: 'TexAPI Cloud', url: TEXAPI_BASE_URL };
+    }
+    return {
+      connected: false,
+      url: TEXAPI_BASE_URL,
+      error: `HTTP ${res.status}: ${(body?.errors || []).join('; ') || 'unexpected response'}`,
+    };
+  } catch (err: any) {
+    return { connected: false, url: TEXAPI_BASE_URL, error: err?.message || 'unreachable' };
+  }
+}
+
+/**
  * Check connectivity and validity of FormaTeX Cloud LaTeX API Key
  */
 export async function getFormatexHealth(): Promise<{ connected: boolean; engine?: string; error?: string }> {
@@ -211,9 +502,82 @@ export async function getFormatexHealth(): Promise<{ connected: boolean; engine?
  * Intelligent sanitization and repair for LaTeX question strings.
  * Preserves math environments ($...$, $$...$$, \[...\], \(...\)) while safely escaping unescaped special characters.
  */
+/**
+ * Unicode that pdflatex cannot typeset, mapped to LaTeX equivalents.
+ *
+ * Private-use characters (U+E000-U+F8FF) are NOT in this map on purpose: they
+ * arrive from PDF symbol-font extraction (Wingdings bullets, dingbats) and
+ * carry no recoverable text, so stripUnsupportedUnicode drops them instead.
+ */
+const UNICODE_LATEX_MAP: Record<string, string> = {
+  '‘': "'", '’': "'", '‚': ',', '‛': "'",
+  '“': '``', '”': "''", '„': '"', '‟': '"',
+  '–': '--', '—': '---', '―': '---',
+  '…': '\\ldots{}', '•': '\\textbullet{}', '·': '\\textperiodcentered{}',
+  ' ': ' ', ' ': ' ', ' ': ' ', ' ': ' ', ' ': ' ',
+  '​': '', '‌': '', '‍': '', '﻿': '',
+  '×': '$\\times$', '÷': '$\\div$', '±': '$\\pm$',
+  '≤': '$\\leq$', '≥': '$\\geq$', '≠': '$\\neq$', '≈': '$\\approx$',
+  '→': '$\\rightarrow$', '←': '$\\leftarrow$', '⇒': '$\\Rightarrow$',
+  '∞': '$\\infty$', '∑': '$\\sum$', '∏': '$\\prod$',
+  '∫': '$\\int$', '√': '$\\surd$', '∈': '$\\in$', '∉': '$\\notin$',
+  'α': '$\\alpha$', 'β': '$\\beta$', 'γ': '$\\gamma$',
+  'δ': '$\\delta$', 'ε': '$\\epsilon$', 'θ': '$\\theta$',
+  'λ': '$\\lambda$', 'μ': '$\\mu$', 'π': '$\\pi$',
+  'ρ': '$\\rho$', 'σ': '$\\sigma$', 'τ': '$\\tau$',
+  'φ': '$\\phi$', 'ψ': '$\\psi$', 'ω': '$\\omega$',
+  'Δ': '$\\Delta$', 'Σ': '$\\Sigma$', 'Φ': '$\\Phi$', 'Ω': '$\\Omega$',
+};
+
+/**
+ * Drop or transliterate characters pdflatex cannot set, so a document that
+ * compiled to a Unicode error in the source PDF still produces a PDF here.
+ */
+export function stripUnsupportedUnicode(text: string): { text: string; stripped: number } {
+  if (!text) return { text: '', stripped: 0 };
+  let out = '';
+  let stripped = 0;
+
+  for (const ch of text) {
+    const mapped = UNICODE_LATEX_MAP[ch];
+    if (mapped !== undefined) {
+      out += mapped;
+      continue;
+    }
+
+    const cp = ch.codePointAt(0)!;
+
+    // Private Use Area (BMP + supplementary planes): symbol-font extraction junk.
+    if ((cp >= 0xe000 && cp <= 0xf8ff) || cp >= 0xf0000) {
+      stripped++;
+      continue;
+    }
+
+    // Control characters other than tab/newline would break the run.
+    if ((cp < 0x20 && cp !== 0x09 && cp !== 0x0a) || cp === 0x7f) {
+      stripped++;
+      continue;
+    }
+
+    out += ch;
+  }
+
+  return { text: out, stripped };
+}
+
 export function cleanAndSanitizeLatex(rawText: string): string {
   if (!rawText) return '';
   let text = String(rawText).trim();
+
+  // Normalise unsupported Unicode before anything else so the math-protection
+  // placeholders and escaping below only ever see typesettable characters.
+  const unicodeResult = stripUnsupportedUnicode(text);
+  text = unicodeResult.text;
+  if (unicodeResult.stripped > 0) {
+    console.warn(
+      `[cleanAndSanitizeLatex] dropped ${unicodeResult.stripped} untypesettable character(s) from question text`
+    );
+  }
 
   const mathSegments: string[] = [];
   const placeholder = (i: number) => `ZZMATHBLOCK${i}ZZ`;
@@ -404,9 +768,12 @@ ${(theory2Lines.slice(5).length > 0 ? theory2Lines.slice(5) : theory2Lines.slice
 \\fancyhf{}
 \\renewcommand{\\headrulewidth}{0.5pt}
 \\renewcommand{\\footrulewidth}{0.5pt}
-\\lhead{\\small\\textbf{\\color{accentcrimson}ZEROLEAK SECURE VAULT} $\\cdot$ \\textsf{CONFIDENTIAL}}
-\\chead{\\small\\textsf{Paper Code: \\textbf{${paperCode}}}}
-\\rhead{\\small\\textbf{\\color{boardblue}SET: ${setLetter}}}
+% Left/centre/right heads share one line. The left head was colliding with the
+% centre head under the current margins, so the paper code now rides on the
+% right with the set label and the centre head is left empty.
+\\lhead{\\small\\textbf{\\color{accentcrimson}ZEROLEAK} $\\cdot$ \\textsf{CONFIDENTIAL}}
+\\chead{}
+\\rhead{\\small\\textsf{\\textbf{${paperCode}}} $\\cdot$ \\textbf{\\color{boardblue}SET: ${setLetter}}}
 \\lfoot{\\footnotesize Generated via FormaTeX \\& ZeroLeak Cryptographic Engine}
 \\rfoot{\\footnotesize Page \\textbf{\\thepage}}
 
@@ -554,35 +921,93 @@ export async function compileLatexWithFormatex(options: FormatexCompileOptions):
 }
 
 /**
- * Universal Dual-Engine Compiler:
- * 1. Primary: Free LaTeX.Online cloud compiler (https://latexonline.cc) - Fast, unlimited, no API key needed
- * 2. Secondary Fallback: FormaTeX Cloud REST API (https://api.formatex.io)
+ * Universal Four-Tier LaTeX Compiler:
+ * 1. Primary: Self-hosted latex-service container (CLSI-shaped API) - no quota, no API key
+ * 2. Fallback: TexAPI Cloud (https://texapi.ovh) - X-API-KEY auth, 20 req/min, skipped when no key
+ * 3. Fallback: Free LaTeX.Online cloud compiler (https://latexonline.cc)
+ * 4. Last resort: FormaTeX Cloud REST API (https://api.formatex.io) - metered
  */
 export async function compileLatexUniversal(options: FormatexCompileOptions): Promise<FormatexCompileResult> {
   const { preferEngine = 'auto' } = options;
+  const targetEngine = (options.engine === 'xelatex' || options.engine === 'lualatex') ? options.engine : 'pdflatex';
 
   if (preferEngine === 'formatex') {
     return await compileLatexWithFormatex(options);
   }
 
-  // Try Primary Free Engine: LaTeX.Online
-  try {
-    const onlineEngine = (options.engine === 'xelatex' || options.engine === 'lualatex') ? options.engine : 'pdflatex';
-    const res = await compileWithLatexOnline({
+  if (preferEngine === 'latexonline') {
+    return await compileWithLatexOnline({
       latex: options.latex,
-      command: onlineEngine,
+      command: targetEngine,
+      timeoutMs: options.timeoutMs || 35000,
+    });
+  }
+
+  if (preferEngine === 'clsi') {
+    return await compileWithLocalClsi({
+      latex: options.latex,
+      command: targetEngine,
+      timeoutMs: options.timeoutMs || 60000,
+    });
+  }
+
+  if (preferEngine === 'texapi') {
+    return await compileWithTexApi({
+      latex: options.latex,
+      command: targetEngine,
+      timeoutMs: options.timeoutMs || 60000,
+    });
+  }
+
+  // Auto tier 1: self-hosted engine. The only tier with no quota to exhaust.
+  try {
+    const local = await compileWithLocalClsi({
+      latex: options.latex,
+      command: targetEngine,
+      timeoutMs: options.timeoutMs || 60000,
+    });
+    if (local.success && local.pdfBuffer && local.pdfBuffer.length > 0) {
+      return local;
+    }
+    console.warn(`[LatexCompiler] Self-hosted LaTeX failed: ${local.error}. Falling back to TexAPI...`);
+  } catch (err: any) {
+    console.warn(`[LatexCompiler] Self-hosted LaTeX exception: ${err.message}. Falling back to TexAPI...`);
+  }
+
+  // Auto tier 2: TexAPI Cloud (20 req/min; skipped when no key is configured)
+  if (TEXAPI_API_KEY) {
+    try {
+      const texapi = await compileWithTexApi({
+        latex: options.latex,
+        command: targetEngine,
+        timeoutMs: options.timeoutMs || 60000,
+      });
+      if (texapi.success && texapi.pdfBuffer && texapi.pdfBuffer.length > 0) {
+        return texapi;
+      }
+      console.warn(`[LatexCompiler] TexAPI failed: ${texapi.error}. Falling back to LaTeX.Online...`);
+    } catch (err: any) {
+      console.warn(`[LatexCompiler] TexAPI exception: ${err.message}. Falling back to LaTeX.Online...`);
+    }
+  }
+
+  // Auto tier 3: free cloud compiler
+  try {
+    const online = await compileWithLatexOnline({
+      latex: options.latex,
+      command: targetEngine,
       timeoutMs: options.timeoutMs || 30000,
     });
 
-    if (res.success && res.pdfBuffer && res.pdfBuffer.length > 0) {
-      return res;
+    if (online.success && online.pdfBuffer && online.pdfBuffer.length > 0) {
+      return online;
     }
-    console.warn(`[LatexCompiler] LaTeX.Online attempt failed: ${res.error}. Falling back to FormaTeX...`);
+    console.warn(`[LatexCompiler] LaTeX.Online attempt failed: ${online.error}. Falling back to FormaTeX...`);
   } catch (err: any) {
     console.warn(`[LatexCompiler] LaTeX.Online exception: ${err.message}. Falling back to FormaTeX...`);
   }
 
-  // Fallback to FormaTeX
+  // Auto tier 4: metered cloud API
   return await compileLatexWithFormatex(options);
 }
 
@@ -596,7 +1021,7 @@ export async function generateAndUploadFormatexPdf(params: {
   theorySec1?: any[];
   theorySec2?: any[];
   customLatex?: string;
-  preferEngine?: 'latexonline' | 'formatex' | 'auto';
+  preferEngine?: 'clsi' | 'texapi' | 'latexonline' | 'formatex' | 'auto';
 }): Promise<{
   success: boolean;
   pdfUrl?: string;
@@ -627,7 +1052,8 @@ export async function generateAndUploadFormatexPdf(params: {
 
   const pdfBuffer = compilation.pdfBuffer;
   const checksumSha256 = crypto.createHash('sha256').update(pdfBuffer).digest('hex');
-  const filename = `${exam.code || 'EXAM'}_Set_${setLetter}_Official_Paper.pdf`;
+  const engineSuffix = preferEngine === 'latexonline' ? 'LaTeXOnline' : preferEngine === 'formatex' ? 'FormaTeX' : 'Official';
+  const filename = `${exam.code || exam.paper_code || 'EXAM'}_Set_${setLetter}_${engineSuffix}.pdf`;
 
   // Save to local cache
   const localOutputDir = path.join(process.cwd(), 'public', 'compiled_papers');

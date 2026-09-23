@@ -1,10 +1,7 @@
 import { Request, Response } from 'express';
 import { v4 as uuidv4 } from 'uuid';
 import { getDb, executeQuery, executeRun } from './db.ts';
-
-// LangChain & OpenAI Imports
-import { OpenAIEmbeddings } from '@langchain/openai';
-import { ChatOpenAI } from '@langchain/openai';
+import { embedTexts, generateFallbackVector, OLLAMA_EMBED_MODEL } from './aiProviders.ts';
 
 export interface RagQuestionMetadata {
   questionId: string;
@@ -97,67 +94,50 @@ export function computeLocalTextSimilarity(textA: string, textB: string): number
  */
 export class UniversityChromaVectorStore {
   private collection: RagQuestionMetadata[] = [];
-  private openAiEmbeddings: OpenAIEmbeddings | null = null;
-
-  constructor() {
-    const apiKey = process.env.OPENAI_API_KEY;
-    if (apiKey && apiKey.trim().length > 10 && !apiKey.includes('your-api-key')) {
-      try {
-        this.openAiEmbeddings = new OpenAIEmbeddings({
-          modelName: 'text-embedding-3-small',
-          openAIApiKey: apiKey,
-        });
-      } catch (err) {
-        console.warn('[RAG Pipeline] OpenAIEmbeddings initialization fallback:', err);
-      }
-    }
-  }
+  /** Which embedder actually produced the vectors currently held. */
+  private embeddingProvider: string = 'uninitialized';
+  private embeddingModel: string = OLLAMA_EMBED_MODEL;
+  /** True when vectors are non-semantic and must not be used to judge similarity. */
+  private degraded: boolean = false;
 
   /**
-   * Requirement 1 & 2: Generate text-embedding-3-small embeddings and store in ChromaDB Vector Store.
+   * Embeddings run locally through Ollama — no API key, no quota, no cost.
+   * The previous implementation required a paid OPENAI_API_KEY and silently fell back
+   * to a character histogram when it was absent, which made duplicate detection meaningless.
    */
   async indexQuestions(questions: RagQuestionMetadata[]): Promise<void> {
     this.collection = [];
     const textsToEmbed = questions.map(q => `${q.section} | ${q.questionType} | ${q.questionText}`);
 
-    let embeddingsResult: number[][] = [];
-    if (this.openAiEmbeddings) {
-      try {
-        embeddingsResult = await this.openAiEmbeddings.embedDocuments(textsToEmbed);
-      } catch (err) {
-        console.warn('[RAG Pipeline] LangChain OpenAI embedding failed, using local fallback vectors:', err);
-      }
+    const embedded = await embedTexts(textsToEmbed, OLLAMA_EMBED_MODEL);
+    this.embeddingProvider = embedded.provider;
+    this.embeddingModel = embedded.model;
+    this.degraded = embedded.degraded;
+
+    if (this.degraded) {
+      console.warn(
+        '[ChromaDB VectorStore] Running on non-semantic fallback vectors — ' +
+        `semantic duplicate detection is DISABLED. Run "ollama pull ${OLLAMA_EMBED_MODEL}" to enable it.`
+      );
     }
 
-    // Populate metadata & embedding vectors
     for (let i = 0; i < questions.length; i++) {
       const q = questions[i];
-      let vec: number[] = embeddingsResult[i] || [];
-
-      // If OpenAI API vector unavailable, generate deterministic pseudo-embedding from text
-      if (vec.length === 0) {
-        vec = this.generateDeterministicPseudoVector(textsToEmbed[i]);
-      }
-
-      this.collection.push({
-        ...q,
-        embedding: vec,
-      });
+      const vec = embedded.vectors[i]?.length ? embedded.vectors[i] : generateFallbackVector(textsToEmbed[i]);
+      this.collection.push({ ...q, embedding: vec });
     }
 
-    console.log(`[ChromaDB VectorStore] Indexed ${this.collection.length} question vectors in ChromaDB.`);
+    console.log(
+      `[ChromaDB VectorStore] Indexed ${this.collection.length} question vectors via ${this.embeddingProvider} (${this.embeddingModel}).`
+    );
   }
 
-  private generateDeterministicPseudoVector(text: string): number[] {
-    const vec: number[] = new Array(64).fill(0);
-    const clean = text.toLowerCase();
-    for (let i = 0; i < clean.length; i++) {
-      const code = clean.charCodeAt(i);
-      const idx = i % 64;
-      vec[idx] += (code * (i + 1)) % 100 / 100;
-    }
-    const norm = Math.sqrt(vec.reduce((acc, v) => acc + v * v, 0)) || 1;
-    return vec.map(v => v / norm);
+  isDegraded(): boolean {
+    return this.degraded;
+  }
+
+  getEmbeddingInfo(): { provider: string; model: string; degraded: boolean } {
+    return { provider: this.embeddingProvider, model: this.embeddingModel, degraded: this.degraded };
   }
 
   /**
@@ -187,23 +167,35 @@ export class UniversityChromaVectorStore {
 
   /**
    * Requirement 6 & 13: Detect duplicates or highly similar questions via cosine similarity threshold (> 0.85).
+   *
+   * `degraded` reports whether the comparison was actually semantic. When the local
+   * embedder is unavailable the vectors are non-semantic and this falls back to lexical
+   * overlap, so a low duplicate count means "not checked", not "no duplicates".
    */
   detectSemanticDuplicates(threshold: number = 0.85): {
     uniqueQuestions: RagQuestionMetadata[];
     duplicates: RagDuplicateMatch[];
+    degraded: boolean;
   } {
     const unique: RagQuestionMetadata[] = [];
     const duplicates: RagDuplicateMatch[] = [];
+    // If any vector came from the non-semantic fallback, no pairwise comparison
+    // involving it is trustworthy.
+    let degraded = this.degraded;
 
     for (const q of this.collection) {
       let isDuplicate = false;
       for (const existing of unique) {
-        let similarity = 0;
-        if (q.embedding && existing.embedding && q.embedding.length === existing.embedding.length) {
-          similarity = computeCosineSimilarity(q.embedding, existing.embedding);
-        } else {
-          similarity = computeLocalTextSimilarity(q.questionText, existing.questionText);
-        }
+        // Vectors from different embedders are not comparable, so only compare
+        // like-for-like and fall back to lexical overlap otherwise. The previous
+        // guard compared lengths only and silently skipped mixed-source pairs.
+        const comparable =
+          q.embedding && existing.embedding && q.embedding.length === existing.embedding.length;
+        const similarity = comparable
+          ? computeCosineSimilarity(q.embedding!, existing.embedding!)
+          : computeLocalTextSimilarity(q.questionText, existing.questionText);
+
+        if (!comparable) degraded = true;
 
         if (similarity >= threshold) {
           isDuplicate = true;
@@ -211,7 +203,9 @@ export class UniversityChromaVectorStore {
             questionAId: existing.questionId,
             questionBId: q.questionId,
             similarityScore: Math.round(similarity * 100) / 100,
-            reason: `Semantic similarity ${Math.round(similarity * 100)}% exceeds threshold ${threshold * 100}%`,
+            reason: comparable
+              ? `Semantic similarity ${Math.round(similarity * 100)}% exceeds threshold ${threshold * 100}%`
+              : `Lexical similarity ${Math.round(similarity * 100)}% exceeds threshold ${threshold * 100}% (semantic check unavailable)`,
           });
           break;
         }
@@ -222,7 +216,7 @@ export class UniversityChromaVectorStore {
       }
     }
 
-    return { uniqueQuestions: unique, duplicates };
+    return { uniqueQuestions: unique, duplicates, degraded };
   }
 
   getCollectionSize(): number {
@@ -438,7 +432,7 @@ export async function handleUniversityRagPipeline(req: Request, res: Response) {
     const retrievedTheory = await vectorStore.retrieveFilteredQuestions('ALL', 'THEORY');
 
     // Step 5 & 6: Semantic Duplicate Detection & Filtering (> 0.85 cosine similarity)
-    const { uniqueQuestions, duplicates } = vectorStore.detectSemanticDuplicates(0.85);
+    const { uniqueQuestions, duplicates, degraded } = vectorStore.detectSemanticDuplicates(0.85);
 
     // Step 7, 8, 9, 10, 11, 12, 14: Deterministic Exact-Count Selection
     const selectionResult = performDeterministicExactCountSelection(
@@ -469,7 +463,11 @@ export async function handleUniversityRagPipeline(req: Request, res: Response) {
       message: `LangChain RAG Pipeline completed successfully. Indexed ${vectorStore.getCollectionSize()} vectors in ChromaDB, removed ${duplicates.length} duplicate questions, and selected EXACTLY ${selectionResult.mcqs.length} MCQs!`,
       chromaStats: {
         totalIndexed: vectorStore.getCollectionSize(),
-        embeddingModel: 'text-embedding-3-small',
+        embeddingProvider: vectorStore.getEmbeddingInfo().provider,
+        embeddingModel: vectorStore.getEmbeddingInfo().model,
+        // When true, duplicate detection was NOT semantic — a zero duplicate count
+        // means "not checked", not "no duplicates found".
+        duplicateDetectionDegraded: degraded,
         retrievedMcqCount: retrievedMcqs.length,
         retrievedTheoryCount: retrievedTheory.length,
         duplicatesDetected: duplicates.length,

@@ -216,17 +216,104 @@ export async function signDeviceChallenge(challenge: string, privateKey: CryptoK
   return btoa(String.fromCharCode(...new Uint8Array(signature)));
 }
 
-async function request<T>(endpoint: string, options: RequestInit = {}): Promise<T> {
+/** Auth + device headers every API call needs. Shared by request() and the stream helper. */
+function buildApiHeaders(extra?: HeadersInit): Record<string, string> {
   const token = getStoredToken();
   const headers: Record<string, string> = {
     'Content-Type': 'application/json',
     'x-device-fingerprint': getDeviceFingerprint(),
-    ...(options.headers as Record<string, string>),
+    ...(extra as Record<string, string>),
   };
-
   if (token) {
     headers['Authorization'] = `Bearer ${token}`;
   }
+  return headers;
+}
+
+/**
+ * Stream a chat reply from the local Ollama model, calling `onDelta` for each token.
+ *
+ * This cannot go through request(): request() waits for a complete JSON body, and a
+ * non-streaming Ollama call sends no headers at all until the entire reply is ready —
+ * which on a CPU-only machine exceeds Node's 300s fetch header timeout and kills the
+ * request. Streaming returns tokens as they are produced, so long replies survive and
+ * the text appears progressively.
+ */
+export async function ollamaChatStream(
+  payload: {
+    messages: Array<{ role: string; content: string }>;
+    model?: string;
+    temperature?: number;
+    plainText?: boolean;
+  },
+  onDelta: (delta: string) => void,
+  signal?: AbortSignal
+): Promise<string> {
+  const res = await fetch('/api/ai/ollama-chat-stream', {
+    method: 'POST',
+    headers: buildApiHeaders(),
+    body: JSON.stringify(payload),
+    signal,
+  });
+
+  if (!res.ok) {
+    let detail = `HTTP ${res.status}`;
+    try {
+      const data = await res.json();
+      detail = data?.error || detail;
+    } catch {
+      /* non-JSON error body — keep the status text */
+    }
+    throw new Error(detail);
+  }
+  if (!res.body) throw new Error('The server returned no response stream.');
+
+  const reader = res.body.getReader();
+  const decoder = new TextDecoder();
+  let pending = '';
+  let full = '';
+
+  try {
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      pending += decoder.decode(value, { stream: true });
+
+      // SSE frames are newline-delimited; a chunk can split one, so buffer the tail.
+      let newlineIndex: number;
+      while ((newlineIndex = pending.indexOf('\n')) !== -1) {
+        const line = pending.slice(0, newlineIndex).trim();
+        pending = pending.slice(newlineIndex + 1);
+        if (!line.startsWith('data:')) continue;
+
+        const raw = line.slice(5).trim();
+        if (!raw) continue;
+
+        let event: any;
+        try {
+          event = JSON.parse(raw);
+        } catch {
+          continue;
+        }
+        if (event?.error) throw new Error(event.error);
+        if (event?.delta) {
+          full += event.delta;
+          onDelta(event.delta);
+        }
+        // `done` carries the authoritative full text; trust it over accumulated deltas
+        // in case a frame was dropped.
+        if (event?.done && typeof event.text === 'string' && event.text) full = event.text;
+      }
+    }
+  } finally {
+    reader.cancel().catch(() => {});
+  }
+
+  return full;
+}
+
+async function request<T>(endpoint: string, options: RequestInit = {}): Promise<T> {
+  const headers = buildApiHeaders(options.headers);
 
   let res: Response;
   try {
@@ -479,7 +566,7 @@ export const api = {
     }>('/api/pdf/extract-text', { method: 'POST', body: JSON.stringify(payload) }),
   groqChat: (payload: { messages: Array<{ role: string; content: string }>; model?: string; temperature?: number; max_tokens?: number }) =>
     request<{ success: boolean; message: { content: string }; text: string }>('/api/ai/groq-chat', { method: 'POST', body: JSON.stringify(payload) }),
-  ollamaChat: (payload: { messages: Array<{ role: string; content: string }>; model?: string; temperature?: number }) =>
+  ollamaChat: (payload: { messages: Array<{ role: string; content: string }>; model?: string; temperature?: number; plainText?: boolean }) =>
     request<{ success: boolean; message: { content: string }; text: string }>('/api/ai/ollama-chat', { method: 'POST', body: JSON.stringify(payload) }),
   getOllamaModels: () =>
     request<{ connected: boolean; models: Array<{ name: string; model: string; size?: number }> }>('/api/ai/ollama-models'),
@@ -513,7 +600,9 @@ export const api = {
   getOllamaHealth: () => request<{ connected: boolean; model: string; error?: string }>('/api/question-papers/ollama-health'),
   getFormatexHealth: () => request<{ connected: boolean; engine?: string; error?: string }>('/api/formatex/health'),
   getLatexOnlineHealth: () => request<{ connected: boolean; service?: string; engine?: string; error?: string }>('/api/latex-online/health'),
-  compileFormatexPdf: (examId: string, payload?: { setLetter?: string; customLatex?: string; preferEngine?: 'latexonline' | 'formatex' | 'auto' }) =>
+  getLatexServiceHealth: () => request<{ connected: boolean; service?: string; url?: string; compilers?: string[]; error?: string }>('/api/latex-service/health'),
+  getTexApiHealth: () => request<{ connected: boolean; service?: string; url?: string; error?: string }>('/api/texapi/health'),
+  compileFormatexPdf: (examId: string, payload?: { setLetter?: string; customLatex?: string; preferEngine?: 'clsi' | 'texapi' | 'latexonline' | 'formatex' | 'auto' }) =>
     request<{ success: boolean; pdfUrl: string; latex: string; sizeBytes: number; checksumSha256: string; compilerService?: string; error?: string }>(`/api/examinations/${examId}/compile-formatex-pdf`, {
       method: 'POST',
       body: JSON.stringify(payload || {}),

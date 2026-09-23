@@ -1,7 +1,17 @@
-import { GoogleGenAI } from '@google/genai';
 import { spawn } from 'child_process';
 import fs from 'fs';
 import path from 'path';
+import {
+  chatWithFailover,
+  chatOnce,
+  parseJsonObject,
+  checkOllamaReachable,
+  OLLAMA_BASE_URL,
+  OLLAMA_MODEL,
+  OLLAMA_FAST_MODEL,
+  OLLAMA_TIMEOUT_MS,
+  type ChatMessage,
+} from './aiProviders.ts';
 
 function getPdfExtractorPath(): string {
   const candidate1 = path.resolve(process.cwd(), 'server', 'pdf_extractor.py');
@@ -11,29 +21,13 @@ function getPdfExtractorPath(): string {
   return candidate1;
 }
 
-let aiClient: GoogleGenAI | null = null;
-
-function getAiClient(): GoogleGenAI | null {
-  if (!aiClient && process.env.GEMINI_API_KEY) {
-    try {
-      aiClient = new GoogleGenAI({
-        apiKey: process.env.GEMINI_API_KEY,
-        httpOptions: {
-          headers: {
-            'User-Agent': 'aistudio-build',
-          },
-        },
-      });
-    } catch (e) {
-      console.warn('Failed to initialize GoogleGenAI client:', e);
-    }
-  }
-  return aiClient;
-}
-
 /**
- * Groq AI Client Integration
- * Ultra-fast inference using OpenAI-compatible Groq API
+ * Thin compatibility wrapper over the free-provider router.
+ *
+ * Historically this called Groq directly with a hardcoded fallback key. It now walks
+ * the full free chain (Groq → Gemini → Cerebras → Mistral → OpenRouter → GitHub →
+ * local Ollama), so callers keep their existing signature but stop depending on a
+ * single provider's quota.
  */
 export async function callGroqChat(
   messages: Array<{ role: 'system' | 'user' | 'assistant'; content: string }>,
@@ -44,44 +38,13 @@ export async function callGroqChat(
     response_format?: { type: 'json_object' };
   } = {}
 ): Promise<string> {
-  const apiKey = process.env.GROQ_API_KEY || 'REDACTED_GROQ_KEY';
-  if (!apiKey) {
-    throw new Error('GROQ_API_KEY is not configured in environment.');
-  }
-
-  const model = options.model || process.env.GROQ_MODEL || 'openai/gpt-oss-120b';
-
-  const payload: any = {
-    model,
-    messages,
-    temperature: options.temperature ?? 0.1,
-    max_tokens: options.max_tokens ?? 3000,
-  };
-
-  if (options.response_format) {
-    payload.response_format = options.response_format;
-  }
-
-  const response = await fetch('https://api.groq.com/openai/v1/chat/completions', {
-    method: 'POST',
-    headers: {
-      'Authorization': `Bearer ${apiKey}`,
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify(payload),
+  const result = await chatWithFailover(messages as ChatMessage[], {
+    model: options.model,
+    temperature: options.temperature,
+    max_tokens: options.max_tokens,
+    json: options.response_format?.type === 'json_object',
   });
-
-  if (!response.ok) {
-    const errText = await response.text();
-    throw new Error(`Groq API error (${response.status}): ${errText}`);
-  }
-
-  const data: any = await response.json();
-  const choice = data?.choices?.[0];
-  if (!choice?.message?.content) {
-    throw new Error('Groq returned empty response content.');
-  }
-  return choice.message.content;
+  return result.text;
 }
 
 export interface TheoryPatternAnalysisResult {
@@ -149,55 +112,26 @@ Extract the exact structural blueprint as a strict JSON object with the followin
 
 Return ONLY the JSON object.`;
 
-  // 1. Primary Engine: Ultra-fast Groq AI
+  // 1. Free-provider chain (Groq → Gemini → … → local Ollama)
   try {
-    const groqText = await callGroqChat([
+    const { text } = await chatWithFailover([
       { role: 'system', content: 'You are an academic examination blueprint parser. Return strictly valid JSON.' },
-      { role: 'user', content: prompt }
-    ], { temperature: 0.1 });
+      { role: 'user', content: prompt },
+    ], { temperature: 0.1, json: true });
 
-    const jsonMatch = groqText.match(/\{[\s\S]*\}/);
-    if (jsonMatch) {
-      const parsed = JSON.parse(jsonMatch[0]);
+    const parsed = parseJsonObject(text);
+    if (parsed) {
       return {
         detectedSections: parsed.detectedSections || [],
         totalQuestions: Number(parsed.totalQuestions) || 10,
         totalMarks: Number(parsed.totalMarks) || 100,
         attemptRules: parsed.attemptRules || 'Standard examination attempt guidelines apply.',
         aiConfidenceScore: parsed.aiConfidenceScore || 0.95,
-        patternSummary: parsed.patternSummary || 'Automated pattern extraction verified by Groq AI engine.',
+        patternSummary: parsed.patternSummary || 'Automated pattern extraction verified by AI engine.',
       };
     }
-  } catch (groqErr) {
-    console.warn('[ZeroLeak AI] Groq theory pattern analysis skipped, trying Gemini fallback:', groqErr);
-  }
-
-  const client = getAiClient();
-  if (client) {
-    try {
-      const response = await client.models.generateContent({
-        model: 'gemini-3.7-flash',
-        contents: prompt,
-        config: {
-          responseMimeType: 'application/json',
-          temperature: 0.2,
-        },
-      });
-
-      if (response.text) {
-        const parsed = JSON.parse(response.text.trim());
-        return {
-          detectedSections: parsed.detectedSections || [],
-          totalQuestions: Number(parsed.totalQuestions) || 10,
-          totalMarks: Number(parsed.totalMarks) || 100,
-          attemptRules: parsed.attemptRules || 'Standard examination attempt guidelines apply.',
-          aiConfidenceScore: parsed.aiConfidenceScore || 0.92,
-          patternSummary: parsed.patternSummary || 'Automated pattern extraction verified by AI engine.',
-        };
-      }
-    } catch (e) {
-      console.warn('Gemini pattern analysis fallback skipped:', e);
-    }
+  } catch (err) {
+    console.warn('[ZeroLeak AI] Theory pattern analysis fell through to algorithmic blueprint:', err);
   }
 
   // Algorithmic Academic Pattern Fallback if AI Key is pending or network is unreachable
@@ -276,39 +210,17 @@ Analyze similarity and return ONLY a JSON response:
   "recommendedAction": "ACCEPT"
 }`;
 
-  // 1. Primary Engine: Groq AI
+  // 1. Free-provider chain (Groq → Gemini → … → local Ollama)
   try {
-    const groqText = await callGroqChat([
+    const { text } = await chatWithFailover([
       { role: 'system', content: 'You are an AI examination deduplication analyzer. Return ONLY JSON.' },
-      { role: 'user', content: prompt }
-    ], { temperature: 0.1 });
+      { role: 'user', content: prompt },
+    ], { temperature: 0.1, json: true });
 
-    const jsonMatch = groqText.match(/\{[\s\S]*\}/);
-    if (jsonMatch) {
-      return JSON.parse(jsonMatch[0]);
-    }
-  } catch (groqErr) {
-    console.warn('[ZeroLeak AI] Groq similarity check skipped, trying Gemini fallback:', groqErr);
-  }
-
-  const client = getAiClient();
-  if (client && existingQuestions.length > 0) {
-    try {
-      const response = await client.models.generateContent({
-        model: 'gemini-3.7-flash',
-        contents: prompt,
-        config: {
-          responseMimeType: 'application/json',
-          temperature: 0.1,
-        },
-      });
-
-      if (response.text) {
-        return JSON.parse(response.text.trim());
-      }
-    } catch (e) {
-      console.warn('Gemini duplicate check fallback to string distance:', e);
-    }
+    const parsed = parseJsonObject<QuestionSimilarityResult>(text);
+    if (parsed) return parsed;
+  } catch (err) {
+    console.warn('[ZeroLeak AI] Similarity check fell through to lexical comparison:', err);
   }
 
   // Algorithmic string & token overlap fallback (Jaccard / Levenshtein approximation)
@@ -411,75 +323,38 @@ Output Schema:
   "aiConfidence": 0.96
 }`;
 
-  // 1. Primary Engine: Ultra-fast Groq AI
+  // 1. Free-provider chain (Groq → Gemini → … → local Ollama)
   try {
-    const groqText = await callGroqChat([
+    const { text } = await chatWithFailover([
       { role: 'system', content: `You are an expert linguistic translator specializing in ${targetLanguage} for academic exams. Output ONLY JSON.` },
-      { role: 'user', content: prompt }
-    ], { temperature: 0.1 });
+      { role: 'user', content: prompt },
+    ], { temperature: 0.1, json: true });
 
-    const jsonMatch = groqText.match(/\{[\s\S]*\}/);
-    if (jsonMatch) {
-      const parsed = JSON.parse(jsonMatch[0]);
+    const parsed = parseJsonObject(text);
+    if (parsed) {
       return {
         translatedContent: parsed.translatedContent || content,
         translatedOptions: parsed.translatedOptions || options,
         targetLanguage,
-        linguisticNotes: parsed.linguisticNotes || `Translated accurately into ${targetLanguage} by Groq AI linguistic engine.`,
-        aiConfidence: parsed.aiConfidence || 0.98,
+        linguisticNotes: parsed.linguisticNotes || `Translated accurately into ${targetLanguage}.`,
+        aiConfidence: parsed.aiConfidence || 0.95,
       };
     }
-  } catch (groqErr) {
-    console.warn('[ZeroLeak AI] Groq translation skipped, trying Gemini fallback:', groqErr);
+  } catch (err) {
+    console.warn('[ZeroLeak AI] Translation fell through to untranslated fallback:', err);
   }
 
-  const client = getAiClient();
-  if (client) {
-    try {
-      const response = await client.models.generateContent({
-        model: 'gemini-3.7-flash',
-        contents: prompt,
-        config: {
-          responseMimeType: 'application/json',
-          temperature: 0.1,
-        },
-      });
-
-      if (response.text) {
-        const parsed = JSON.parse(response.text.trim());
-        return {
-          translatedContent: parsed.translatedContent || content,
-          translatedOptions: parsed.translatedOptions || options,
-          targetLanguage,
-          linguisticNotes: parsed.linguisticNotes || `Translated accurately into ${targetLanguage} by AI linguistic engine.`,
-          aiConfidence: parsed.aiConfidence || 0.95,
-        };
-      }
-    } catch (e) {
-      console.warn('Gemini translation error, using linguistic fallback:', e);
-    }
-  }
-
-  // Algorithmic / Lexical translation fallback
-  const langPrefixes: Record<string, string> = {
-    Hindi: 'हिंदी अनुवाद:',
-    Marathi: 'मराठी भाषांतर:',
-    Gujarati: 'ગુજરાતી અનુવાદ:',
-    Tamil: 'தமிழ் மொழிபெயர்ப்பு:',
-    Telugu: 'తెలుగు అనువాదం:',
-    Bengali: 'বাংলা অনুবাদ:',
-    Kannada: 'ಕನ್ನಡ ಅನುವಾದ:',
-    Urdu: 'اردو ترجمہ:',
-  };
-
-  const prefix = langPrefixes[targetLanguage] || `[${targetLanguage} Translation]:`;
-
+  // No translation engine was reachable. Return the ORIGINAL text unchanged and say so.
+  // Previously this prefixed the English source with a target-language label and reported
+  // aiConfidence 0.88, which presented untranslated text as a finished translation.
   return {
-    translatedContent: `${prefix} ${content}`,
-    translatedOptions: options ? options.map(opt => `${prefix} ${opt}`) : null,
+    translatedContent: content,
+    translatedOptions: options,
     targetLanguage,
-    linguisticNotes: `Standard bilingual translation prepared for ${targetLanguage}.`,
-    aiConfidence: 0.88,
+    linguisticNotes:
+      `No translation engine was reachable, so the original text is returned untranslated. ` +
+      `Start Ollama ("ollama serve") or configure a free API key, then retry.`,
+    aiConfidence: 0,
   };
 }
 
@@ -747,21 +622,26 @@ export async function recropQuestionWithPython(payload: {
   });
 }
 
-const OLLAMA_BASE_URL = (process.env.OLLAMA_BASE_URL || 'http://localhost:11434').replace(/\/$/, '');
-const OLLAMA_MODEL = process.env.OLLAMA_MODEL || 'qwen2.5vl:7b';
-
 export async function checkOllamaHealth(): Promise<{ connected: boolean; model: string; error?: string }> {
-  try {
-    const response = await fetch(`${OLLAMA_BASE_URL}/api/tags`, { signal: AbortSignal.timeout(3000) });
-    if (!response.ok) return { connected: false, model: OLLAMA_MODEL, error: `Ollama returned HTTP ${response.status}.` };
-    const payload = await response.json() as { models?: Array<{ name?: string }> };
-    const modelAvailable = (payload.models || []).some(model => model.name === OLLAMA_MODEL || model.name?.startsWith(`${OLLAMA_MODEL}:`));
-    return modelAvailable
-      ? { connected: true, model: OLLAMA_MODEL }
-      : { connected: false, model: OLLAMA_MODEL, error: `Ollama model "${OLLAMA_MODEL}" is not installed.` };
-  } catch {
-    return { connected: false, model: OLLAMA_MODEL, error: 'Ollama is not running. Start Ollama and try again.' };
+  const health = await checkOllamaReachable();
+  if (!health.reachable) {
+    return { connected: false, model: OLLAMA_MODEL, error: health.error || 'Ollama is not running. Start Ollama and try again.' };
   }
+
+  // Both the main and the fast model must be present: extraction uses the former and the
+  // chat uses the latter, so a missing one should be reported here rather than surfacing
+  // later as a bare 404 from a model that was never pulled.
+  const isInstalled = (name: string) => health.models.some(m => m === name || m.startsWith(`${name}:`));
+  const missing = [OLLAMA_MODEL, OLLAMA_FAST_MODEL].filter(name => !isInstalled(name));
+  if (missing.length > 0) {
+    return {
+      connected: false,
+      model: OLLAMA_MODEL,
+      error: `Ollama model(s) not installed: ${missing.join(', ')}. Run ${missing.map(m => `"ollama pull ${m}"`).join(' and ')}.`,
+    };
+  }
+
+  return { connected: true, model: OLLAMA_MODEL };
 }
 
 export async function extractQuestionsFromPaperWithOllama(
@@ -788,35 +668,36 @@ Source text:
 ${paperText.slice(0, 60000)}
 >>>`;
 
-  let response: Response;
+  let rawText: string;
   try {
-    response = await fetch(`${OLLAMA_BASE_URL}/api/chat`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        model: OLLAMA_MODEL,
-        stream: false,
-        keep_alive: '10m',
-        format: 'json',
-        options: { temperature: 0 },
-        messages: [{ role: 'system', content: 'Extract only source questions and return strict JSON.' }, { role: 'user', content: prompt }],
-      }),
-      signal: AbortSignal.timeout(120000),
-    });
+    const result = await chatOnce(
+      'Extract only source questions and return strict JSON.',
+      prompt,
+      { temperature: 0, json: true, providerOrder: ['ollama'], timeoutMs: OLLAMA_TIMEOUT_MS }
+    );
+    rawText = result.text;
   } catch (error: any) {
-    if (error?.name === 'TimeoutError' || error?.name === 'AbortError') {
-      throw new Error('Ollama extraction timed out. Use a smaller PDF or a faster local model.');
+    // Three different failures used to report as one "not reachable" message, which sent
+    // people to restart an Ollama that was running fine. Separate them: a dead daemon, a
+    // run that was merely too slow, and a reply that arrived but was unusable.
+    const attempts: any[] = Array.isArray(error?.attempts) ? error.attempts : [];
+    const detail = String(attempts.find(a => a.provider === 'ollama')?.error || error?.message || error);
+
+    if (error?.name === 'TimeoutError' || error?.name === 'AbortError' || /timed out|timeout|aborted/i.test(detail)) {
+      throw new Error(
+        `Ollama timed out after ${Math.round(OLLAMA_TIMEOUT_MS / 1000)}s extracting this paper. ` +
+          `Local inference here runs on CPU, where long papers are slow — raise OLLAMA_TIMEOUT_MS, ` +
+          `or switch OLLAMA_MODEL to a smaller, faster model.`
+      );
     }
-    throw new Error(`Ollama is not reachable at ${OLLAMA_BASE_URL}. Start Ollama with "ollama serve" and try again.`);
+    if (/unreachable|ECONNREFUSED|ECONNRESET|fetch failed|network error/i.test(detail)) {
+      throw new Error(`Ollama is not reachable at ${OLLAMA_BASE_URL}. Start Ollama with "ollama serve" and try again.`);
+    }
+    throw new Error(`Ollama extraction failed: ${detail}`);
   }
-  if (!response.ok) throw new Error(`Ollama extraction failed with HTTP ${response.status}.`);
-  const payload = await response.json() as { message?: { content?: string } };
-  let parsed: { questions?: Array<Record<string, unknown>> };
-  try {
-    parsed = JSON.parse(payload.message?.content || '{}');
-  } catch {
-    throw new Error('Ollama returned invalid JSON.');
-  }
+
+  const parsed = parseJsonObject<{ questions?: Array<Record<string, unknown>> }>(rawText);
+  if (!parsed) throw new Error('Ollama returned invalid JSON.');
   if (!Array.isArray(parsed.questions)) throw new Error('Ollama returned an invalid question list.');
 
   const extractedQuestions = parsed.questions.map((question, index) => {
@@ -872,26 +753,15 @@ Candidates:
 ${JSON.stringify(candidates)}`;
 
   try {
-    const response = await fetch(`${OLLAMA_BASE_URL}/api/chat`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        model: OLLAMA_MODEL,
-        stream: false,
-        format: 'json',
-        keep_alive: '10m',
-        options: { temperature: 0 },
-        messages: [
-          { role: 'system', content: 'You are a strict question-versus-instruction classifier. Return JSON only.' },
-          { role: 'user', content: prompt },
-        ],
-      }),
-      signal: AbortSignal.timeout(5000),
-    });
-    if (!response.ok) return questions;
-    const payload = await response.json() as { message?: { content?: string } };
-    const parsed = JSON.parse(payload.message?.content || '{}') as { keep_indices?: unknown };
-    if (!Array.isArray(parsed.keep_indices)) return questions;
+    // 5s was too tight for a local 7B model to classify a full paper; the previous
+    // timeout silently returned every candidate unfiltered.
+    const { text } = await chatOnce(
+      'You are a strict question-versus-instruction classifier. Return JSON only.',
+      prompt,
+      { temperature: 0, json: true, providerOrder: ['ollama'], timeoutMs: 45_000 }
+    );
+    const parsed = parseJsonObject<{ keep_indices?: unknown }>(text);
+    if (!parsed || !Array.isArray(parsed.keep_indices)) return questions;
     const keep = new Set(
       parsed.keep_indices
         .filter((index): index is number => Number.isInteger(index) && index >= 0 && index < questions.length)
@@ -911,9 +781,7 @@ export async function extractQuestionsFromPaperWithAI(
   categoryHint: string = 'Competitive Exam',
   pdfData?: string
 ): Promise<PaperExtractionResult> {
-  const client = getAiClient();
-
-  if (client && (paperText.trim().length > 20 || pdfData)) {
+  if (paperText.trim().length > 20 || pdfData) {
     try {
       const prompt = `You are a high-accuracy visual examination-paper transcription engine for ZeroLeak.
     Extract only the human-readable questions a person can see when opening the attached PDF.
@@ -969,20 +837,19 @@ REQUIREMENTS:
   ]
 }`;
 
-      const contents = pdfData
-        ? [{ text: prompt }, { inlineData: { mimeType: 'application/pdf', data: pdfData } }]
-        : prompt;
-      const response = await client.models.generateContent({
-        model: 'gemini-3.7-flash',
-        contents,
-        config: {
-          responseMimeType: 'application/json',
+      // Gemini accepts the PDF natively; Ollama (qwen2.5vl) receives the text layer
+      // and applies vision reasoning over whatever page images it is given.
+      const { text } = await chatWithFailover(
+        [{ role: 'user', content: prompt }],
+        {
           temperature: 0.1,
-        },
-      });
+          json: true,
+          attachments: pdfData ? [{ mimeType: 'application/pdf', data: pdfData }] : undefined,
+        }
+      );
 
-      if (response.text) {
-        const parsed = JSON.parse(response.text.trim());
+      const parsed = parseJsonObject(text);
+      if (parsed) {
         const rawList = parsed.extractedQuestions || [];
         const extractedQuestions: ExtractedQuestion[] = rawList.map((q: any, idx: number) => ({
           tempId: q.tempId || `EXT-${idx + 1}`,
@@ -1008,12 +875,12 @@ REQUIREMENTS:
           extractedQuestions,
           totalExtracted: extractedQuestions.length,
           detectedSubject: parsed.detectedSubject || subjectHint,
-          extractionSummary: parsed.extractionSummary || `Successfully extracted ${extractedQuestions.length} questions via Gemini AI.`,
+          extractionSummary: parsed.extractionSummary || `Successfully extracted ${extractedQuestions.length} questions via the AI provider chain.`,
           aiEngineUsed: true,
         };
       }
     } catch (err) {
-      console.warn('Gemini paper extraction error, using heuristic fallback:', err);
+      console.warn('AI paper extraction chain exhausted, using heuristic parser:', err);
     }
   }
 
@@ -1206,3 +1073,241 @@ export async function runNaviDcOcr(payload: {
     }
   });
 }
+
+export interface ConsolidatedExamPattern {
+  totalMarks: number;
+  durationMinutes: number;
+  universityName?: string;
+  paperCode?: string;
+  subjectName?: string;
+  instructions: string[];
+  sections: Array<{
+    name: string;
+    type: 'MCQ' | 'THEORY' | 'APPLICATION';
+    marks: number;
+    questionCount: number;
+    attemptRules?: string;
+    subQuestionsPerQuestion?: number;
+    marksPerSubQuestion?: number;
+    questions?: Array<{
+      questionNumber: string;
+      title: string;
+      marks: number;
+      attemptRule?: string;
+      count: number;
+    }>;
+  }>;
+  mcqCount: number;
+  mcqMarks: number;
+  section1Marks: number;
+  section2Marks: number;
+  aiConfidenceScore: number;
+  commonPatternSummary: string;
+}
+
+/**
+ * Analyzes the text and layout of all 3 uploaded draft question papers,
+ * detecting the common structural pattern, marks distribution, MCQ counts, and attempt rules.
+ */
+export async function analyzeConsolidatedExamPattern(
+  papersText: Array<{ paperIndex: number; filename: string; text: string }>,
+  subject: string = 'Academic Examination',
+  category: string = 'University Exam'
+): Promise<ConsolidatedExamPattern> {
+  const prompt = `You are a high-security university examination pattern analyzer for ZeroLeak.
+Do NOT generate a question paper yet.
+Analyze the 3 uploaded source draft question papers for Subject: "${subject}", Category: "${category}" and identify the COMMON examination structure/blueprint.
+
+Source Papers Data:
+${papersText.map(p => `=== DRAFT #${p.paperIndex} (${p.filename}) ===\n${p.text.substring(0, 4000)}\n`).join('\n\n')}
+
+Extract the common blueprint as a STRICT JSON object:
+{
+  "totalMarks": 70,
+  "durationMinutes": 180,
+  "universityName": "PUNYASHLOK AHILYADEVI HOLKAR SOLAPUR UNIVERSITY, SOLAPUR",
+  "paperCode": "SLR-HL-475",
+  "subjectName": "${subject}",
+  "instructions": [
+    "Q. 1 is compulsory.",
+    "Figures to the right indicate full marks.",
+    "Assume suitable data wherever necessary.",
+    "Use of non-programmable calculators is permissible."
+  ],
+  "sections": [
+    {
+      "name": "MCQ / OBJECTIVE TYPE QUESTIONS",
+      "type": "MCQ",
+      "marks": 14,
+      "questionCount": 14,
+      "attemptRules": "All 14 questions are compulsory. Choose the single correct alternative."
+    },
+    {
+      "name": "SECTION I",
+      "type": "THEORY",
+      "marks": 28,
+      "questionCount": 2,
+      "attemptRules": "Q.2 Attempt Any Four out of 5 (16 Marks), Q.3 Attempt Any Two out of 3 (12 Marks)"
+    },
+    {
+      "name": "SECTION II",
+      "type": "THEORY",
+      "marks": 28,
+      "questionCount": 2,
+      "attemptRules": "Q.5 Attempt Any Four out of 5 (16 Marks), Q.6 Attempt Any Two out of 3 (12 Marks)"
+    }
+  ],
+  "mcqCount": 14,
+  "mcqMarks": 14,
+  "section1Marks": 28,
+  "section2Marks": 28,
+  "aiConfidenceScore": 0.96,
+  "commonPatternSummary": "Standard 70-Mark University Board CBCS pattern (14 MCQs + 28 Marks Section I + 28 Marks Section II)."
+}
+Return ONLY valid JSON.`;
+
+  try {
+    const { text } = await chatWithFailover([
+      { role: 'system', content: 'You are an academic examination blueprint parser. Return strictly valid JSON.' },
+      { role: 'user', content: prompt },
+    ], { temperature: 0.1, json: true });
+
+    const parsed = parseJsonObject(text);
+    if (parsed) {
+      return {
+        totalMarks: Number(parsed.totalMarks) || 70,
+        durationMinutes: Number(parsed.durationMinutes) || 180,
+        universityName: parsed.universityName || 'PUNYASHLOK AHILYADEVI HOLKAR SOLAPUR UNIVERSITY',
+        paperCode: parsed.paperCode || 'SLR-HL-475',
+        subjectName: parsed.subjectName || subject,
+        instructions: Array.isArray(parsed.instructions) && parsed.instructions.length > 0 ? parsed.instructions : [
+          'Q.1 is compulsory.',
+          'Figures to the right indicate full marks.',
+          'Assume suitable data wherever necessary and state your assumptions clearly.'
+        ],
+        sections: parsed.sections || [
+          { name: 'MCQ / Objective Questions', type: 'MCQ', marks: 14, questionCount: 14, attemptRules: 'All 14 MCQs are compulsory' },
+          { name: 'SECTION I', type: 'THEORY', marks: 28, questionCount: 2, attemptRules: 'Q.2 (Attempt Any Four, 16M), Q.3 (Attempt Any Two, 12M)' },
+          { name: 'SECTION II', type: 'THEORY', marks: 28, questionCount: 2, attemptRules: 'Q.5 (Attempt Any Four, 16M), Q.6 (Attempt Any Two, 12M)' },
+        ],
+        mcqCount: Number(parsed.mcqCount) || 14,
+        mcqMarks: Number(parsed.mcqMarks) || 14,
+        section1Marks: Number(parsed.section1Marks) || 28,
+        section2Marks: Number(parsed.section2Marks) || 28,
+        aiConfidenceScore: Number(parsed.aiConfidenceScore) || 0.95,
+        commonPatternSummary: parsed.commonPatternSummary || 'Consolidated 70-Mark University Board Pattern detected across all 3 source papers.',
+      };
+    }
+  } catch (err: any) {
+    console.warn('[analyzeConsolidatedExamPattern] AI extraction fallback to deterministic pattern:', err.message);
+  }
+
+  // Deterministic CBCS Standard Pattern Fallback
+  return {
+    totalMarks: 70,
+    durationMinutes: 180,
+    universityName: 'PUNYASHLOK AHILYADEVI HOLKAR SOLAPUR UNIVERSITY, SOLAPUR',
+    paperCode: 'SLR-HL-475',
+    subjectName: subject,
+    instructions: [
+      'Q. 1 is compulsory.',
+      'Figures to the right indicate full marks.',
+      'Assume suitable data wherever necessary.',
+      'Use of non-programmable calculators is permissible.'
+    ],
+    sections: [
+      { name: 'MCQ / OBJECTIVE TYPE QUESTIONS', type: 'MCQ', marks: 14, questionCount: 14, attemptRules: 'All 14 questions are compulsory.' },
+      { name: 'SECTION I', type: 'THEORY', marks: 28, questionCount: 2, attemptRules: 'Q.2 Attempt Any Four (16M), Q.3 Attempt Any Two (12M)' },
+      { name: 'SECTION II', type: 'THEORY', marks: 28, questionCount: 2, attemptRules: 'Q.5 Attempt Any Four (16M), Q.6 Attempt Any Two (12M)' }
+    ],
+    mcqCount: 14,
+    mcqMarks: 14,
+    section1Marks: 28,
+    section2Marks: 28,
+    aiConfidenceScore: 0.92,
+    commonPatternSummary: 'Standard 70-Mark University Board Format (14 MCQs + 28 Marks Section I + 28 Marks Section II).'
+  };
+}
+
+/**
+ * Generates a fresh, conceptually sound question based on a source reference question,
+ * preserving topic, depth, marks, and format without verbatim copying.
+ */
+export async function generateFreshQuestionWithAI(
+  referenceQuestion: { content_text: string; question_type: string; marks: number; topic?: string; subject?: string },
+  syllabus: string = 'General Technical Syllabus'
+): Promise<{
+  content_text: string;
+  options?: Array<{ id: string; text: string; label: string }>;
+  correct_answer?: string;
+  marks: number;
+  topic: string;
+  /**
+   * False when no AI engine produced this text and `content_text` is the untouched
+   * source question. Callers assembling a paper MUST exclude these — emitting a source
+   * question verbatim is the exact leak this system exists to prevent.
+   */
+  generated: boolean;
+}> {
+  const isMcq = referenceQuestion.question_type === 'MCQ';
+  const prompt = `You are a senior academic paper setter for an accredited university examination.
+Generate a BRAND NEW, original examination question based on the concept and difficulty of the reference question.
+Do NOT copy verbatim. Change variables, scenario, or analytical perspective while testing the same core syllabus concept.
+
+Subject/Syllabus: "${syllabus}"
+Reference Question: "${referenceQuestion.content_text}"
+Type: ${referenceQuestion.question_type}
+Marks: ${referenceQuestion.marks}
+
+Return STRICT JSON:
+${isMcq ? `{
+  "content_text": "...",
+  "options": [
+    { "id": "opt_0", "label": "A", "text": "..." },
+    { "id": "opt_1", "label": "B", "text": "..." },
+    { "id": "opt_2", "label": "C", "text": "..." },
+    { "id": "opt_3", "label": "D", "text": "..." }
+  ],
+  "correct_answer": "A",
+  "marks": 1,
+  "topic": "${referenceQuestion.topic || 'Core Concept'}"
+}` : `{
+  "content_text": "...",
+  "marks": ${referenceQuestion.marks},
+  "topic": "${referenceQuestion.topic || 'Core Concept'}"
+}`}`;
+
+  try {
+    const { text } = await chatWithFailover([
+      { role: 'system', content: 'You are a university question setter. Return strictly valid JSON.' },
+      { role: 'user', content: prompt },
+    ], { temperature: 0.3, json: true });
+
+    const parsed = parseJsonObject(text);
+    // Only a genuine rewrite counts as generated. If the model echoed the reference
+    // verbatim, treat it as a failure rather than reporting it as fresh.
+    if (parsed && parsed.content_text && String(parsed.content_text).trim() !== referenceQuestion.content_text.trim()) {
+      return {
+        content_text: parsed.content_text,
+        options: parsed.options,
+        correct_answer: parsed.correct_answer || 'A',
+        marks: Number(parsed.marks) || referenceQuestion.marks,
+        topic: parsed.topic || referenceQuestion.topic || 'Core Subject',
+        generated: true,
+      };
+    }
+    if (parsed) {
+      console.warn('[generateFreshQuestionWithAI] Model returned the reference question unchanged; treating as not generated.');
+    }
+  } catch (err: any) {
+    console.warn('[generateFreshQuestionWithAI] AI question generation failed:', err?.message || err);
+  }
+
+  return {
+    content_text: referenceQuestion.content_text,
+    marks: referenceQuestion.marks,
+    topic: referenceQuestion.topic || 'Core Subject',
+    generated: false,
+  };
+}
+

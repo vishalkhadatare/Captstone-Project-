@@ -1,0 +1,20 @@
+# Self-hosted LaTeX compile service.
+#
+#   docker compose -f latex-service/docker-compose.yml up -d --build
+#
+# Bound to 127.0.0.1 on purpose: this compiles untrusted LaTeX and must not be
+# reachable from outside the host.
+services:
+  latex-service:
+    build: .
+    image: zeroleak/latex-service:latest
+    container_name: zeroleak-latex
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:3013:3013"
+    environment:
+      COMPILE_TIMEOUT_MS: "60000"
+    # A runaway compile should not be able to take the host down.
+    mem_limit: 2g
+    security_opt:
+      - no-new-privileges:true

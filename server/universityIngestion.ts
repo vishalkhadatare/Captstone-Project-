@@ -250,6 +250,9 @@ export function parseDraftPaperQuestions(
   return questions;
 }
 
+import { uploadDocumentToCloudinary } from './cloudinary.ts';
+import { analyzeConsolidatedExamPattern } from './ai.ts';
+
 /**
  * Express Route Handler: Ingest EXACTLY 3 University Draft Paper PDFs
  */
@@ -258,13 +261,17 @@ export async function handleUploadUniversityDrafts(req: Request, res: Response) 
   try {
     const files = req.files as Express.Multer.File[];
     const exam_id = (req.body.exam_id || 'EXAM-UNIV-MASTER-2026').trim();
+    const org_id = (req.user?.org_id || 'ORG-ZEROLEAK-NATIONAL').trim();
+    const user_id = (req.user?.id || 'usr-system').trim();
 
     // Requirement 1 & 3: Validate EXACTLY 3 files were uploaded
     if (!files || !Array.isArray(files) || files.length !== 3) {
       // Clean up any uploaded files
       if (files && Array.isArray(files)) {
         files.forEach(f => {
-          if (f.path && fs.existsSync(f.path)) fs.unlinkSync(f.path);
+          if (f.path && fs.existsSync(f.path)) {
+            try { fs.unlinkSync(f.path); } catch {}
+          }
         });
       }
       return res.status(400).json({
@@ -282,7 +289,7 @@ export async function handleUploadUniversityDrafts(req: Request, res: Response) 
       const ext = path.extname(f.originalname).toLowerCase();
       const isPdf = (mime.includes('pdf') || mime === 'application/octet-stream') && ext === '.pdf';
       if (!isPdf) {
-        tempFiles.forEach(p => { if (fs.existsSync(p)) fs.unlinkSync(p); });
+        tempFiles.forEach(p => { if (fs.existsSync(p)) try { fs.unlinkSync(p); } catch {} });
         return res.status(400).json({
           success: false,
           error: `INVALID_FILE_FORMAT: File "${f.originalname}" is not a valid PDF file.`,
@@ -293,12 +300,20 @@ export async function handleUploadUniversityDrafts(req: Request, res: Response) 
     const db = await getDb();
     const nowIso = new Date().toISOString();
 
+    // Fetch existing exam info for syllabus and subject metadata
+    const examRows = executeQuery(db, 'SELECT * FROM examinations WHERE id = ?', [exam_id]);
+    const exam = examRows.length > 0 ? examRows[0] : null;
+    const examSubject = exam?.subject || 'Academic Examination';
+    const examCategory = exam?.category || 'University Exam';
+    const examSyllabus = exam?.syllabus || examSubject;
+
     // Clear previous draft papers for this exam to ensure fresh clean ingestion
     executeRun(db, 'DELETE FROM draft_questions WHERE exam_id = ?', [exam_id]);
     executeRun(db, 'DELETE FROM draft_papers WHERE exam_id = ?', [exam_id]);
 
     const ingestedDraftPapers: any[] = [];
     const allExtractedQuestions: ParsedDraftQuestion[] = [];
+    const papersTextForPattern: Array<{ paperIndex: number; filename: string; text: string }> = [];
 
     let paper1Count = 0;
     let paper2Count = 0;
@@ -315,6 +330,27 @@ export async function handleUploadUniversityDrafts(req: Request, res: Response) 
       const extractedText = extractionResult.text;
       const extractionMethod = extractionResult.method;
 
+      papersTextForPattern.push({
+        paperIndex,
+        filename: file.originalname,
+        text: extractedText,
+      });
+
+      // Upload to Cloudinary if available
+      let cloudinaryUrl: string | undefined;
+      let cloudinaryPublicId: string | undefined;
+      try {
+        const fileData = fs.readFileSync(file.path);
+        const dataUri = `data:application/pdf;base64,${fileData.toString('base64')}`;
+        const cRes = await uploadDocumentToCloudinary(dataUri, file.originalname, 'zeroleak/draft-papers');
+        if (cRes && cRes.secure_url) {
+          cloudinaryUrl = cRes.secure_url;
+          cloudinaryPublicId = cRes.public_id;
+        }
+      } catch (cErr) {
+        console.warn(`[University Ingestion] Cloudinary upload notice for ${file.originalname}:`, cErr);
+      }
+
       // Parse structured questions
       const parsedQuestions = parseDraftPaperQuestions(extractedText, paperIndex, draftPaperId, exam_id);
 
@@ -325,7 +361,7 @@ export async function handleUploadUniversityDrafts(req: Request, res: Response) 
       if (paperIndex === 2) paper2Count = parsedQuestions.length;
       if (paperIndex === 3) paper3Count = parsedQuestions.length;
 
-      // Insert Draft Paper record into SQLite database
+      // 1. Insert into draft_papers table
       executeRun(
         db,
         `INSERT INTO draft_papers (id, exam_id, paper_index, file_name, file_size, mime_type, storage_path, extracted_text, extraction_method, question_count, mcq_count, theory_count, uploaded_at)
@@ -337,7 +373,7 @@ export async function handleUploadUniversityDrafts(req: Request, res: Response) 
           file.originalname,
           file.size,
           file.mimetype,
-          file.path,
+          cloudinaryUrl || file.path,
           extractedText.substring(0, 5000), // store preview excerpt
           extractionMethod,
           parsedQuestions.length,
@@ -347,7 +383,31 @@ export async function handleUploadUniversityDrafts(req: Request, res: Response) 
         ]
       );
 
-      // Insert Parsed Structured Questions into SQLite database
+      // 2. Insert/Update question_papers table for unified Question Paper Studio display
+      const qpExists = executeQuery(db, 'SELECT id FROM question_papers WHERE exam_id = ? AND original_filename = ?', [exam_id, file.originalname])[0];
+      if (!qpExists) {
+        executeRun(
+          db,
+          `INSERT INTO question_papers (id, org_id, exam_id, original_filename, subject, examination_category, processing_status, page_count, question_count, auto_extracted_count, needs_review_count, manually_corrected_count, cloudinary_url, cloudinary_public_id, uploaded_at)
+           VALUES (?, ?, ?, ?, ?, ?, 'COMPLETED', ?, ?, ?, 0, 0, ?, ?, ?)`,
+          [
+            draftPaperId,
+            org_id,
+            exam_id,
+            file.originalname,
+            examSubject,
+            examCategory,
+            Math.max(1, Math.ceil(extractedText.length / 2500)),
+            parsedQuestions.length,
+            parsedQuestions.length,
+            cloudinaryUrl || null,
+            cloudinaryPublicId || null,
+            nowIso,
+          ]
+        );
+      }
+
+      // 3. Insert Parsed Structured Questions into draft_questions & questions tables
       for (const q of parsedQuestions) {
         executeRun(
           db,
@@ -369,6 +429,41 @@ export async function handleUploadUniversityDrafts(req: Request, res: Response) 
             q.created_at,
           ]
         );
+
+        // Sync into unified questions table ensuring non-null syllabus
+        executeRun(
+          db,
+          `INSERT OR REPLACE INTO questions (
+            id, org_id, exam_id, question_paper_id, source_file, source_page, question_number,
+            subject, topic, difficulty, marks, negative_marks, correct_answer, language,
+            syllabus, question_type, content_text, options_json, diagram_url, status, created_by, created_at, updated_at
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'ELIGIBLE_FOR_PAPER', ?, ?, ?)`,
+          [
+            q.id,
+            org_id,
+            exam_id,
+            draftPaperId,
+            file.originalname,
+            1,
+            q.question_number,
+            examSubject,
+            q.section || 'General',
+            'MEDIUM',
+            q.marks || (q.question_type === 'MCQ' ? 1 : 4),
+            0,
+            q.correct_answer || (q.options?.length ? 'A' : ''),
+            'English',
+            examSyllabus,
+            q.question_type,
+            q.question_text,
+            q.options ? JSON.stringify(q.options) : null,
+            q.diagram_url || null,
+            user_id,
+            nowIso,
+            nowIso,
+          ]
+        );
+
         allExtractedQuestions.push(q);
       }
 
@@ -379,6 +474,8 @@ export async function handleUploadUniversityDrafts(req: Request, res: Response) 
         file_name: file.originalname,
         file_size: file.size,
         mime_type: file.mimetype,
+        cloudinary_url: cloudinaryUrl,
+        storage_path: cloudinaryUrl || file.path,
         extraction_method: extractionMethod,
         question_count: parsedQuestions.length,
         mcq_count: mcqCount,
@@ -387,9 +484,36 @@ export async function handleUploadUniversityDrafts(req: Request, res: Response) 
       });
     }
 
+    // Analyze Common Examination Pattern across all 3 source papers
+    let detectedPattern: any = null;
+    try {
+      detectedPattern = await analyzeConsolidatedExamPattern(papersTextForPattern, examSubject, examCategory);
+      if (detectedPattern) {
+        // Save detected pattern to examination_configurations table
+        const patternJson = JSON.stringify(detectedPattern);
+        const configId = uuidv4();
+        const existingConfig = executeQuery(db, 'SELECT id FROM examination_configurations WHERE exam_id = ?', [exam_id])[0];
+        if (existingConfig) {
+          executeRun(
+            db,
+            'UPDATE examination_configurations SET blueprint_json = ?, theory_pattern_json = ?, pattern_confirmed = 1, updated_at = ? WHERE exam_id = ?',
+            [patternJson, patternJson, nowIso, exam_id]
+          );
+        } else {
+          executeRun(
+            db,
+            'INSERT INTO examination_configurations (id, exam_id, blueprint_json, theory_pattern_json, pattern_confirmed, created_at, updated_at) VALUES (?, ?, ?, ?, 1, ?, ?)',
+            [configId, exam_id, patternJson, patternJson, nowIso, nowIso]
+          );
+        }
+      }
+    } catch (patErr) {
+      console.warn('[University Ingestion] Pattern analysis notice:', patErr);
+    }
+
     saveDb();
 
-    // Requirement 4: Delete temporary files after processing
+    // Clean up temporary local files after processing
     tempFiles.forEach(filePath => {
       if (fs.existsSync(filePath)) {
         try {
@@ -408,6 +532,7 @@ export async function handleUploadUniversityDrafts(req: Request, res: Response) 
       success: true,
       message: `Successfully ingested 3 University draft papers. Extracted ${totalQuestions} questions across Paper 1, Paper 2, and Paper 3.`,
       draftPapers: ingestedDraftPapers,
+      detectedPattern,
       paperCounts: {
         paper1Count,
         paper2Count,
@@ -432,4 +557,5 @@ export async function handleUploadUniversityDrafts(req: Request, res: Response) 
     });
   }
 }
+
 

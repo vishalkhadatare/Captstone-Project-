@@ -33,9 +33,13 @@ import {
   runNaviDcOcr,
   callGroqChat,
 } from './server/ai.ts';
+import { getProviderStatus, ollamaStream, OLLAMA_FAST_MODEL, type ChatMessage } from './server/aiProviders.ts';
+import { assessExtractedQuestion } from './server/questionQuality.ts';
 import {
   getFormatexHealth,
   getLatexOnlineHealth,
+  getLocalClsiHealth,
+  getTexApiHealth,
   generateUniversityLatexDocument,
   compileLatexWithFormatex,
   compileWithLatexOnline,
@@ -100,6 +104,7 @@ import {
   generateMultiPaperSets,
   generateUniversityBoardPaperSets,
   validateBlueprintFeasibility,
+  normalizePatternSections,
   PaperBlueprintConfig,
   QuestionItem,
 } from './server/multiPaperGenerator.ts';
@@ -857,7 +862,7 @@ async function startServer() {
   // Requirement 1, 2, 3, 4, 10: University Exam Draft Papers Ingestion Route (3 PDFs Upload, pdf-parse & Tesseract OCR fallback)
   app.post(
     '/api/university/upload-drafts',
-    uploadDraftPapersMulter.array('draft_papers', 3),
+    uploadDraftPapersMulter.any(),
     handleUploadUniversityDrafts
   );
 
@@ -868,6 +873,14 @@ async function startServer() {
       const draftPapers = executeQuery(db, 'SELECT * FROM draft_papers WHERE exam_id = ? ORDER BY paper_index ASC', [exam_id]);
       const questions = executeQuery(db, 'SELECT * FROM draft_questions WHERE exam_id = ? ORDER BY paper_index ASC, section ASC', [exam_id]);
       
+      const configRow = executeQuery(db, 'SELECT blueprint_json, theory_pattern_json FROM examination_configurations WHERE exam_id = ?', [exam_id])[0];
+      let detectedPattern = null;
+      if (configRow) {
+        try {
+          detectedPattern = JSON.parse(configRow.theory_pattern_json || configRow.blueprint_json || '{}');
+        } catch {}
+      }
+
       const paper1Count = questions.filter((q: any) => q.paper_index === 1).length;
       const paper2Count = questions.filter((q: any) => q.paper_index === 2).length;
       const paper3Count = questions.filter((q: any) => q.paper_index === 3).length;
@@ -878,6 +891,7 @@ async function startServer() {
       return res.json({
         success: true,
         draftPapers,
+        detectedPattern,
         paperCounts: {
           paper1Count,
           paper2Count,
@@ -4144,48 +4158,76 @@ async function startServer() {
   });
 
   // Ollama Chat Proxy Endpoint
+  //
+  // Config (base URL, model, num_ctx, output cap, timeouts) lives in ollamaStream so
+  // there is one place to get it right. This variant waits for the whole reply and
+  // returns it as JSON — used by callers that need the complete document, e.g. the
+  // paper generator. It no longer hits Node's 300s fetch ceiling because ollamaStream
+  // requests a streaming response internally.
   app.post('/api/ai/ollama-chat', authenticateToken, async (req: Request, res: Response) => {
     try {
-      const { messages, model, temperature } = req.body;
-      const baseUrl = (process.env.OLLAMA_BASE_URL || 'http://localhost:11434').replace(/\/$/, '');
-      const defaultModel = model || process.env.OLLAMA_MODEL || 'qwen2.5vl:7b';
-      const apiKey = process.env.OLLAMA_API_KEY || '';
-
-      const headers: Record<string, string> = {
-        'Content-Type': 'application/json',
-      };
-      if (apiKey) {
-        headers['Authorization'] = `Bearer ${apiKey}`;
-      }
-
-      const response = await fetch(`${baseUrl}/api/chat`, {
-        method: 'POST',
-        headers,
-        body: JSON.stringify({
-          model: defaultModel,
-          messages: messages || [],
-          stream: false,
-          format: 'json',
-          options: {
-            temperature: temperature ?? 0.1,
-          },
-        }),
-        signal: AbortSignal.timeout(120000),
+      const { messages, model, temperature, plainText } = req.body;
+      const text = await ollamaStream((messages || []) as ChatMessage[], {
+        model,
+        temperature,
+        // Existing callers rely on structured JSON output, so JSON stays the default.
+        // Free-form chat opts out with plainText: LaTeX is full of backslashes and
+        // newlines, and asking a small local model to embed that inside a JSON string
+        // reliably produces invalid JSON.
+        json: !plainText,
       });
-
-      if (!response.ok) {
-        const errBody = await response.text();
-        throw new Error(`Ollama returned HTTP ${response.status}: ${errBody}`);
-      }
-
-      const data: any = await response.json();
-      const content = data?.message?.content || data?.response || '';
-      return res.json({ success: true, message: { content }, text: content });
+      return res.json({ success: true, message: { content: text }, text });
     } catch (err: any) {
       console.error('Ollama chat error:', err);
-      return res.status(500).json({
-        error: err?.message || `Ollama is not reachable at ${process.env.OLLAMA_BASE_URL || 'http://localhost:11434'}. Start Ollama and try again.`,
-      });
+      return res.status(500).json({ error: err?.message || 'Ollama chat failed.' });
+    }
+  });
+
+  // Streaming variant, used by the PDF modal's LaTeX assistant so the reply builds up on
+  // screen instead of leaving a blank spinner for the minutes a full document takes to
+  // generate on CPU. Emits Server-Sent Events: {"delta":"..."} per token, then
+  // {"done":true}, or {"error":"..."} on failure.
+  app.post('/api/ai/ollama-chat-stream', authenticateToken, async (req: Request, res: Response) => {
+    const { messages, model, temperature, plainText } = req.body || {};
+
+    res.setHeader('Content-Type', 'text/event-stream');
+    res.setHeader('Cache-Control', 'no-cache, no-transform');
+    res.setHeader('Connection', 'keep-alive');
+    res.setHeader('X-Accel-Buffering', 'no');
+    res.flushHeaders();
+
+    const controller = new AbortController();
+    // If the browser closes the tab or the modal, stop the CPU work rather than letting
+    // it generate for minutes into a socket nobody is reading.
+    req.on('close', () => controller.abort());
+
+    let closed = false;
+    const send = (payload: unknown) => {
+      if (closed) return;
+      try {
+        res.write(`data: ${JSON.stringify(payload)}\n\n`);
+      } catch {
+        closed = true;
+      }
+    };
+
+    try {
+      const text = await ollamaStream(
+        (messages || []) as ChatMessage[],
+        // Interactive chat defaults to the fast model; the caller can still name another.
+        { model: model || OLLAMA_FAST_MODEL, temperature, json: !plainText },
+        { onToken: delta => send({ delta }), signal: controller.signal }
+      );
+      send({ done: true, text });
+    } catch (err: any) {
+      // An abort is the client leaving, not a failure worth reporting back to it.
+      if (!controller.signal.aborted) {
+        console.error('Ollama stream error:', err);
+        send({ error: err?.message || 'Ollama streaming failed.' });
+      }
+    } finally {
+      closed = true;
+      res.end();
     }
   });
 
@@ -4286,7 +4328,10 @@ async function startServer() {
         console.warn('Python extractor error, attempting AI/heuristic fallback:', pyErr);
       }
 
-      // 2. If Python returned 0 questions or failed, attempt Ollama or Gemini fallback
+      // 2. If Python returned 0 questions or failed, run the AI extraction chain.
+      // extractQuestionsFromPaperWithAI walks the full free-provider chain (Groq → Gemini
+      // → Cerebras → Mistral → OpenRouter → GitHub Models → local Ollama), so it no longer
+      // needs a separate Ollama-first attempt or an OLLAMA_MODEL env guard to work.
       if (!extraction || !extraction.totalExtracted || extraction.totalExtracted === 0) {
         if (!rawText && pdfBase64 && (file_name || '').toLowerCase().endsWith('.pdf')) {
           try {
@@ -4294,25 +4339,10 @@ async function startServer() {
             rawText = parsedPdf.text || '';
             pageCount = parsedPdf.numpages || 1;
           } catch {
-            // Gemini can still OCR a scanned or malformed text layer PDF.
+            // A vision-capable provider can still OCR a scanned or malformed text-layer PDF.
           }
         }
-        if (process.env.OLLAMA_MODEL) {
-          try {
-            const ollamaRes = await extractQuestionsFromPaperWithOllama(
-              rawText,
-              subject || 'Academic Examination',
-              category || 'Competitive Exam',
-              pageCount
-            );
-            if (ollamaRes && ollamaRes.totalExtracted > 0) {
-              extraction = ollamaRes;
-            }
-          } catch (ollamaErr) {
-            console.warn('Ollama extraction fallback skipped:', ollamaErr);
-          }
-        }
-        if (!extraction || !extraction.totalExtracted || extraction.totalExtracted === 0) {
+        {
           try {
             const aiRes = await extractQuestionsFromPaperWithAI(
               rawText,
@@ -4324,7 +4354,7 @@ async function startServer() {
               extraction = aiRes;
             }
           } catch (aiErr) {
-            console.warn('Gemini extraction fallback skipped:', aiErr);
+            console.warn('AI extraction chain exhausted, using heuristic parser:', aiErr);
           }
         }
       }
@@ -4340,7 +4370,9 @@ async function startServer() {
         };
       }
 
-      if (extraction?.extractedQuestions?.length && process.env.OLLAMA_MODEL && !extraction.engine?.includes('v12.0')) {
+      // Local classification pass. Ollama needs no key, so this no longer depends on
+      // OLLAMA_MODEL being set — it degrades to a no-op only if Ollama is unreachable.
+      if (extraction?.extractedQuestions?.length && !extraction.engine?.includes('v12.0')) {
         extractionProgressMap.set(effectiveJobId, {
           jobId: effectiveJobId,
           status: 'PROCESSING',
@@ -4438,18 +4470,28 @@ async function startServer() {
             ? q.options_json
             : JSON.stringify(q.options || []);
 
+          // Look up exam syllabus if exam_id is present
+          let resolvedSyllabus = q.syllabus || 'Standard Curriculum';
+          if (exam_id) {
+            const exRow = executeQuery(db, 'SELECT subject, syllabus FROM examinations WHERE id = ?', [exam_id])[0];
+            if (exRow) {
+              resolvedSyllabus = q.syllabus || exRow.syllabus || exRow.subject || subject || 'Standard Curriculum';
+            }
+          }
+
           executeRun(
             db,
             `INSERT INTO questions (
-              id, org_id, question_paper_id, source_file, source_page, question_number,
+              id, org_id, exam_id, question_paper_id, source_file, source_page, question_number,
               subject, topic, difficulty, marks, negative_marks, correct_answer, language,
               syllabus, question_type, content_text, options_json, diagram_url, image_url,
               high_res_page_url, crop_coordinates, extraction_status, options_status,
               validation_flags, status, created_by, created_at, updated_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
             [
               qId,
               req.user!.org_id,
+              exam_id || null,
               sourcePaperId,
               file_name || 'raw_text_entry',
               q.source_page || q.page_number || 1,
@@ -4461,7 +4503,7 @@ async function startServer() {
               q.negative_marks || 1.0,
               q.correct_answer || 'A',
               q.language || 'English',
-              q.syllabus || 'Standard',
+              resolvedSyllabus,
               q.question_type || 'MCQ',
               q.content_text || '',
               optJson,
@@ -4478,6 +4520,34 @@ async function startServer() {
               now,
             ]
           );
+
+          // Also mirror to draft_questions if exam_id is present
+          if (exam_id) {
+            const existingDraftQ = executeQuery(db, 'SELECT id FROM draft_questions WHERE id = ?', [qId])[0];
+            if (!existingDraftQ) {
+              const paperIdx = executeQuery(db, 'SELECT count(*) as cnt FROM draft_papers WHERE exam_id = ?', [exam_id])[0]?.cnt || 1;
+              executeRun(
+                db,
+                `INSERT INTO draft_questions (id, draft_paper_id, exam_id, paper_index, source_paper, section, question_number, question_text, question_type, options_json, marks, sub_question_pattern, created_at)
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+                [
+                  qId,
+                  sourcePaperId,
+                  exam_id,
+                  Math.min(3, Math.max(1, paperIdx)),
+                  `Paper ${Math.min(3, Math.max(1, paperIdx))}`,
+                  q.section || (q.question_type === 'MCQ' ? 'MCQ' : 'Section I'),
+                  qNum,
+                  q.content_text || '',
+                  q.question_type || 'MCQ',
+                  optJson,
+                  q.marks || 4,
+                  null,
+                  now,
+                ]
+              );
+            }
+          }
         }
       }
 
@@ -4711,6 +4781,16 @@ async function startServer() {
     return res.json(await checkOllamaHealth());
   });
 
+  // Free AI Provider Status — which engines are configured, the current failover order,
+  // and whether local semantic embeddings are ready.
+  app.get('/api/ai/providers', authenticateToken, async (_req: Request, res: Response) => {
+    try {
+      return res.json({ success: true, ...(await getProviderStatus()) });
+    } catch (err: any) {
+      return res.status(500).json({ success: false, error: err?.message || 'Failed to read AI provider status.' });
+    }
+  });
+
   // FormaTeX Cloud LaTeX & AI Compilation Health
   app.get('/api/formatex/health', authenticateToken, async (_req: Request, res: Response) => {
     return res.json(await getFormatexHealth());
@@ -4719,6 +4799,16 @@ async function startServer() {
   // Free LaTeX.Online Cloud Compiler Health
   app.get('/api/latex-online/health', authenticateToken, async (_req: Request, res: Response) => {
     return res.json(await getLatexOnlineHealth());
+  });
+
+  // Self-Hosted LaTeX Service (CLSI-shaped) Health
+  app.get('/api/latex-service/health', authenticateToken, async (_req: Request, res: Response) => {
+    return res.json(await getLocalClsiHealth());
+  });
+
+  // TexAPI Cloud LaTeX Compiler Health
+  app.get('/api/texapi/health', authenticateToken, async (_req: Request, res: Response) => {
+    return res.json(await getTexApiHealth());
   });
 
   // Retrieve Formatted LaTeX Source for Examination
@@ -5619,16 +5709,39 @@ async function startServer() {
       }
       const now = new Date().toISOString();
       const createdIds: string[] = [];
+      const quarantined: Array<{ code?: string; reason?: string; preview: string }> = [];
 
       for (const q of questions) {
         const questionId = `Q-${uuidv4().substring(0, 8).toUpperCase()}`;
-        const initialStatus = initial_status || 'VERIFIED';
         const targetExamId = q.exam_id || exam_id || null;
+
+        // Gate every extracted row before it reaches the bank. Extraction
+        // returns page headers, footers and log lines alongside real
+        // questions, and once stored those rows are indistinguishable from
+        // genuine ones - they were previously stamped VERIFIED and printed as
+        // 10-mark questions. Rejects are quarantined with a reason, not
+        // silently dropped, so extraction quality stays auditable.
+        const verdict = assessExtractedQuestion(q);
+        let initialStatus: string;
+        if (!verdict.ok) {
+          initialStatus = 'QUARANTINED';
+          quarantined.push({
+            code: verdict.code,
+            reason: verdict.reason,
+            preview: String(q.content_text || '').replace(/\s+/g, ' ').slice(0, 120),
+          });
+          console.warn(
+            `[bulk-create] quarantined (${verdict.code}): ${verdict.reason} :: ${String(q.content_text || '').replace(/\s+/g, ' ').slice(0, 90)}`
+          );
+        } else {
+          // Extraction output is never born verified.
+          initialStatus = initial_status || 'UNDER_VERIFICATION';
+        }
 
         executeRun(
           db,
-          `INSERT INTO questions (id, org_id, exam_id, question_paper_id, source_file, source_page, question_number, subject, topic, difficulty, marks, negative_marks, correct_answer, language, syllabus, question_type, content_text, options_json, diagram_url, status, created_by, created_at, updated_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          `INSERT INTO questions (id, org_id, exam_id, question_paper_id, source_file, source_page, question_number, subject, topic, difficulty, marks, negative_marks, correct_answer, language, syllabus, question_type, content_text, options_json, diagram_url, extraction_status, validation_flags, status, created_by, created_at, updated_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
           [
             questionId,
             req.user!.org_id,
@@ -5649,6 +5762,8 @@ async function startServer() {
             q.content_text,
             q.options ? JSON.stringify(q.options) : null,
             q.diagram_url || q.diagram_data || null,
+            verdict.ok ? 'AUTO_EXTRACTED' : 'REJECTED_BY_QUALITY_GATE',
+            verdict.ok ? null : JSON.stringify({ code: verdict.code, reason: verdict.reason }),
             initialStatus,
             req.user!.id,
             now,
@@ -5688,9 +5803,15 @@ async function startServer() {
         details: { count: createdIds.length, auto_assign_translator_id },
       });
 
+      const acceptedCount = createdIds.length - quarantined.length;
       return res.json({
-        message: `Successfully imported ${createdIds.length} questions into the secure question bank.`,
+        message: quarantined.length
+          ? `Imported ${acceptedCount} questions; ${quarantined.length} rejected by the quality gate and quarantined for review.`
+          : `Successfully imported ${createdIds.length} questions into the secure question bank.`,
         createdCount: createdIds.length,
+        acceptedCount,
+        quarantinedCount: quarantined.length,
+        quarantined: quarantined.slice(0, 25),
         questionIds: createdIds,
       });
     } catch (e: any) {
@@ -6782,6 +6903,24 @@ async function startServer() {
       || blueprintVersions.versions.find(version => version.status === 'ACTIVE');
     const hasManualBlueprint = Boolean(manualBlueprint);
 
+    // A pattern detected from an uploaded paper is stored as legacy blueprint
+    // JSON whose sections use the pattern's own field names
+    // (questionCount / type / marks / attemptRules). The section logic below
+    // reads totalQuestions / questionType / marksPerQuestion / questionsToAttempt,
+    // so without this mapping every section resolves to zero questions and the
+    // paper comes out empty - ignoring the uploaded paper's pattern entirely.
+    // Normalizing at read time also repairs patterns already stored, with no
+    // migration and no re-upload.
+    if (manualBlueprint && Array.isArray(manualBlueprint.sections)) {
+      const rawSections = manualBlueprint.sections;
+      manualBlueprint.sections = normalizePatternSections(rawSections);
+      if (rawSections.length !== manualBlueprint.sections.length) {
+        console.warn(
+          `[PaperCompiler] pattern normalization dropped ${rawSections.length - manualBlueprint.sections.length} malformed section(s)`
+        );
+      }
+    }
+
     const isUniversityExam = !hasManualBlueprint && (
       body.exam_mode === 'UNIVERSITY_3_PAPERS' ||
       body.exam_mode === 'UNIVERSITY_3_SETS' ||
@@ -6891,6 +7030,26 @@ async function startServer() {
       }
     }
 
+    // Final gate before assembly, covering BOTH the blueprint path (which reads
+    // eligibleQuestions directly) and the board-set path. Rows already in the
+    // bank predate the ingest gate, so page furniture, log lines and content
+    // filed under the wrong subject must be filtered here too.
+    const beforeQualityGate = eligibleQuestions.length;
+    eligibleQuestions = eligibleQuestions.filter(q => {
+      const verdict = assessExtractedQuestion({ content_text: q.content_text, subject: q.subject });
+      if (!verdict.ok) {
+        console.warn(`[PaperCompiler] excluding ${q.id} (${verdict.code}): ${verdict.reason}`);
+        return false;
+      }
+      return true;
+    });
+    if (eligibleQuestions.length < beforeQualityGate) {
+      console.warn(
+        `[PaperCompiler] excluded ${beforeQualityGate - eligibleQuestions.length} stored question(s) failing the quality gate; ` +
+        `review and quarantine them in the question bank.`
+      );
+    }
+
     const validationErrors: string[] = [];
     const requiredMinQuestions = hasManualBlueprint
       ? (manualBlueprint.sections || []).reduce((sum: number, section: any) => sum + Number(section.totalQuestions || 0), 0)
@@ -6947,6 +7106,12 @@ async function startServer() {
           });
           const selected = matches.slice(0, Number(section.totalQuestions || 0));
           if (selected.length < Number(section.totalQuestions || 0)) {
+            const shortfall = Number(section.totalQuestions || 0) - selected.length;
+            console.warn(
+              `[PaperCompiler] section "${section.name}" is short by ${shortfall}: ` +
+              `pattern wants ${section.totalQuestions}, only ${selected.length} eligible question(s) available. ` +
+              `Emitting a short section rather than repeating questions.`
+            );
             validationErrors.push(`Section "${section.name}" requires ${section.totalQuestions} eligible questions, but only ${selected.length} match its subject, type, and difficulty rules.`);
           }
           selected.forEach(q => {
@@ -7476,12 +7641,13 @@ async function startServer() {
             executeRun(
               db,
               `INSERT INTO questions (
-                id, org_id, question_paper_id, subject, topic, difficulty, marks, negative_marks,
-                correct_answer, content_text, options_json, diagram_url, image_url, question_type, status, created_at
-              ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'ELIGIBLE_FOR_PAPER', ?)`,
+                id, org_id, exam_id, question_paper_id, subject, topic, difficulty, marks, negative_marks,
+                correct_answer, language, syllabus, question_type, content_text, options_json, diagram_url, image_url, status, created_by, created_at, updated_at
+              ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'ELIGIBLE_FOR_PAPER', ?, ?, ?)`,
               [
                 q.id,
                 exam.org_id || req.user!.org_id,
+                exam.id,
                 q.question_paper_id || (body.selected_paper_ids?.[0] || 'GENERATED_VAULT'),
                 q.subject || exam.subject || 'General',
                 q.topic || 'General',
@@ -7489,11 +7655,15 @@ async function startServer() {
                 q.marks || (q.question_type === 'MCQ' ? 1 : 4),
                 q.negative_marks || 0,
                 q.correct_answer || '',
+                q.language || 'English',
+                q.syllabus || exam.syllabus || exam.subject || 'General Technical Standard',
+                q.question_type || (q.options?.length ? 'MCQ' : 'THEORY'),
                 q.content_text || '',
                 typeof q.options_json === 'string' ? q.options_json : JSON.stringify(q.options || []),
                 q.diagram_url || null,
                 q.image_url || null,
-                q.question_type || (q.options?.length ? 'MCQ' : 'THEORY'),
+                req.user?.id || 'usr-system',
+                now,
                 now
               ]
             );

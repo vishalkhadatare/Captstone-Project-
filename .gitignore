@@ -33,6 +33,10 @@ public/papers/*
 # Scratch and temporary work
 scratch/
 
+# Claude Code local settings — contains a live API token, never commit
+.claude/settings.local.json
+.claude/*.local.json
+
 # Model weights and artifacts
 models/
 NaviDC-OCR/outputs/

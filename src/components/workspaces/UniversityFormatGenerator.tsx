@@ -135,7 +135,8 @@ export const UniversityFormatGenerator: React.FC<UniversityFormatGeneratorProps>
   const [cloudinaryHealth, setCloudinaryHealth] = useState<{ connected: boolean; cloud_name?: string; assets_count?: number } | null>(null);
   const [formatexHealth, setFormatexHealth] = useState<{ connected: boolean; engine?: string } | null>(null);
   const [latexOnlineHealth, setLatexOnlineHealth] = useState<{ connected: boolean; service?: string; engine?: string } | null>(null);
-  const [compilingFormatex, setCompilingFormatex] = useState(false);
+  const [compilingEngine, setCompilingEngine] = useState<'latexonline' | 'formatex' | null>(null);
+  const [latestLatexOnlinePdfUrl, setLatestLatexOnlinePdfUrl] = useState<string | null>(null);
   const [latestFormatexPdfUrl, setLatestFormatexPdfUrl] = useState<string | null>(null);
   const [showLatexModal, setShowLatexModal] = useState(false);
   const [latexCode, setLatexCode] = useState('');
@@ -530,11 +531,11 @@ export const UniversityFormatGenerator: React.FC<UniversityFormatGeneratorProps>
           runMasterBlueprintValidation(currentRes.questions || [], currentRes.exam || exams.find(e => e.id === examId)!);
         }
 
-        // Automatically compile Set P with LaTeX.Online/FormaTeX in the backend
+        // Automatically compile Set P with LaTeX.Online in the background
         try {
-          const fRes = await api.compileFormatexPdf(examId, { setLetter: 'P' });
+          const fRes = await api.compileFormatexPdf(examId, { setLetter: 'P', preferEngine: 'latexonline' });
           if (fRes.success && fRes.pdfUrl) {
-            setLatestFormatexPdfUrl(fRes.pdfUrl);
+            setLatestLatexOnlinePdfUrl(fRes.pdfUrl);
           }
         } catch (fErr) {
           console.warn('Latex background compile:', fErr);
@@ -563,34 +564,40 @@ export const UniversityFormatGenerator: React.FC<UniversityFormatGeneratorProps>
     }
   };
 
-  const handleCompileFormatexPdf = async (setLetterOverride?: string) => {
+  const handleCompileFormatexPdf = async (setLetterOverride?: string, preferEngine: 'latexonline' | 'formatex' | 'auto' = 'latexonline') => {
     const examToUse = selectedExamId && exams.some(e => e.id === selectedExamId) ? selectedExamId : exams[0]?.id;
     if (!examToUse) {
       setActionMessage({ type: 'error', text: 'No active examination found. Please select an examination first.' });
       return;
     }
-    setCompilingFormatex(true);
+    const targetEngine = preferEngine === 'formatex' ? 'formatex' : 'latexonline';
+    setCompilingEngine(targetEngine);
     setActionMessage(null);
     try {
       const letter = setLetterOverride || ['P', 'Q', 'R', 'S'][activeSetIndex] || 'P';
-      const res = await api.compileFormatexPdf(examToUse, { setLetter: letter });
+      const res = await api.compileFormatexPdf(examToUse, { setLetter: letter, preferEngine: targetEngine });
       if (res.success && res.pdfUrl) {
-        setLatestFormatexPdfUrl(res.pdfUrl);
+        if (targetEngine === 'formatex') {
+          setLatestFormatexPdfUrl(res.pdfUrl);
+        } else {
+          setLatestLatexOnlinePdfUrl(res.pdfUrl);
+        }
+        const engineLabel = res.compilerService || (targetEngine === 'formatex' ? 'FormaTeX Cloud' : 'LaTeX.Online');
         setActionMessage({
           type: 'success',
-          text: `⚡ FormaTeX compiled official publication PDF for Set ${letter} (${Math.round((res.sizeBytes || 0) / 1024)} KB)!`,
+          text: `⚡ ${engineLabel} compiled official publication PDF for Set ${letter} (${Math.round((res.sizeBytes || 0) / 1024)} KB)!`,
         });
         window.open(res.pdfUrl, '_blank');
       } else {
         setActionMessage({
           type: 'error',
-          text: res.error || 'FormaTeX compilation failed.',
+          text: res.error || 'LaTeX compilation failed.',
         });
       }
     } catch (e: any) {
-      setActionMessage({ type: 'error', text: `FormaTeX Error: ${e.message}` });
+      setActionMessage({ type: 'error', text: `Compilation Error: ${e.message}` });
     } finally {
-      setCompilingFormatex(false);
+      setCompilingEngine(null);
     }
   };
 
@@ -941,23 +948,37 @@ export const UniversityFormatGenerator: React.FC<UniversityFormatGeneratorProps>
         )}
 
         {/* Paper 1, Paper 2, Paper 3 Extracted Summary Cards */}
-        {ingestedData && (
+        {((ingestedData && ingestedData.draftPapers && ingestedData.draftPapers.length > 0) || uploadedPapers.length > 0) && (
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 pt-2">
-            <div className="p-4 bg-slate-50 border border-slate-200 rounded-xl space-y-1">
-              <div className="text-[11px] font-bold text-slate-600 uppercase">Paper 1 Questions</div>
-              <div className="text-xl font-bold text-slate-900">{ingestedData.paperCounts?.paper1 || 0} Extracted</div>
-              <div className="text-[10px] text-slate-500 font-mono">Status: Processed</div>
-            </div>
-            <div className="p-4 bg-slate-50 border border-slate-200 rounded-xl space-y-1">
-              <div className="text-[11px] font-bold text-slate-600 uppercase">Paper 2 Questions</div>
-              <div className="text-xl font-bold text-slate-900">{ingestedData.paperCounts?.paper2 || 0} Extracted</div>
-              <div className="text-[10px] text-slate-500 font-mono">Status: Processed</div>
-            </div>
-            <div className="p-4 bg-slate-50 border border-slate-200 rounded-xl space-y-1">
-              <div className="text-[11px] font-bold text-slate-600 uppercase">Paper 3 Questions</div>
-              <div className="text-xl font-bold text-slate-900">{ingestedData.paperCounts?.paper3 || 0} Extracted</div>
-              <div className="text-[10px] text-slate-500 font-mono">Status: Processed</div>
-            </div>
+            {[1, 2, 3].map((pNum) => {
+              const draft = ingestedData?.draftPapers?.find((p: any) => p.paper_index === pNum);
+              const upPaper = uploadedPapers[pNum - 1];
+              const count = (ingestedData?.paperCounts as any)?.[`paper${pNum}Count`] 
+                ?? (ingestedData?.paperCounts as any)?.[`paper${pNum}`] 
+                ?? draft?.question_count 
+                ?? upPaper?.question_count 
+                ?? 0;
+              const filename = draft?.file_name || upPaper?.original_filename || `Draft Paper ${pNum}.pdf`;
+              const isParsed = count > 0 || Boolean(draft || upPaper);
+
+              return (
+                <div key={pNum} className="p-4 bg-slate-50 border border-slate-200 rounded-xl space-y-1">
+                  <div className="flex items-center justify-between">
+                    <span className="text-[11px] font-bold text-slate-600 uppercase">Draft #{pNum}</span>
+                    <span className={`px-2 py-0.5 rounded text-[9px] font-bold uppercase ${
+                      isParsed ? 'bg-emerald-100 text-emerald-800 border border-emerald-200' : 'bg-amber-100 text-amber-800'
+                    }`}>
+                      {isParsed ? 'Parsed' : 'Pending'}
+                    </span>
+                  </div>
+                  <div className="text-xs font-bold text-slate-900 truncate" title={filename}>{filename}</div>
+                  <div className="text-xl font-bold text-slate-900">{count} Extracted</div>
+                  <div className="text-[10px] text-slate-500 font-mono">
+                    Status: {isParsed ? 'Vault Indexed' : 'Ready'}
+                  </div>
+                </div>
+              );
+            })}
           </div>
         )}
       </div>
@@ -1488,42 +1509,131 @@ export const UniversityFormatGenerator: React.FC<UniversityFormatGeneratorProps>
             </div>
           ) : (
             <>
-              {/* PDF Ready Quick Access Bar */}
-              {latestFormatexPdfUrl && (
-                <div className="bg-emerald-50 border border-emerald-200 p-4 rounded-2xl shadow-xs flex flex-wrap items-center justify-between gap-3 animate-fadeIn">
-                  <div className="flex items-center gap-3">
-                    <div className="p-2.5 bg-emerald-100 text-emerald-800 rounded-xl border border-emerald-300">
-                      <FileCheck className="w-5 h-5" />
-                    </div>
-                    <div>
-                      <div className="flex items-center gap-2">
-                        <span className="font-bold text-sm text-slate-900">Official Question Paper PDF Ready</span>
-                        <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-700 text-white">
-                          READY TO PRINT
-                        </span>
+              {/* Dual Engine PDF Ready Quick Access Bar */}
+              {(latestLatexOnlinePdfUrl || latestFormatexPdfUrl) && (
+                <div className="bg-gradient-to-r from-emerald-50 via-slate-50 to-indigo-50 border border-emerald-200 p-4 rounded-2xl shadow-xs space-y-3 animate-fadeIn">
+                  <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-200/80 pb-3">
+                    <div className="flex items-center gap-3">
+                      <div className="p-2 bg-emerald-600 text-white rounded-xl shadow-xs">
+                        <FileCheck className="w-5 h-5" />
                       </div>
-                      <p className="text-xs text-slate-600">
-                        Generated &amp; compiled via Free LaTeX.Online cloud compiler
-                      </p>
+                      <div>
+                        <div className="flex items-center gap-2">
+                          <span className="font-bold text-sm text-slate-900">Official Question Paper PDF Outputs</span>
+                          <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-700 text-white">
+                            DUAL ENGINE READY
+                          </span>
+                        </div>
+                        <p className="text-xs text-slate-600">
+                          Each compiler operates independently. View or compare both rendered PDFs below:
+                        </p>
+                      </div>
                     </div>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <button
-                      type="button"
-                      onClick={() => window.open(latestFormatexPdfUrl, '_blank')}
-                      className="px-3.5 py-2 bg-emerald-700 hover:bg-emerald-600 text-white rounded-xl font-bold text-xs flex items-center gap-1.5 shadow-xs cursor-pointer transition-all"
-                    >
-                      <ExternalLink className="w-3.5 h-3.5" />
-                      <span>Open PDF</span>
-                    </button>
                     <button
                       type="button"
                       onClick={() => setShowPdfModal(true)}
-                      className="px-3.5 py-2 bg-white hover:bg-slate-50 text-slate-800 border border-slate-300 rounded-xl font-bold text-xs flex items-center gap-1.5 cursor-pointer transition-all shadow-2xs"
+                      className="px-3 py-1.5 bg-white hover:bg-slate-50 text-slate-800 border border-slate-300 rounded-xl font-bold text-xs flex items-center gap-1.5 cursor-pointer transition-all shadow-2xs"
                     >
                       <Eye className="w-3.5 h-3.5" />
-                      <span>View PDF Modal</span>
+                      <span>View In-App Modal</span>
                     </button>
+                  </div>
+
+                  {/* Two Independent Cards Side-by-Side */}
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-1">
+                    {/* LaTeX.Online Output Card */}
+                    <div className={`p-3 rounded-xl border transition-all ${
+                      latestLatexOnlinePdfUrl ? 'bg-white border-indigo-200 shadow-xs' : 'bg-white/70 border-slate-200'
+                    }`}>
+                      <div className="flex items-center justify-between mb-1.5">
+                        <div className="flex items-center gap-2">
+                          <span className="w-2.5 h-2.5 rounded-full bg-indigo-600"></span>
+                          <span className="font-bold text-xs text-slate-900">LaTeX.Online Compiler</span>
+                          <span className="px-1.5 py-0.2 rounded text-[9px] font-bold bg-indigo-50 text-indigo-700 border border-indigo-200">
+                            latexonline.cc
+                          </span>
+                        </div>
+                        {latestLatexOnlinePdfUrl ? (
+                          <span className="text-[10px] font-bold text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded border border-emerald-200">
+                            Generated
+                          </span>
+                        ) : (
+                          <span className="text-[10px] text-slate-400">Idle</span>
+                        )}
+                      </div>
+                      <p className="text-[11px] text-slate-500 mb-2.5">
+                        Free cloud pdflatex compiler (high-speed standard typography)
+                      </p>
+                      {latestLatexOnlinePdfUrl ? (
+                        <div className="flex items-center gap-2">
+                          <button
+                            type="button"
+                            onClick={() => window.open(latestLatexOnlinePdfUrl, '_blank')}
+                            className="flex-1 px-3 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg font-bold text-xs flex items-center justify-center gap-1.5 shadow-xs cursor-pointer transition-all"
+                          >
+                            <ExternalLink className="w-3.5 h-3.5" />
+                            <span>Open LaTeX.Online PDF</span>
+                          </button>
+                        </div>
+                      ) : (
+                        <button
+                          type="button"
+                          onClick={() => handleCompileFormatexPdf(setLetter, 'latexonline')}
+                          disabled={compilingEngine === 'latexonline'}
+                          className="w-full px-3 py-1.5 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-200 rounded-lg font-bold text-xs flex items-center justify-center gap-1.5 cursor-pointer transition-all disabled:opacity-50"
+                        >
+                          <Zap className={`w-3.5 h-3.5 ${compilingEngine === 'latexonline' ? 'animate-spin' : ''}`} />
+                          <span>Compile with LaTeX.Online</span>
+                        </button>
+                      )}
+                    </div>
+
+                    {/* FormaTeX Cloud Output Card */}
+                    <div className={`p-3 rounded-xl border transition-all ${
+                      latestFormatexPdfUrl ? 'bg-white border-amber-200 shadow-xs' : 'bg-white/70 border-slate-200'
+                    }`}>
+                      <div className="flex items-center justify-between mb-1.5">
+                        <div className="flex items-center gap-2">
+                          <span className="w-2.5 h-2.5 rounded-full bg-amber-500"></span>
+                          <span className="font-bold text-xs text-slate-900">FormaTeX Cloud Engine</span>
+                          <span className="px-1.5 py-0.2 rounded text-[9px] font-bold bg-amber-50 text-amber-800 border border-amber-200">
+                            api.formatex.io
+                          </span>
+                        </div>
+                        {latestFormatexPdfUrl ? (
+                          <span className="text-[10px] font-bold text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded border border-emerald-200">
+                            Generated
+                          </span>
+                        ) : (
+                          <span className="text-[10px] text-slate-400">Idle</span>
+                        )}
+                      </div>
+                      <p className="text-[11px] text-slate-500 mb-2.5">
+                        Academic layout engine with strict border &amp; font styling
+                      </p>
+                      {latestFormatexPdfUrl ? (
+                        <div className="flex items-center gap-2">
+                          <button
+                            type="button"
+                            onClick={() => window.open(latestFormatexPdfUrl, '_blank')}
+                            className="flex-1 px-3 py-1.5 bg-amber-500 hover:bg-amber-600 text-slate-950 rounded-lg font-bold text-xs flex items-center justify-center gap-1.5 shadow-xs cursor-pointer transition-all"
+                          >
+                            <ExternalLink className="w-3.5 h-3.5" />
+                            <span>Open FormaTeX PDF</span>
+                          </button>
+                        </div>
+                      ) : (
+                        <button
+                          type="button"
+                          onClick={() => handleCompileFormatexPdf(setLetter, 'formatex')}
+                          disabled={compilingEngine === 'formatex'}
+                          className="w-full px-3 py-1.5 bg-amber-50 hover:bg-amber-100 text-amber-800 border border-amber-200 rounded-lg font-bold text-xs flex items-center justify-center gap-1.5 cursor-pointer transition-all disabled:opacity-50"
+                        >
+                          <Zap className={`w-3.5 h-3.5 ${compilingEngine === 'formatex' ? 'animate-spin' : ''}`} />
+                          <span>Compile with FormaTeX</span>
+                        </button>
+                      )}
+                    </div>
                   </div>
                 </div>
               )}
@@ -1550,16 +1660,28 @@ export const UniversityFormatGenerator: React.FC<UniversityFormatGeneratorProps>
                 </div>
 
                 <div className="flex flex-wrap items-center gap-2">
-                  {/* LaTeX PDF Compilation */}
+                  {/* LaTeX.Online PDF Compilation */}
                   <button
                     type="button"
-                    onClick={() => handleCompileFormatexPdf(setLetter)}
-                    disabled={compilingFormatex}
-                    title="Compile and download publication-ready official PDF using LaTeX.Online / FormaTeX Engine"
+                    onClick={() => handleCompileFormatexPdf(setLetter, 'latexonline')}
+                    disabled={compilingEngine === 'latexonline'}
+                    title="Compile official PDF via free LaTeX.Online (https://latex.online / latexonline.cc)"
+                    className="px-3 py-1.5 rounded-lg text-xs font-bold bg-indigo-600 hover:bg-indigo-700 text-white flex items-center gap-1.5 cursor-pointer transition-all shadow-xs disabled:opacity-50"
+                  >
+                    <Zap className={`w-3.5 h-3.5 ${compilingEngine === 'latexonline' ? 'animate-spin' : ''}`} />
+                    <span>{compilingEngine === 'latexonline' ? 'Compiling LaTeX.Online...' : '⚡ LaTeX.Online PDF'}</span>
+                  </button>
+
+                  {/* FormaTeX Cloud Compilation */}
+                  <button
+                    type="button"
+                    onClick={() => handleCompileFormatexPdf(setLetter, 'formatex')}
+                    disabled={compilingEngine === 'formatex'}
+                    title="Compile official PDF via FormaTeX Cloud Engine"
                     className="px-3 py-1.5 rounded-lg text-xs font-bold bg-amber-500 hover:bg-amber-600 text-slate-950 flex items-center gap-1.5 cursor-pointer transition-all shadow-xs disabled:opacity-50"
                   >
-                    <Zap className={`w-3.5 h-3.5 ${compilingFormatex ? 'animate-spin' : ''}`} />
-                    <span>{compilingFormatex ? `Compiling Set ${setLetter}...` : `⚡ Compile Official PDF (Set ${setLetter})`}</span>
+                    <Zap className={`w-3.5 h-3.5 ${compilingEngine === 'formatex' ? 'animate-spin' : ''}`} />
+                    <span>{compilingEngine === 'formatex' ? 'Compiling FormaTeX...' : '⚡ FormaTeX Cloud PDF'}</span>
                   </button>
 
                   {/* View LaTeX Source Code */}
@@ -1922,12 +2044,22 @@ export const UniversityFormatGenerator: React.FC<UniversityFormatGeneratorProps>
 
                 <button
                   type="button"
-                  onClick={() => handleCompileFormatexPdf(setLetter)}
-                  disabled={compilingFormatex}
+                  onClick={() => handleCompileFormatexPdf(setLetter, 'latexonline')}
+                  disabled={compilingEngine === 'latexonline'}
+                  className="px-3 py-1.5 rounded-lg text-xs font-bold bg-indigo-600 hover:bg-indigo-700 text-white flex items-center gap-1.5 cursor-pointer transition-all shadow-xs disabled:opacity-50"
+                >
+                  <Zap className={`w-3.5 h-3.5 ${compilingEngine === 'latexonline' ? 'animate-spin' : ''}`} />
+                  <span>{compilingEngine === 'latexonline' ? 'Compiling LaTeX.Online...' : 'Compile (LaTeX.Online)'}</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => handleCompileFormatexPdf(setLetter, 'formatex')}
+                  disabled={compilingEngine === 'formatex'}
                   className="px-3 py-1.5 rounded-lg text-xs font-bold bg-amber-500 hover:bg-amber-600 text-slate-950 flex items-center gap-1.5 cursor-pointer transition-all shadow-xs disabled:opacity-50"
                 >
-                  <Zap className={`w-3.5 h-3.5 ${compilingFormatex ? 'animate-spin' : ''}`} />
-                  <span>{compilingFormatex ? 'Compiling...' : 'Compile with FormaTeX'}</span>
+                  <Zap className={`w-3.5 h-3.5 ${compilingEngine === 'formatex' ? 'animate-spin' : ''}`} />
+                  <span>{compilingEngine === 'formatex' ? 'Compiling FormaTeX...' : 'Compile (FormaTeX)'}</span>
                 </button>
 
                 <button
@@ -1952,10 +2084,36 @@ export const UniversityFormatGenerator: React.FC<UniversityFormatGeneratorProps>
             </div>
 
             {/* Modal Footer */}
-            <div className="px-6 py-3 border-t border-slate-200 bg-slate-50 flex items-center justify-between text-xs text-slate-600">
-              <div className="flex items-center gap-2">
-                <span className="inline-block w-2 h-2 rounded-full bg-emerald-500"></span>
-                <span>FormaTeX Cloud Engine Ready</span>
+            <div className="px-6 py-3 border-t border-slate-200 bg-slate-50 flex flex-wrap items-center justify-between gap-3 text-xs text-slate-600">
+              <div className="flex items-center gap-3">
+                {latestLatexOnlinePdfUrl && (
+                  <a
+                    href={latestLatexOnlinePdfUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="inline-flex items-center gap-1.5 px-2.5 py-1 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 font-bold rounded-md border border-indigo-200 transition-colors"
+                  >
+                    <ExternalLink className="w-3 h-3" />
+                    <span>View LaTeX.Online PDF</span>
+                  </a>
+                )}
+                {latestFormatexPdfUrl && (
+                  <a
+                    href={latestFormatexPdfUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="inline-flex items-center gap-1.5 px-2.5 py-1 bg-amber-50 hover:bg-amber-100 text-amber-900 font-bold rounded-md border border-amber-200 transition-colors"
+                  >
+                    <ExternalLink className="w-3 h-3" />
+                    <span>View FormaTeX PDF</span>
+                  </a>
+                )}
+                {!latestLatexOnlinePdfUrl && !latestFormatexPdfUrl && (
+                  <div className="flex items-center gap-2">
+                    <span className="inline-block w-2 h-2 rounded-full bg-emerald-500"></span>
+                    <span>Click either compiler above to generate PDF</span>
+                  </div>
+                )}
               </div>
               <div>
                 <span>Characters: <strong>{latexCode.length}</strong></span>

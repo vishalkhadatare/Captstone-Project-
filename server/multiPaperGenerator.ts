@@ -1,4 +1,5 @@
 import crypto from 'crypto';
+import { assessExtractedQuestion } from './questionQuality.ts';
 
 export interface QuestionItem {
   id: string;
@@ -97,9 +98,87 @@ export function normalizeText(text: string): string {
 }
 
 /**
- * Cryptographically secure Fisher-Yates shuffle
+ * Map a detected-paper pattern section onto the shape the blueprint branch of
+ * `compilePaperPayloadForExam` consumes.
+ *
+ * Pattern analysis (server/ai.ts `analyzeConsolidatedExamPattern`) emits sections
+ * shaped `{ name, type, marks, questionCount, attemptRules }`, while blueprint
+ * sections are consumed as `{ totalQuestions, marksPerQuestion,
+ * questionsToAttempt, questionType, subject, difficulty }`. Every field name
+ * differs, so without this mapping `Number(section.totalQuestions || 0)` is 0
+ * and the section selects no questions at all - the generated paper comes out
+ * empty and ignores the uploaded paper's pattern.
  */
-export function cryptoShuffle<T>(array: T[]): T[] {
+export interface NormalizedBlueprintSection {
+  id: string;
+  name: string;
+  totalQuestions: number;
+  marksPerQuestion: number;
+  questionsToAttempt: number;
+  questionType: string;
+  subject?: string;
+  difficulty: string;
+  negativeMarks: number;
+  attemptRules?: string;
+}
+
+/** First whole number mentioned in a phrase like "Attempt any four of the following". */
+function firstIntegerIn(text: unknown): number | null {
+  const m = String(text ?? '').match(/\d+/);
+  return m ? Number(m[0]) : null;
+}
+
+export function normalizePatternSection(section: any): NormalizedBlueprintSection {
+  const s = section || {};
+  // Clamp: a negative or non-numeric count would otherwise reach slice(0, n).
+  const count = Math.max(0, Number(s.totalQuestions ?? s.questionCount ?? 0) || 0);
+
+  // Marks arrive either per-question or as a section total. Prefer the explicit
+  // per-question figure and only derive from the total when we must.
+  let marksPerQuestion = Number(s.marksPerQuestion ?? 0) || 0;
+  if (!marksPerQuestion && count > 0) {
+    const sectionTotal = Number(s.totalMarks ?? s.marks ?? 0) || 0;
+    if (sectionTotal > 0) marksPerQuestion = Math.max(1, Math.round(sectionTotal / count));
+  }
+
+  // "attemptRules" is prose. Take the first number it mentions; if it names none,
+  // assume every question in the section is attemptable.
+  let questionsToAttempt = Number(s.questionsToAttempt ?? 0) || 0;
+  if (!questionsToAttempt) {
+    questionsToAttempt = firstIntegerIn(s.attemptRules) ?? count;
+  }
+  if (count > 0 && questionsToAttempt > count) questionsToAttempt = count;
+
+  return {
+    id: String(s.id || `SEC-${String(s.name || 'SECTION').replace(/[^A-Z0-9]/gi, '').toUpperCase().slice(0, 12)}`),
+    name: String(s.name || 'Section'),
+    totalQuestions: count,
+    marksPerQuestion,
+    questionsToAttempt,
+    // The pattern calls it `type`; the generator calls it `questionType`.
+    questionType: s.questionType || s.type || 'MIXED',
+    // Deliberately NOT defaulted to exam.subject: the blueprint filter is an
+    // exact string comparison (`q.subject !== section.subject`), so filling this
+    // in would drop every question whose subject string differs by so much as
+    // punctuation. The eligible pool is already narrowed by exam subject
+    // upstream, so an absent subject here simply means "no extra filtering".
+    subject: s.subject || undefined,
+    // 'ANY' disables the difficulty filter, which is what an unqualified pattern means.
+    difficulty: s.difficulty || 'ANY',
+    negativeMarks: Number(s.negativeMarks ?? 0) || 0,
+    attemptRules: s.attemptRules,
+  };
+}
+
+/** Normalize every section of a detected pattern. */
+export function normalizePatternSections(sections: unknown): NormalizedBlueprintSection[] {
+  if (!Array.isArray(sections)) return [];
+  return sections.map((section) => normalizePatternSection(section));
+}
+
+/**
+ * Cryptographically secure Fisher-Yates shuffle
+ */export function cryptoShuffle<T>(array: T[]): T[] {
   const result = [...array];
   for (let i = result.length - 1; i > 0; i--) {
     const j = crypto.randomInt(0, i + 1);
@@ -595,9 +674,24 @@ export function generateUniversityBoardPaperSets(
   const theoryPool: QuestionItem[] = [];
 
   const seenHashes = new Set<string>();
+  let rejectedByQuality = 0;
   draftPool.forEach(q => {
     const textHash = sha256(normalizeText(q.content_text));
     if (seenHashes.has(textHash)) return;
+
+    // Defence in depth for rows already sitting in the bank. The ingest gate
+    // stops new contamination, but legacy rows - page furniture, log lines,
+    // and content filed under the wrong subject - are still stored and would
+    // otherwise be drawn onto a paper. Never print them.
+    const verdict = assessExtractedQuestion({ content_text: q.content_text, subject: q.subject });
+    if (!verdict.ok) {
+      rejectedByQuality++;
+      console.warn(
+        `[BoardPaper] excluding question ${q.id} (${verdict.code}): ${verdict.reason}`
+      );
+      return;
+    }
+
     seenHashes.add(textHash);
 
     const { options } = parseAndNormalizeOptions(q.options_json, q.correct_answer);
@@ -607,6 +701,13 @@ export function generateUniversityBoardPaperSets(
       theoryPool.push(q);
     }
   });
+
+  if (rejectedByQuality > 0) {
+    console.warn(
+      `[BoardPaper] ${customPaperCode}: excluded ${rejectedByQuality} stored question(s) that failed the quality gate. ` +
+      `These should be reviewed and quarantined in the question bank.`
+    );
+  }
 
   const sLower = (subjectName || '').toLowerCase();
 
@@ -707,36 +808,73 @@ export function generateUniversityBoardPaperSets(
           'Explain Write-Ahead Logging (WAL) and ARIES recovery algorithm in database systems.',
         ],
       };
-    } else {
+    } else if (sLower.includes('software testing') || sLower.includes('testing') || sLower.includes('quality')) {
       return {
         q2: [
-          'Distinguish between Raster Scan display and Random Scan display systems with architecture diagrams.',
-          'Explain 2D Rotation transformation with homogenous coordinate matrix representations.',
-          'Explain any four Computer Graphics real-world industrial and simulation applications.',
-          'Scale the polygon with coordinates P(2,5), Q(7,10), C(10,2) by 2 units in both x and y directions.',
-          'Explain Run Length Encoding (RLE) and Huffman Coding in image data compression.',
+          'Define software quality. Explain the core components of quality and the cost of quality.',
+          'Differentiate between Verification and Validation with suitable examples.',
+          'Explain the V-Model and Waterfall SDLC models with respect to testing activities.',
+          'Describe the Software Testing Life Cycle (STLC) phases in detail.',
+          'Explain the roles and responsibilities of a test manager and a test analyst.',
         ],
         q3: [
-          'Consider a line from (0,0) to (5,6). Use DDA Line Drawing algorithm to rasterize this line.',
-          'Write Bresenham’s Circle generation algorithm with mathematical decision parameter derivation.',
+          'Explain the different levels of testing: Unit, Integration, System, and Acceptance testing.',
+          'Differentiate between Black-Box and White-Box testing techniques with examples.',
         ],
         q4: [
-          'Explain Beam Penetration Technique in color CRT monitors with advantages and limitations.',
-          'Explain Shadow Mask Technique in color CRT monitors with delta-electron gun alignment.',
+          'Explain the concept of Regression Testing and when it should be performed.',
+          'Write a short note on Test Plan and Test Strategy documentation.',
         ],
         q5: [
-          'Write a short technical note on Segmented Display File structure and display processors.',
-          'Explain 2D Viewing Transformation Pipeline from World Coordinates to Viewport Coordinates.',
-          'Explain mathematical properties of Bezier Curves and convex hull control polygon points.',
-          'Explain Z-Buffer depth-buffer algorithm for hidden surface removal and visibility test.',
-          'Explain Painter’s Algorithm (Depth Sort) for hidden surface elimination.',
+          'Explain Equivalence Class Partitioning and Boundary Value Analysis with examples.',
+          'Explain Decision Table based testing and Cause-Effect graphing techniques.',
+          'Explain Statement, Branch, and Path coverage metrics with suitable code examples.',
+          'Explain the defect life cycle with a neat diagram.',
+          'Compare Error Guessing and Exploratory Testing approaches.',
         ],
         q6: [
-          'Explain Warnock Area Subdivision Algorithm for visible surface determination.',
-          'What is Antialiasing? Explain supersampling, filtering, and pixel phasing antialiasing techniques.',
+          'Explain ISO 9001 and CMM/CMMI quality standards and their relevance to software testing.',
+          'Explain the Six Sigma methodology and its characteristics in quality management.',
         ],
         q7: [
-          'Explain Cohen-Sutherland Line Clipping algorithm with 4-bit outcodes and intersection calculations.',
+          'Explain Automation Testing frameworks (Data-Driven, Keyword-Driven, and Hybrid) with their benefits and limitations.',
+        ],
+      };
+    } else {
+      // Subject-neutral fallback. This branch MUST NOT hardcode a domain: it
+      // previously returned Computer Graphics questions for every subject it
+      // did not recognise, which is how a Software Testing paper came to ask
+      // about Bezier curves and hidden-surface removal. Wording keyed to the
+      // real subject name is vague but honest; invented topics are neither.
+      return {
+        q2: [
+          `Explain the fundamental concepts of ${subjectName} with suitable examples.`,
+          `Describe the key principles and terminology used in ${subjectName}.`,
+          `Discuss the practical applications of ${subjectName} in industry.`,
+          `Explain the standard processes and methodologies followed in ${subjectName}.`,
+          `Describe the tools and techniques commonly used in ${subjectName}.`,
+        ],
+        q3: [
+          `Explain in detail the core theories underlying ${subjectName}, with examples.`,
+          `Compare and contrast two major approaches used in ${subjectName}.`,
+        ],
+        q4: [
+          `Write a short technical note on an important topic in ${subjectName}.`,
+          `Explain a commonly used technique in ${subjectName} with a diagram.`,
+        ],
+        q5: [
+          `Explain a real-world problem in ${subjectName} and describe a systematic solution.`,
+          `Describe the steps involved in analysing and solving a typical ${subjectName} problem.`,
+          `Explain the importance of standards and best practices in ${subjectName}.`,
+          `Discuss common pitfalls in ${subjectName} and how to avoid them.`,
+          `Explain how quality is measured and assured in ${subjectName}.`,
+        ],
+        q6: [
+          `Explain a significant framework or standard relevant to ${subjectName}.`,
+          `Describe a case study illustrating effective practice in ${subjectName}.`,
+        ],
+        q7: [
+          `Write a detailed technical note on an advanced topic in ${subjectName}.`,
         ],
       };
     }
@@ -749,13 +887,18 @@ export function generateUniversityBoardPaperSets(
     const setLabel = setNames[s] || `Set ${String.fromCharCode(80 + s)}`;
     const versionCode = `UNIV-${customPaperCode}-${setLabel.replace(/\s+/g, '')}-${Date.now().toString().slice(-4)}`;
 
-    // Permute MCQs for Q.1 (14 MCQs)
+    // Permute MCQs for Q.1 (target 14).
+    // Never cycle to reach the target: re-adding an already-selected question
+    // prints the same MCQ twice on one paper. A short paper is correct; a
+    // duplicated one is not.
+    const MCQ_TARGET = 14;
     const shuffledMcqs = cryptoShuffle(mcqPool);
-    const selectedMcqs = shuffledMcqs.slice(0, 14);
-
-    // If candidate pool has fewer than 14 MCQs, cycle/fallback
-    while (selectedMcqs.length < 14 && mcqPool.length > 0) {
-      selectedMcqs.push(mcqPool[selectedMcqs.length % mcqPool.length]);
+    const selectedMcqs = shuffledMcqs.slice(0, MCQ_TARGET);
+    if (selectedMcqs.length < MCQ_TARGET) {
+      console.warn(
+        `[BoardPaper] ${customPaperCode} ${setLabel}: only ${selectedMcqs.length}/${MCQ_TARGET} MCQs in the pool; ` +
+        `emitting a short Q.1 rather than repeating questions.`
+      );
     }
 
     const formattedMcqs = selectedMcqs.map((q, idx) => {
