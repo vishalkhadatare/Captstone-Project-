@@ -46,6 +46,7 @@ import { api } from '../../api';
 import { User, Examination, DraftPaper, UniversityDraftQuestion, IngestDraftPapersResponse } from '../../types';
 import { QuestionPaperPdfModal } from './QuestionPaperPdfModal';
 import { LaTeXText } from '../common/LaTeXText';
+import { FreeLatexToolchainPanel } from '../FreeLatexToolchainPanel';
 
 interface UniversityFormatGeneratorProps {
   currentUser: User | null;
@@ -842,6 +843,9 @@ export const UniversityFormatGenerator: React.FC<UniversityFormatGeneratorProps>
           </button>
         </div>
       </div>
+
+      {/* Free AI + LaTeX toolchain: status, the researched editors, and a real self-test. */}
+      <FreeLatexToolchainPanel />
 
       {/* Action Notification */}
       {actionMessage && (

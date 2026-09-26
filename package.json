@@ -3,14 +3,24 @@
   "private": true,
   "version": "0.0.0",
   "type": "module",
+  "main": "electron/main.cjs",
   "scripts": {
     "dev": "tsx watch server.ts",
+    "desktop": "electron .",
+    "desktop:smoke": "electron . --smoke",
+    "desktop:install": "node node_modules/electron/install.js",
+    "test:popup": "electron tests/manual/popup-sandbox-probe.cjs",
+    "test:gesture": "electron tests/manual/desktop-pane-gesture-probe.cjs",
+    "test:signin": "electron tests/manual/provider-pane-probe.cjs",
+    "test:google": "electron tests/manual/provider-pane-probe.cjs",
+    "test:policy": "node --test electron/panePolicy.test.cjs",
+    "test:generated": "node --test --test-reporter=dot electron/panePolicy.generated.test.cjs && node --import tsx --test --test-reporter=dot src/utils/authFlow.generated.test.ts",
     "build": "vite build && esbuild server.ts --bundle --platform=node --format=cjs --packages=external --sourcemap --outfile=dist/server.cjs",
     "start": "node dist/server.cjs",
     "preview": "vite preview",
     "clean": "rm -rf dist server.cjs",
     "lint": "tsc --noEmit",
-    "test": "node --import tsx --test server/deviceBinding.test.ts server/authority.test.ts server/authorityProctor.test.ts server/questionQuality.test.ts server/multiPaperGenerator.test.ts"
+    "test": "node --import tsx --test server/deviceBinding.test.ts server/authority.test.ts server/authorityProctor.test.ts server/questionQuality.test.ts server/multiPaperGenerator.test.ts server/patternPaperComposer.test.ts server/formatexPatternFidelity.test.ts server/freeAiLatexTools.test.ts server/browserConfig.test.ts server/browserStream.test.ts server/pdfFigureExtractor.test.ts server/latexFallbackPdf.test.ts src/utils/sourcePattern.test.ts src/utils/patternEnforcement.test.ts src/utils/prismAuth.test.ts src/utils/browserTabs.test.ts src/utils/browserInput.test.ts src/components/browser/browserGuards.test.ts src/utils/authFlow.test.ts src/utils/signInDiagnosis.test.ts src/utils/authFlow.generated.test.ts electron/panePolicy.test.cjs electron/panePolicy.generated.test.cjs electron/desktopLauncher.test.cjs electron/chromeIdentity.test.cjs electron/downloadPaths.test.cjs electron/hostKeys.test.cjs"
   },
   "dependencies": {
     "@google/genai": "^2.4.0",
@@ -57,6 +67,7 @@
     "@types/multer": "^2.2.0",
     "@types/node": "^22.14.0",
     "autoprefixer": "^10.4.21",
+    "electron": "^44.4.5",
     "esbuild": "^0.25.0",
     "tailwindcss": "^4.1.14",
     "tsx": "^4.21.0",

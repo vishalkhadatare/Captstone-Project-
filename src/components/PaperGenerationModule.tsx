@@ -27,11 +27,14 @@ import {
   FileText,
   Printer,
   Eye,
+  Globe,
 } from 'lucide-react';
 
+import { SimpleMultiPaperSynthesizer } from './SimpleMultiPaperSynthesizer';
 import { AiPdfPaperGenerator } from './AiPdfPaperGenerator';
 import { UniversityFormatGenerator } from './workspaces/UniversityFormatGenerator';
 import { QuestionPaperPdfModal } from './workspaces/QuestionPaperPdfModal';
+import { OpenAIPrismBrowserModal } from './OpenAIPrismBrowserModal';
 
 interface PaperGenProps {
   currentUser: User | null;
@@ -39,7 +42,8 @@ interface PaperGenProps {
 }
 
 export const PaperGenerationModule: React.FC<PaperGenProps> = ({ currentUser, onRefresh }) => {
-  const [activeTab, setActiveTab] = useState<'university_generator' | 'ai_pdf_generator' | 'vault_generation'>('university_generator');
+  const [activeTab, setActiveTab] = useState<'multi_synthesizer' | 'university_generator' | 'ai_pdf_generator' | 'vault_generation'>('multi_synthesizer');
+  const [showPrismBrowser, setShowPrismBrowser] = useState(false);
   const [exams, setExams] = useState<Examination[]>([]);
   const [questions, setQuestions] = useState<Question[]>([]);
   const [selectedExamId, setSelectedExamId] = useState<string>('');
@@ -330,48 +334,52 @@ export const PaperGenerationModule: React.FC<PaperGenProps> = ({ currentUser, on
       )}
 
       {/* Top Module Navigation Tabs */}
-      <div className="flex flex-wrap items-center gap-2 border-b border-slate-200 dark:border-slate-800 pb-3">
-        <button
-          type="button"
-          onClick={() => setActiveTab('university_generator')}
-          className={`px-4 py-2.5 rounded-xl text-xs font-bold flex items-center gap-2 transition-all cursor-pointer ${
-            activeTab === 'university_generator'
-              ? 'bg-rose-600 text-white shadow-md shadow-rose-900/30'
-              : 'bg-white dark:bg-slate-900 text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800 border border-slate-200 dark:border-slate-800'
-          }`}
-        >
-          <BookOpen className="w-4 h-4 text-rose-400" />
-          <span>🎓 University Format Generator</span>
-        </button>
+      <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-200 dark:border-slate-800 pb-3">
+        <div className="flex flex-wrap items-center gap-2">
+          <button
+            type="button"
+            onClick={() => setActiveTab('multi_synthesizer')}
+            className={`px-4 py-2.5 rounded-xl text-xs font-bold flex items-center gap-2 transition-all cursor-pointer ${
+              activeTab === 'multi_synthesizer'
+                ? 'bg-gradient-to-r from-emerald-600 to-indigo-600 text-white shadow-md shadow-indigo-900/30'
+                : 'bg-white dark:bg-slate-900 text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800 border border-slate-200 dark:border-slate-800'
+            }`}
+          >
+            <Sparkles className="w-4 h-4 text-amber-300" />
+            <span>✨ Multi-Paper AI Synthesizer</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => setActiveTab('vault_generation')}
+            className={`px-4 py-2.5 rounded-xl text-xs font-bold flex items-center gap-2 transition-all cursor-pointer ${
+              activeTab === 'vault_generation'
+                ? 'bg-indigo-600 text-white shadow-md shadow-indigo-900/30'
+                : 'bg-white dark:bg-slate-900 text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800 border border-slate-200 dark:border-slate-800'
+            }`}
+          >
+            <Lock className="w-4 h-4 text-indigo-400" />
+            <span>🏛 Cryptographic Vault</span>
+          </button>
+        </div>
 
         <button
           type="button"
-          onClick={() => setActiveTab('ai_pdf_generator')}
-          className={`px-4 py-2.5 rounded-xl text-xs font-bold flex items-center gap-2 transition-all cursor-pointer ${
-            activeTab === 'ai_pdf_generator'
-              ? 'bg-indigo-600 text-white shadow-md shadow-indigo-900/30'
-              : 'bg-white dark:bg-slate-900 text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800 border border-slate-200 dark:border-slate-800'
-          }`}
+          onClick={() => setShowPrismBrowser(true)}
+          className="px-4 py-2.5 rounded-xl text-xs font-bold flex items-center gap-2 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white shadow-md shadow-emerald-950/40 border border-emerald-400/30 transition-all cursor-pointer shrink-0"
+          title="Open Prism, the LaTeX editor, in this screen"
         >
-          <Sparkles className="w-4 h-4 text-amber-400" />
-          <span>✨ AI Paper Generator from PDF</span>
-        </button>
-
-        <button
-          type="button"
-          onClick={() => setActiveTab('vault_generation')}
-          className={`px-4 py-2.5 rounded-xl text-xs font-bold flex items-center gap-2 transition-all cursor-pointer ${
-            activeTab === 'vault_generation'
-              ? 'bg-indigo-600 text-white shadow-md shadow-indigo-900/30'
-              : 'bg-white dark:bg-slate-900 text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800 border border-slate-200 dark:border-slate-800'
-          }`}
-        >
-          <Lock className="w-4 h-4 text-indigo-400" />
-          <span>🏛 Cryptographic Vault & Shamir 3-of-5 Custody</span>
+          <Globe className="w-4 h-4 text-emerald-200" />
+          <span>🌐 Prism</span>
         </button>
       </div>
 
-      {activeTab === 'university_generator' ? (
+      {activeTab === 'multi_synthesizer' ? (
+        <SimpleMultiPaperSynthesizer
+          currentUser={currentUser}
+          onRefresh={onRefresh}
+        />
+      ) : activeTab === 'university_generator' ? (
         <UniversityFormatGenerator
           currentUser={currentUser}
           onRefresh={onRefresh}
@@ -1057,6 +1065,13 @@ export const PaperGenerationModule: React.FC<PaperGenProps> = ({ currentUser, on
           }}
         />
       )}
+
+      {/* OpenAI Prism & LaTeX In-Project Browser Modal */}
+      <OpenAIPrismBrowserModal
+        isOpen={showPrismBrowser}
+        onClose={() => setShowPrismBrowser(false)}
+        initialUrl="https://prism.openai.com/"
+      />
     </div>
   );
 };

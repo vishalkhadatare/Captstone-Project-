@@ -33,19 +33,59 @@ import {
   runNaviDcOcr,
   callGroqChat,
 } from './server/ai.ts';
-import { getProviderStatus, ollamaStream, OLLAMA_FAST_MODEL, type ChatMessage } from './server/aiProviders.ts';
+import { getProviderStatus, ollamaStream, smartStream, OLLAMA_FAST_MODEL, type ChatMessage } from './server/aiProviders.ts';
 import { assessExtractedQuestion } from './server/questionQuality.ts';
 import {
   getFormatexHealth,
   getLatexOnlineHealth,
   getLocalClsiHealth,
   getTexApiHealth,
+  getTexliveNetHealth,
   generateUniversityLatexDocument,
   compileLatexWithFormatex,
   compileWithLatexOnline,
   compileLatexUniversal,
   generateAndUploadFormatexPdf,
+  sanitizeLatexSource,
+  compileValidatedLatexWithSelfHealing,
+  isolateAndFormatLatexTablesAndDiagrams,
+  type LatexCompileResource,
 } from './server/formatex.ts';
+import {
+  getFreeAiLatexStatus,
+  runFreeAiLatexSelfTest,
+  probeAiLatexWebTools,
+  FREE_AI_LATEX_EDITORS,
+  FREE_AI_LATEX_WEB_TOOLS,
+  FREE_COMPILE_ENGINES,
+  EXCLUDED_LATEX_EDITORS,
+} from './server/freeAiLatexTools.ts';
+import { buildBrowserConfig } from './server/browserConfig.ts';
+import {
+  BrowserStreamHub,
+  DEFAULT_VIEWPORT,
+  describeHostExit,
+  hostChildEnv,
+  hostTokenMatches,
+  normalizeCommand,
+  normalizeInputEvent,
+  planHostSpawn,
+} from './server/browserStream.ts';
+import { spawn } from 'node:child_process';
+import {
+  generateSynthesizedPaperPdf,
+  parsePaperTextToStructure,
+  stripPlaceholderQuestions,
+  type SynthesizedPaperData,
+  type PaperFigureAsset,
+} from './server/synthesizedPaperPdfGenerator.ts';
+import {
+  generatePdfWithLatex,
+  latexFallbackHealth,
+  type LatexBuildResult,
+} from './server/latexFallbackPdf.ts';
+import { extractPdfTextWithOcr } from './server/ocrPdfHelper.ts';
+import { extractSourceFigures, readPublishedFigureResources } from './server/pdfFigureExtractor.ts';
 import {
   evaluateOrganizationVerification,
   getOrganizationVerificationSource,
@@ -108,6 +148,12 @@ import {
   PaperBlueprintConfig,
   QuestionItem,
 } from './server/multiPaperGenerator.ts';
+import {
+  deriveMainQuestionFrames,
+  composePatternPaperDocument,
+  type ComposerQuestion,
+  type PatternSectionInput,
+} from './server/patternPaperComposer.ts';
 import { uploadDraftPapersMulter, handleUploadUniversityDrafts } from './server/universityIngestion.ts';
 import { handleUniversityRagPipeline } from './server/universityRagPipeline.ts';
 import { handleGenerateFinalUniversityPaper, handleGetUniversityAuditLogs, handleDownloadUniversityPaper } from './server/universityFinalPipeline.ts';
@@ -142,7 +188,14 @@ declare global {
 
 async function startServer() {
   const app = express();
-  const PORT = 3000;
+  /**
+   * Overridable because a deployed instance is not the only instance. The port
+   * was fixed at 3000, and 3000 is exactly where the dev server already is - so
+   * serving the built app (or tunnelling it through ngrok) meant stopping the
+   * very session you were working in. `PORT=3100 npm start` runs the production
+   * build beside the dev server instead.
+   */
+  const PORT = Number.parseInt(process.env.PORT || '', 10) || 3000;
 
   app.use(express.json({ limit: '50mb' }));
   app.use(express.urlencoded({ extended: true, limit: '50mb' }));
@@ -349,6 +402,21 @@ async function startServer() {
         return res.status(403).json({ error: 'This token is not authorized for device binding.' });
       }
       req.user = decoded as AuthenticatedUser;
+      next();
+    });
+  };
+
+  // Optional authentication middleware for public/utility endpoints
+  const authenticateOptional = (req: Request, res: Response, next: NextFunction) => {
+    const authHeader = req.headers['authorization'];
+    const token = authHeader && authHeader.split(' ')[1];
+    if (!token) {
+      return next();
+    }
+    jwt.verify(token, JWT_SECRET, (err: any, decoded: any) => {
+      if (!err && decoded) {
+        req.user = decoded as AuthenticatedUser;
+      }
       next();
     });
   };
@@ -4084,7 +4152,7 @@ async function startServer() {
   });
 
   // Extract Raw Text and Page Metadata from Uploaded PDF / Document
-  app.post('/api/pdf/extract-text', authenticateToken, async (req: Request, res: Response) => {
+  app.post('/api/pdf/extract-text', authenticateOptional, async (req: Request, res: Response) => {
     try {
       const { file_data, file_name, raw_text } = req.body;
       if (raw_text && raw_text.trim().length > 0) {
@@ -4107,16 +4175,16 @@ async function startServer() {
       const isPdf = (file_name || '').toLowerCase().endsWith('.pdf') || fileBuffer.slice(0, 5).toString() === '%PDF-';
 
       if (isPdf) {
-        const parsed = await pdfParse(fileBuffer);
-        const text = (parsed.text || '').replace(/\r\n/g, '\n');
+        const ocrResult = await extractPdfTextWithOcr(fileBuffer, file_name || 'uploaded_document.pdf');
         return res.json({
           success: true,
-          text: text.trim(),
-          pageCount: parsed.numpages || 1,
-          info: parsed.info || {},
+          text: ocrResult.text,
+          pageCount: ocrResult.pageCount,
+          isOcr: ocrResult.isOcr,
+          ocrMethod: ocrResult.ocrMethod,
           fileName: file_name || 'uploaded_document.pdf',
-          charCount: text.length,
-          wordCount: text.trim().split(/\s+/).filter(Boolean).length,
+          charCount: ocrResult.charCount,
+          wordCount: ocrResult.wordCount,
         });
       } else {
         const text = fileBuffer.toString('utf-8');
@@ -4164,19 +4232,16 @@ async function startServer() {
   // returns it as JSON — used by callers that need the complete document, e.g. the
   // paper generator. It no longer hits Node's 300s fetch ceiling because ollamaStream
   // requests a streaming response internally.
-  app.post('/api/ai/ollama-chat', authenticateToken, async (req: Request, res: Response) => {
+  app.post('/api/ai/ollama-chat', authenticateOptional, async (req: Request, res: Response) => {
     try {
       const { messages, model, temperature, plainText } = req.body;
-      const text = await ollamaStream((messages || []) as ChatMessage[], {
+      const text = await smartStream((messages || []) as ChatMessage[], {
         model,
         temperature,
-        // Existing callers rely on structured JSON output, so JSON stays the default.
-        // Free-form chat opts out with plainText: LaTeX is full of backslashes and
-        // newlines, and asking a small local model to embed that inside a JSON string
-        // reliably produces invalid JSON.
         json: !plainText,
       });
       return res.json({ success: true, message: { content: text }, text });
+
     } catch (err: any) {
       console.error('Ollama chat error:', err);
       return res.status(500).json({ error: err?.message || 'Ollama chat failed.' });
@@ -4187,7 +4252,7 @@ async function startServer() {
   // screen instead of leaving a blank spinner for the minutes a full document takes to
   // generate on CPU. Emits Server-Sent Events: {"delta":"..."} per token, then
   // {"done":true}, or {"error":"..."} on failure.
-  app.post('/api/ai/ollama-chat-stream', authenticateToken, async (req: Request, res: Response) => {
+  app.post('/api/ai/ollama-chat-stream', authenticateOptional, async (req: Request, res: Response) => {
     const { messages, model, temperature, plainText } = req.body || {};
 
     res.setHeader('Content-Type', 'text/event-stream');
@@ -4197,9 +4262,12 @@ async function startServer() {
     res.flushHeaders();
 
     const controller = new AbortController();
-    // If the browser closes the tab or the modal, stop the CPU work rather than letting
-    // it generate for minutes into a socket nobody is reading.
-    req.on('close', () => controller.abort());
+    // If client disconnects before stream finishes, abort upstream call
+    res.on('close', () => {
+      if (!res.writableEnded) {
+        controller.abort();
+      }
+    });
 
     let closed = false;
     const send = (payload: unknown) => {
@@ -4212,11 +4280,17 @@ async function startServer() {
     };
 
     try {
-      const text = await ollamaStream(
+      const text = await smartStream(
         (messages || []) as ChatMessage[],
         // Interactive chat defaults to the fast model; the caller can still name another.
         { model: model || OLLAMA_FAST_MODEL, temperature, json: !plainText },
-        { onToken: delta => send({ delta }), signal: controller.signal }
+        {
+          onToken: delta => send({ delta }),
+          // A provider that dies mid-stream has already sent partial tokens; the
+          // browser must bin them or the fallback's reply gets appended to them.
+          onReset: () => send({ reset: true }),
+          signal: controller.signal,
+        }
       );
       send({ done: true, text });
     } catch (err: any) {
@@ -4811,6 +4885,361 @@ async function startServer() {
     return res.json(await getTexApiHealth());
   });
 
+  // Free TeXLive.net LaTeX Compiler Health (no key, no quota)
+  app.get('/api/texlive/health', authenticateToken, async (_req: Request, res: Response) => {
+    return res.json(await getTexliveNetHealth());
+  });
+
+  // Free AI LaTeX toolchains: which free halves of the pipeline are usable now.
+  app.get('/api/latex-tools/status', authenticateToken, async (_req: Request, res: Response) => {
+    try {
+      return res.json(await getFreeAiLatexStatus());
+    } catch (err: any) {
+      return res.status(500).json({ error: err?.message || 'Failed to probe the free LaTeX toolchain.' });
+    }
+  });
+
+  // The researched catalogue itself - free + AI-integrated editors, the free
+  // compilers behind them, and the near misses with the reason each one fails.
+  app.get('/api/latex-tools/catalogue', authenticateOptional, (_req: Request, res: Response) => {
+    return res.json({
+      editors: FREE_AI_LATEX_EDITORS,
+      engines: FREE_COMPILE_ENGINES,
+      excluded: EXCLUDED_LATEX_EDITORS,
+      // Key-free AI that is safe to load in the paper-generation browser. These
+      // are live tools, not repositories: a github.com link in the pane would
+      // show source code instead of an editor.
+      webTools: FREE_AI_LATEX_WEB_TOOLS,
+    });
+  });
+
+  // The embedded browser's configuration, assembled here so every client agrees
+  // on what may be loaded, which search engine actually works inside a frame,
+  // which hosts refuse framing, and what is awake right now. Readable without a
+  // token so the panel is usable on the paper page before sign-in.
+  app.get('/api/browser/config', authenticateOptional, async (_req: Request, res: Response) => {
+    try {
+      return res.json(await buildBrowserConfig());
+    } catch (err: any) {
+      return res.status(500).json({ error: err?.message || 'Failed to build the browser configuration.' });
+    }
+  });
+
+  // Live browser state, pushed rather than polled: the probe reaches the open
+  // internet, so one stream serves every open tab and the status dots cannot
+  // drift out of step with each other.
+  //
+  // The frame carries the ASSEMBLED bookmarks, not raw probe rows, so the rule
+  // for what "awake" means lives here once instead of in every renderer.
+  app.get('/api/browser/stream', authenticateOptional, async (_req: Request, res: Response) => {
+    res.setHeader('Content-Type', 'text/event-stream');
+    res.setHeader('Cache-Control', 'no-cache, no-transform');
+    res.setHeader('Connection', 'keep-alive');
+    res.setHeader('X-Accel-Buffering', 'no');
+    res.flushHeaders();
+
+    let closed = false;
+    const send = (payload: unknown) => {
+      if (closed) return;
+      try {
+        res.write(`data: ${JSON.stringify(payload)}\n\n`);
+      } catch {
+        closed = true;
+      }
+    };
+
+    const push = async () => {
+      try {
+        const config = await buildBrowserConfig();
+        send({
+          type: 'browser-status',
+          at: config.generatedAt,
+          bookmarks: config.bookmarks,
+          tools: config.toolStatus,
+          usableNow: config.usableToolsNow,
+          notes: config.notes,
+        });
+      } catch (err: any) {
+        send({ type: 'error', at: new Date().toISOString(), error: err?.message || 'probe failed' });
+      }
+    };
+
+    await push();
+    const timer = setInterval(() => {
+      void push();
+    }, 45000);
+
+    res.on('close', () => {
+      closed = true;
+      clearInterval(timer);
+      if (!res.writableEnded) res.end();
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // The streamed browser: a REAL Chromium, so browser mode can sign in
+  // -------------------------------------------------------------------------
+  //
+  // The panel in browser mode is an `<iframe>` in an ordinary tab, and a frame
+  // can never host a sign-in: `auth.openai.com` answers `frame-ancestors 'self'`,
+  // `chatgpt.com` answers `X-Frame-Options: SAMEORIGIN`, `accounts.google.com`
+  // answers `DENY`, and Chrome partitions the third-party cookies such a login
+  // would need. None of that is fixable from a renderer.
+  //
+  // So browser mode stops trying to BE the page and becomes a viewport onto one
+  // running somewhere with no framing rules - an offscreen Electron Chromium,
+  // which is an ordinary top-level browsing context. Its rendered frames come up
+  // as POSTs, the panel's steering goes down as SSE, and both use the transport
+  // this server already uses (so no new dependency appears in package.json).
+  // A pinned token makes the documented manual launch possible:
+  //   ZEROLEAK_BROWSER_HOST_TOKEN=... npm run dev
+  //   ZEROLEAK_HOST_TOKEN=... electron electron/browserHost.cjs
+  // Without it the token is random per boot, which is the safer default.
+  const browserStream = new BrowserStreamHub(undefined, process.env.ZEROLEAK_BROWSER_HOST_TOKEN);
+  let browserHostChild: ReturnType<typeof spawn> | null = null;
+
+  const browserHostRunning = () => !!browserHostChild && browserHostChild.exitCode === null;
+
+  /**
+   * Start the browser host, or explain why it cannot be started.
+   *
+   * A missing Electron install is a normal state, not an exception: the panel is
+   * told in words so it can offer the fix instead of showing a dead canvas.
+   */
+  const spawnBrowserHost = () => {
+    // "Already running" has to include a host WE did not spawn. A host started by
+    // hand (the documented path) holds the session, so starting a second one
+    // would only get its reports refused until it gave up.
+    if (browserHostRunning() || browserStream.isReady()) {
+      return { ok: true, reason: 'A streamed browser is already running.', status: browserStream.status() };
+    }
+    const plan = planHostSpawn({
+      root: process.cwd(),
+      exists: (candidate: string) => fs.existsSync(candidate),
+      readFile: (candidate: string) => fs.readFileSync(candidate, 'utf8'),
+      serverPort: PORT,
+      hostToken: browserStream.getToken(),
+      viewport: DEFAULT_VIEWPORT,
+      // Not 12. The panel is a picture of a text editor, and at 12fps typing
+      // arrives a frame interval after the key - which is what "Prism is lagging"
+      // is. The host sends a frame the moment one is painted, so this is a
+      // ceiling on the pump, not a schedule it waits for.
+      fps: 24,
+    });
+    if (!plan.ok || !plan.plan) {
+      return { ok: false, reason: plan.reason, status: browserStream.markError(plan.reason) };
+    }
+
+    browserStream.markStarting();
+    let child: ReturnType<typeof spawn>;
+    try {
+      child = spawn(plan.plan.command, plan.plan.args, {
+        env: hostChildEnv(process.env, plan.plan.env),
+        stdio: ['ignore', 'pipe', 'pipe'],
+        windowsHide: true,
+      });
+    } catch (err: any) {
+      const reason = `The streamed browser could not be started: ${err?.message || 'unknown error'}`;
+      return { ok: false, reason, status: browserStream.markError(reason) };
+    }
+
+    browserHostChild = child;
+    const relay = (chunk: unknown) => {
+      const text = String(chunk).trimEnd();
+      if (text) console.log(text);
+    };
+    child.stdout?.on('data', relay);
+    child.stderr?.on('data', relay);
+    child.on('error', (err: Error) => {
+      browserHostChild = null;
+      browserStream.markError(`The streamed browser failed to start: ${err.message}`);
+    });
+    child.on('exit', (code: number | null) => {
+      browserHostChild = null;
+      browserStream.markStopped(describeHostExit(code));
+    });
+    return { ok: true, reason: 'Starting a real browser to stream into the panel.', status: browserStream.status() };
+  };
+
+  // A host that goes quiet is treated as gone, so the panel offers to restart it
+  // instead of waiting forever on a canvas that will never update.
+  const hostSweeper = setInterval(() => browserStream.sweep(), 5000);
+  if (typeof hostSweeper.unref === 'function') hostSweeper.unref();
+
+  // Is a streamed browser available, and what is it showing? Readable without a
+  // token so the panel can say "not running" before sign-in rather than after.
+  app.get('/api/browser/host/status', authenticateOptional, (_req: Request, res: Response) => {
+    // `running` means "a host is alive", not "we are its parent": a browser
+    // launched by hand is just as real, and the panel must not offer to start a
+    // second one over the top of it.
+    return res.json({ status: browserStream.status(), running: browserHostRunning() || browserStream.isReady() });
+  });
+
+  app.post('/api/browser/host/start', authenticateToken, (_req: Request, res: Response) => {
+    const result = spawnBrowserHost();
+    return res.status(result.ok ? 202 : 503).json(result);
+  });
+
+  app.post('/api/browser/host/stop', authenticateToken, (_req: Request, res: Response) => {
+    if (browserHostChild) {
+      try {
+        browserHostChild.kill();
+      } catch {
+        /* already gone */
+      }
+      browserHostChild = null;
+      return res.json({ status: browserStream.markStopped('The streamed browser was closed by request.') });
+    }
+    // A host we did not spawn cannot be killed from here, and pretending to stop
+    // it would be a lie the next report undoes a second later.
+    return res.status(409).json({
+      error: browserStream.isReady()
+        ? 'This browser was started outside the app, so close its window to stop it.'
+        : 'No streamed browser is running.',
+      status: browserStream.status(),
+    });
+  });
+
+  // The host's own channel. Authenticated by the token minted at spawn time,
+  // because a local browser process has no user session to present - and NOT by
+  // being on localhost, which any process on this machine shares.
+  app.post('/api/browser/host/report', (req: Request, res: Response) => {
+    if (!hostTokenMatches(browserStream.getToken(), req.headers['x-zeroleak-host'])) {
+      return res.status(403).json({ error: 'Invalid browser host token.' });
+    }
+    const result = browserStream.reportHost(req.body ?? {});
+    return res.status(result.accepted ? 200 : 409).json(result);
+  });
+
+  app.get('/api/browser/host/commands', (req: Request, res: Response) => {
+    if (!hostTokenMatches(browserStream.getToken(), req.headers['x-zeroleak-host'])) {
+      return res.status(403).json({ error: 'Invalid browser host token.' });
+    }
+    res.setHeader('Content-Type', 'text/event-stream');
+    res.setHeader('Cache-Control', 'no-cache, no-transform');
+    res.setHeader('Connection', 'keep-alive');
+    res.setHeader('X-Accel-Buffering', 'no');
+    res.flushHeaders();
+
+    let closed = false;
+    const write = (chunk: string) => {
+      if (closed) return;
+      try {
+        res.write(chunk);
+      } catch {
+        closed = true;
+      }
+    };
+
+    // Anything queued before the host connected is delivered immediately: a
+    // command typed while it was still starting should not be lost.
+    const flush = () => {
+      const commands = browserStream.drainCommands();
+      if (commands.length) write(`data: ${JSON.stringify({ commands })}\n\n`);
+    };
+    flush();
+    // The host reports the instant it connects rather than up to a heartbeat
+    // later, so the panel learns the real page's URL immediately. A ping is the
+    // one command that is safe to queue for a host that has not spoken yet.
+    browserStream.pushCommand({ type: 'ping' });
+    // Polled rather than evented: commands are rare next to frames, and this
+    // keeps one queue authoritative instead of a queue plus a notification path
+    // that can disagree with it.
+    const pump = setInterval(flush, 40);
+    const beat = setInterval(() => write(': keep-alive\n\n'), 15000);
+
+    res.on('close', () => {
+      closed = true;
+      clearInterval(pump);
+      clearInterval(beat);
+      if (!res.writableEnded) res.end();
+    });
+  });
+
+  // The panel's view of the streamed browser: state plus frames. A frame is
+  // dropped rather than buffered when the socket is behind, because a backlog
+  // shows the past and a skipped frame shows the present.
+  app.get('/api/browser/live', authenticateOptional, (_req: Request, res: Response) => {
+    res.setHeader('Content-Type', 'text/event-stream');
+    res.setHeader('Cache-Control', 'no-cache, no-transform');
+    res.setHeader('Connection', 'keep-alive');
+    res.setHeader('X-Accel-Buffering', 'no');
+    res.flushHeaders();
+
+    let closed = false;
+    const write = (payload: unknown) => {
+      if (closed) return;
+      // Backpressure, with no unbounded queue behind it: at a couple of dozen
+      // JPEG frames a second this only trips on a genuinely stuck socket.
+      if (res.writableLength > 4_000_000) return;
+      try {
+        res.write(`data: ${JSON.stringify(payload)}\n\n`);
+      } catch {
+        closed = true;
+      }
+    };
+
+    write({ type: 'status', status: browserStream.status() });
+    const current = browserStream.latestFrame();
+    if (current) write({ type: 'frame', frame: current });
+
+    const unsubscribe = browserStream.subscribe((event) => {
+      if (event.type === 'frame') write({ type: 'frame', frame: event.frame });
+      else write({ type: 'status', status: event.status });
+    });
+    browserStream.addViewer();
+
+    res.on('close', () => {
+      closed = true;
+      unsubscribe();
+      browserStream.removeViewer();
+      if (!res.writableEnded) res.end();
+    });
+  });
+
+  // Steering the streamed browser. Authenticated on purpose: this drives a
+  // browser that may be signed in to the user's own accounts, so an unauthenticated
+  // caller must not be able to type into it.
+  app.post('/api/browser/command', authenticateToken, (req: Request, res: Response) => {
+    const normalized = normalizeCommand(req.body, browserStream.status().viewport);
+    if (normalized.ok) {
+      const pushed = browserStream.pushCommand(normalized.command);
+      return res.status(pushed.ok ? 202 : 409).json(pushed);
+    }
+    return res.status(400).json({ error: normalized.reason });
+  });
+
+  app.post('/api/browser/input', authenticateToken, (req: Request, res: Response) => {
+    const normalized = normalizeInputEvent(req.body, browserStream.status().viewport);
+    if (normalized.ok) {
+      const pushed = browserStream.pushCommand({ type: 'input', event: normalized.event });
+      return res.status(pushed.ok ? 202 : 409).json(pushed);
+    }
+    return res.status(400).json({ error: normalized.reason });
+  });
+
+  // Are the browser bookmarks awake right now, and may they be framed? A sleeping
+  // Hugging Face Space answers 503, so the pane can say "waking up" instead of
+  // showing an empty frame with no explanation.
+  app.get('/api/latex-tools/web-tools', authenticateOptional, async (_req: Request, res: Response) => {
+    try {
+      return res.json(await probeAiLatexWebTools());
+    } catch (err: any) {
+      return res.status(500).json({ error: err?.message || 'Failed to probe the free AI LaTeX web tools.' });
+    }
+  });
+
+  // Prove the AI + LaTeX pipeline actually works: compile with every free engine,
+  // ask every configured AI provider a one-line question, then have a model write
+  // LaTeX and a free engine render it. POST because it spends real requests.
+  app.post('/api/latex-tools/selftest', authenticateToken, async (_req: Request, res: Response) => {
+    try {
+      return res.json(await runFreeAiLatexSelfTest());
+    } catch (err: any) {
+      return res.status(500).json({ ok: false, error: err?.message || 'The AI + LaTeX self-test failed to run.' });
+    }
+  });
+
   // Retrieve Formatted LaTeX Source for Examination
   app.get('/api/examinations/:id/formatex-latex', authenticateToken, async (req: Request, res: Response) => {
     try {
@@ -4896,6 +5325,704 @@ async function startServer() {
       return res.json({ success: true, latex, setLetter });
     } catch (e: any) {
       return res.status(500).json({ error: e.message });
+    }
+  });
+
+  // Native Self-Hosted PDFKit Question Paper Generator (0 FormaTeX dependency, 100% reliable)
+  app.post('/api/paper-synthesizer/generate-pdfkit-pdf', authenticateOptional, async (req: Request, res: Response) => {
+    try {
+      const {
+        paperText,
+        structuredData: inputStructuredData,
+        subject = 'Computer Networks',
+        universityName = 'MAHARASHTRA STATE TECHNICAL BOARD',
+        paperCode = 'SET-4-FINAL',
+        totalMarks = 70,
+        durationHours = 3,
+      } = req.body || {};
+
+      let finalData: SynthesizedPaperData;
+      if (inputStructuredData && inputStructuredData.sections && Array.isArray(inputStructuredData.sections)) {
+        finalData = inputStructuredData;
+      } else if (paperText && typeof paperText === 'string' && paperText.trim()) {
+        finalData = parsePaperTextToStructure(paperText, {
+          subject,
+          universityName,
+          paperCode,
+          totalMarks: Number(totalMarks) || 70,
+          durationHours: Number(durationHours) || 3,
+        });
+      } else {
+        return res.status(400).json({ success: false, error: 'No paper text or structured data provided.' });
+      }
+
+      const pdfBuffer = await generateSynthesizedPaperPdf(finalData);
+      const safeTitle = (finalData.subject || 'Question_Paper').replace(/[^a-zA-Z0-9_\-]/g, '_');
+      const filename = `${safeTitle}_Set4_${Date.now()}.pdf`;
+      const localOutputDir = path.join(process.cwd(), 'public', 'compiled_papers');
+      if (!fs.existsSync(localOutputDir)) fs.mkdirSync(localOutputDir, { recursive: true });
+      fs.writeFileSync(path.join(localOutputDir, filename), pdfBuffer);
+
+      let pdfUrl = `/compiled_papers/${filename}`;
+      try {
+        const cRes = await uploadDocumentToCloudinary(
+          `data:application/pdf;base64,${pdfBuffer.toString('base64')}`,
+          filename,
+          'zeroleak/generated-papers'
+        );
+        if (cRes?.secure_url) pdfUrl = cRes.secure_url;
+      } catch {}
+
+      const checksumSha256 = crypto.createHash('sha256').update(pdfBuffer).digest('hex');
+
+      return res.json({
+        success: true,
+        pdfUrl,
+        filename,
+        sizeBytes: pdfBuffer.length,
+        checksumSha256,
+        engine: 'Native ZeroLeak PDFKit Engine (100% Self-Hosted)',
+        structuredData: finalData,
+      });
+    } catch (e: any) {
+      console.error('[PDFKit Paper Generator Error]', e);
+      return res.status(500).json({ success: false, error: e.message || 'Failed to generate PDF' });
+    }
+  });
+
+  // Universal Direct LaTeX Compilation Endpoint (for AI Generated 4th Papers)
+  app.post('/api/latex/compile-universal', authenticateOptional, async (req: Request, res: Response) => {
+    try {
+      const { latex, title = 'Question_Paper', preferEngine = 'auto' } = req.body || {};
+      if (!latex || typeof latex !== 'string' || !latex.trim()) {
+        return res.status(400).json({ success: false, error: 'No LaTeX source provided.' });
+      }
+
+      const cleanedLatex = sanitizeLatexSource(latex);
+      const compileRes = await compileLatexUniversal({ latex: cleanedLatex, smart: true, preferEngine });
+      if (!compileRes.success || !compileRes.pdfBuffer) {
+        return res.status(422).json({ success: false, error: compileRes.error || 'LaTeX compilation failed.' });
+      }
+
+      const pdfBuffer = compileRes.pdfBuffer;
+      const checksumSha256 = crypto.createHash('sha256').update(pdfBuffer).digest('hex');
+      const safeTitle = (title || 'Question_Paper').replace(/[^a-zA-Z0-9_\-]/g, '_');
+      const filename = `${safeTitle}_${Date.now()}.pdf`;
+      const localOutputDir = path.join(process.cwd(), 'public', 'compiled_papers');
+      if (!fs.existsSync(localOutputDir)) fs.mkdirSync(localOutputDir, { recursive: true });
+      fs.writeFileSync(path.join(localOutputDir, filename), pdfBuffer);
+
+      let pdfUrl = `/compiled_papers/${filename}`;
+      try {
+        const cRes = await uploadDocumentToCloudinary(
+          `data:application/pdf;base64,${pdfBuffer.toString('base64')}`,
+          filename,
+          'zeroleak/generated-papers'
+        );
+        if (cRes?.secure_url) pdfUrl = cRes.secure_url;
+      } catch {}
+
+      return res.json({
+        success: true,
+        pdfUrl,
+        filename,
+        sizeBytes: pdfBuffer.length,
+        checksumSha256,
+        compilerService: compileRes.compilerService || 'LaTeX.Online (Free)',
+      });
+    } catch (e: any) {
+      return res.status(500).json({ success: false, error: e.message || 'Universal compilation error' });
+    }
+  });
+
+  // High-Grade Multi-Pass LaTeX Compilation & Self-Healing Endpoint for Synthesizer
+  // Lift the figures, tables and charts a paper already prints out of its PDF so
+  // a new paper can reuse them unchanged. The examiner's rule is that a diagram
+  // is never redrawn, approximated or described - it is the same asset.
+  app.post('/api/papers/extract-figures', authenticateOptional, async (req: Request, res: Response) => {
+    try {
+      const { file_data, file_name = 'source-paper.pdf', max_figures } = req.body || {};
+      if (!file_data || typeof file_data !== 'string') {
+        return res.status(400).json({ success: false, error: 'file_data (base64 PDF) is required.' });
+      }
+
+      const base64 = file_data.includes(',') ? file_data.slice(file_data.indexOf(',') + 1) : file_data;
+      const buffer = Buffer.from(base64, 'base64');
+      if (buffer.length === 0) {
+        return res.status(400).json({ success: false, error: 'The uploaded file was empty.' });
+      }
+      if (buffer.length > 40 * 1024 * 1024) {
+        return res.status(413).json({ success: false, error: 'The uploaded paper is larger than 40MB.' });
+      }
+
+      const maxFigures = Math.min(Math.max(Number(max_figures) || 12, 1), 24);
+      console.log(`[PDF] Uploaded file: ${file_name} (${Math.round(buffer.length / 1024)}KB)`);
+      const result = await extractSourceFigures(buffer, file_name, { maxFigures });
+      console.log(
+        `[PDF] Extracting visual assets... ${result.figures.length} figure(s) lifted ` +
+          `(${result.figures.map((f) => `figure-${f.index}:p${f.page}`).join(', ') || 'none'})`
+      );
+      for (const warning of result.warnings) console.log(`[PDF] ${warning}`);
+
+      return res.json({
+        success: true,
+        // The bytes travel with the response. The paper has to reuse this exact
+        // asset, and a URL would make reuse depend on a second request that can
+        // fail on its own - which is precisely how the pipeline broke.
+        figures: result.figures,
+        warnings: result.warnings,
+      });
+    } catch (e: any) {
+      console.error('Extract figures error:', e);
+      return res.status(500).json({ success: false, error: e.message });
+    }
+  });
+
+  app.post('/api/paper-synthesizer/compile-validated-latex', authenticateOptional, async (req: Request, res: Response) => {
+    // Stage clock for the whole typesetting path. Every expensive operation below
+    // reports how long it took, so a stall names the exact operation it is stuck
+    // in instead of leaving the caller with an unlabelled wait.
+    const pdfStartedAt = Date.now();
+    const pdfLog = (message: string) => console.log(`[PDF] +${Date.now() - pdfStartedAt}ms ${message}`);
+    pdfLog('START: typesetting request received');
+    try {
+      const {
+        latex,
+        structuredData,
+        paperText,
+        subject = 'Question Paper',
+        universityName = 'Autonomous Examination Board',
+        paperCode = 'SET-4-FINAL',
+        totalMarks = 70,
+        durationHours = 3,
+        preferEngine = 'auto',
+      } = req.body || {};
+      // Figures lifted out of the source paper travel as their own bytes, in the
+      // same request that builds the paper. Nothing is fetched over HTTP: a URL
+      // would make the paper depend on a second request that can fail on its
+      // own, which is exactly how the pipeline broke.
+      const published = readPublishedFigureResources(req.body?.sourceFigureUrls);
+      const figureResources: LatexCompileResource[] = Array.isArray(req.body?.resources)
+        ? req.body.resources
+        : published.resources;
+      if (published.warnings.length > 0) {
+        console.warn(`[PaperSynthesizer] ${published.warnings.join(' ')}`);
+      }
+
+      // The same crops as buffers, for the local engine, which embeds images
+      // itself and therefore needs neither Docker nor a cloud compiler.
+      const figuresForPdf: PaperFigureAsset[] = figureResources.map((resource, i) => {
+        const numbered = String(resource.path || '').match(/figure-(\d+)/i);
+        return {
+          index: numbered ? Number(numbered[1]) : i + 1,
+          buffer: Buffer.from(resource.content, resource.encoding === 'base64' ? 'base64' : 'utf8'),
+        };
+      });
+      pdfLog(
+        `Received paper JSON: ${(req.body?.latex || '').length} chars of LaTeX, ` +
+          `${(req.body?.paperText || '').length} chars of paper text, ${figureResources.length} visual asset(s) shipped as bytes`
+      );
+      if (figuresForPdf.length > 0) {
+        console.log(`[PDF] Loading visual assets... ${figuresForPdf.length} figure(s) attached to this paper`);
+      } else {
+        pdfLog('Loading visual assets... none attached to this paper');
+      }
+
+      let sourceLatex = (latex || '').trim();
+      let finalStructData = structuredData;
+
+      // If no structured data or sections empty, parse from paperText
+      if ((!finalStructData || !Array.isArray(finalStructData.sections) || finalStructData.sections.length === 0) && paperText) {
+        finalStructData = parsePaperTextToStructure(paperText, {
+          subject,
+          universityName,
+          paperCode,
+          totalMarks: Number(totalMarks) || 70,
+          durationHours: Number(durationHours) || 3,
+        });
+      }
+
+      // Discard any prompt scaffolding the model echoed back before the reply is
+      // treated as a pattern. An answer consisting of the schema's own filler
+      // text is a failed answer, not a paper to print.
+      const rawSections: any[] =
+        finalStructData && Array.isArray(finalStructData.sections) ? finalStructData.sections : [];
+      const patternSections: any[] = stripPlaceholderQuestions(rawSections);
+      if (rawSections.length > 0 && patternSections.length === 0) {
+        console.warn('[PaperSynthesizer] the reply carried only placeholder text; refusing to print it.');
+        return res.status(422).json({
+          success: false,
+          error:
+            'The AI returned its own example template instead of writing questions, so no paper was produced. ' +
+            'Re-run generation to get a real paper.',
+        });
+      }
+      const patternHasQuestions = patternSections.some(
+        (section: any) => Array.isArray(section?.questions) && section.questions.length > 0
+      );
+      const patternQuestionCount = patternSections.reduce(
+        (sum: number, section: any) => sum + (Array.isArray(section?.questions) ? section.questions.length : 0),
+        0
+      );
+      pdfLog(`Number of sections: ${patternSections.length} (${patternQuestionCount} question(s) in the generated paper)`);
+
+      // Preserve model synthesized LaTeX if provided with full document structure.
+      // Only fall back to pattern template if sourceLatex is absent or invalid.
+      if (!sourceLatex || !sourceLatex.includes('\\documentclass')) {
+        if (patternHasQuestions) {
+          pdfLog('Loading template... no model LaTeX was supplied, building it from the locked source pattern');
+          sourceLatex = generateUniversityLatexDocument({
+            exam: {
+              university_name: finalStructData?.universityName || universityName,
+              name: finalStructData?.examName || 'SEMESTER EXAMINATION 2026',
+              subject: finalStructData?.subject || subject,
+              paper_code: finalStructData?.paperCode || paperCode,
+              duration_minutes: (Number(durationHours) || 3) * 60,
+              total_marks: finalStructData?.totalMarks || totalMarks,
+            },
+            // The set letter belongs to the source paper: a paper printed as Set P
+            // must stay Set P. Only fall back to the numeric default when neither
+            // the enforced structure nor the client supplied one.
+            setLetter: finalStructData?.setLetter || req.body?.setLetter || '4',
+            sections: finalStructData?.sections || [],
+          });
+        } else {
+          pdfLog('Loading template... no model LaTeX and no pattern questions: nothing to typeset');
+        }
+      } else {
+        pdfLog('Loading template... using the LaTeX document the model produced');
+      }
+
+      const tableCount = (sourceLatex.match(/\\begin\{tabular|\\begin\{tabularx|\\begin\{longtable/g) || []).length;
+      const diagramCount = (sourceLatex.match(/\\begin\{tikzpicture|\\begin\{figure|\\includegraphics/g) || []).length;
+      pdfLog(`Rendering tables... ${tableCount} table(s) found in the document source`);
+      pdfLog(
+        `Rendering diagrams... ${diagramCount} diagram/figure block(s), ${figuresForPdf.length} local crop(s) available to embed`
+      );
+      pdfLog('Creating document... handing the LaTeX source to the compiler tiers');
+
+      // Execute Multi-Pass Self-Healing Compilation. The whole compile is raced
+      // against a hard deadline: an unusable engine must surface as a real error
+      // to the caller, never as an unbounded `Typesetting...` wait.
+      const PDF_COMPILE_BUDGET_MS = Number(process.env.PDF_COMPILE_BUDGET_MS) || 180_000;
+      const compileRes = await Promise.race([
+        compileValidatedLatexWithSelfHealing({
+          latex: sourceLatex,
+          title: subject,
+          structuredFallback: structuredData,
+          preferEngine,
+          resources: figureResources,
+          timeoutMs: Number(process.env.PDF_PER_ENGINE_TIMEOUT_MS) || 45_000,
+        }),
+        new Promise<never>((_, reject) =>
+          setTimeout(
+            () =>
+              reject(
+                new Error(
+                  `Typesetting exceeded its ${Math.round(PDF_COMPILE_BUDGET_MS / 1000)}s budget without producing a PDF. ` +
+                    'Every LaTeX engine either timed out or failed; the paper was not generated. ' +
+                    'Set PDF_COMPILE_BUDGET_MS higher to allow slower engines more room.'
+                )
+              ),
+            PDF_COMPILE_BUDGET_MS
+          ).unref?.()
+        ),
+      ]);
+      pdfLog(
+        `Compile pass finished: success=${compileRes.success} engine=${compileRes.compilerService || 'n/a'} ` +
+          `passes=${compileRes.passCount} bytes=${compileRes.pdfBuffer?.length || 0}`
+      );
+
+      let pdfBuffer = compileRes.pdfBuffer;
+      let usedEngine = compileRes.compilerService || 'Multi-Pass LaTeX Self-Healing Engine';
+      const warnings: string[] = [];
+      // Evidence from the dedicated LaTeX engine, when the primary engines could
+      // not produce the paper. The .tex stays on disk so the attempt is readable
+      // after the fact instead of vanishing with the request.
+      let latexFallback: (LatexBuildResult & { pageCount?: number }) | null = null;
+
+      const structureForLocalEngine = () => {
+        if (finalStructData && Array.isArray(finalStructData.sections) && finalStructData.sections.length > 0) {
+          return finalStructData;
+        }
+        return paperText
+          ? parsePaperTextToStructure(paperText, { subject, universityName, paperCode, totalMarks, durationHours })
+          : undefined;
+      };
+
+      // The self-hosted engine is the only LaTeX tier that accepts image files.
+      // Every other tier answers 200 while dropping them, which would print a
+      // box where the source paper's own diagram belongs. So when this paper
+      // reuses figures and the engine cannot carry them, the paper is built with
+      // the local engine instead: it embeds the same crops and needs neither
+      // Docker nor a cloud compiler.
+      const engineTookFigures = usedEngine === 'Self-Hosted LaTeX (CLSI)';
+      const figuresDropped = figuresForPdf.length > 0 && !engineTookFigures;
+
+      if (figuresDropped || !pdfBuffer || !compileRes.success) {
+        const reason = figuresDropped
+          ? `the "${usedEngine}" compiler cannot receive image files, so ${figuresForPdf.length} reused figure(s) were rendering as empty placeholders`
+          : 'the LaTeX compiler was unavailable or failed all passes';
+        console.warn(`[PDF] ${reason}. Building the paper locally with the native engine...`);
+
+        const structDataToUse = structureForLocalEngine();
+        if (structDataToUse) {
+          try {
+            const localPdf = await generateSynthesizedPaperPdf(structDataToUse, {
+              figures: figuresForPdf,
+              // The masthead prints a duration even when the AI omitted one.
+              durationHours: Number(durationHours) || undefined,
+            });
+            if (localPdf && localPdf.length > 0) {
+              pdfBuffer = localPdf;
+              usedEngine = 'ZeroLeak Native High-Speed PDF Engine (Verified Layout)';
+              console.log(`[PDF] Local engine produced ${localPdf.length} bytes with ${figuresForPdf.length} figure(s) embedded.`);
+            }
+          } catch (err: any) {
+            console.warn(`[PDF] The local engine failed as well: ${err?.message || err}`);
+          }
+        }
+      }
+
+      // Isolation switch. Set PDF_FORCE_LATEX_FALLBACK=1 to prove the dedicated
+      // LaTeX engine on its own, without having to arrange for the primary
+      // engines to fail first. Discards whatever they produced so the fallback
+      // path below runs exactly as it would after a real failure.
+      if (process.env.PDF_FORCE_LATEX_FALLBACK === '1' && pdfBuffer?.length) {
+        pdfLog(
+          `PDF_FORCE_LATEX_FALLBACK=1: discarding ${pdfBuffer.length} bytes from the primary engines ` +
+            'to exercise the LaTeX fallback in isolation'
+        );
+        pdfBuffer = undefined;
+        usedEngine = 'none (primary engines bypassed for testing)';
+      }
+
+      // Only for the primary engines: when the LaTeX fallback produced the paper
+      // it has already reported, accurately, whether it could carry the crops.
+      if (
+        !latexFallback?.success &&
+        figuresForPdf.length > 0 &&
+        usedEngine !== 'Self-Hosted LaTeX (CLSI)' &&
+        usedEngine !== 'ZeroLeak Native High-Speed PDF Engine (Verified Layout)'
+      ) {
+        warnings.push(
+          `This paper reuses ${figuresForPdf.length} figure(s) cropped from the source paper, but "${usedEngine}" ` +
+            'cannot receive image files, so those diagrams are missing from this PDF.'
+        );
+      }
+
+      // Last resort: the dedicated LaTeX engine, whose document (page layout,
+      // macros, tables, diagrams) is written by this server rather than by the
+      // model. It cannot fail because a language model invented a command, which
+      // is the failure mode that leaves an examiner with "could not be typeset".
+      if (!pdfBuffer || pdfBuffer.length === 0) {
+        const fallbackStructure = structureForLocalEngine();
+        if (fallbackStructure) {
+          pdfLog('Falling back to the dedicated LaTeX engine (backend-owned template)');
+          try {
+            const result = await generatePdfWithLatex(
+              {
+                ...fallbackStructure,
+                universityName: fallbackStructure?.universityName || universityName,
+                subject: fallbackStructure?.subject || subject,
+                paperCode: fallbackStructure?.paperCode || paperCode,
+                totalMarks: fallbackStructure?.totalMarks || totalMarks,
+                setLetter: fallbackStructure?.setLetter || req.body?.setLetter,
+              },
+              { durationHours: Number(durationHours) || 3 },
+              {
+                figures: figuresForPdf,
+                timeoutMs: Number(process.env.PDF_LATEX_FALLBACK_TIMEOUT_MS) || 120_000,
+              }
+            );
+            latexFallback = result;
+            if (result.success && result.pdfPath) {
+              pdfBuffer = fs.readFileSync(result.pdfPath);
+              usedEngine = `LaTeX Fallback Engine (${result.engine})`;
+              console.log(
+                `[LATEX FALLBACK] Produced ${pdfBuffer.length} bytes with ${result.engine}; ` +
+                  `source kept at ${result.texPath} (${result.pageCount || 0} page(s))`
+              );
+              warnings.push(
+                `The primary PDF engines could not typeset this paper, so it was produced by the LaTeX ` +
+                  `fallback engine (${result.engine}). The layout comes from the locked template, so the ` +
+                  'paper is complete; its LaTeX source is available under the paper actions.'
+              );
+              if (figuresForPdf.length > 0 && result.figuresEmbedded) {
+                warnings.push(
+                  `Reused ${figuresForPdf.length} source figure(s), embedded in the LaTeX fallback PDF from ` +
+                    'locally cropped PNGs.'
+                );
+              } else if (figuresForPdf.length > 0) {
+                warnings.push(
+                  `This paper reuses ${figuresForPdf.length} figure(s) cropped from the source paper, but the ` +
+                    `"${result.engine}" compiler cannot receive image files, so those diagrams print as labelled ` +
+                    'placeholders. Install a local LaTeX compiler (or start the self-hosted CLSI service) to embed them.'
+                );
+              }
+            } else {
+              console.error(
+                [
+                  '[LATEX FALLBACK] Failed.',
+                  `Code: ${result.code || 'LATEX_COMPILE_FAILED'}`,
+                  `Engine: ${result.engine || 'none'}`,
+                  `Exit code: ${result.exitCode ?? 'n/a'}`,
+                  `Source: ${result.texPath || '(not written)'}`,
+                  `First error: ${result.error || 'unknown'}`,
+                  'Compiler output:',
+                  String(result.log || '').slice(0, 3000),
+                ].join('\n')
+              );
+            }
+          } catch (err: any) {
+            console.error(`[LATEX FALLBACK] The engine threw: ${err?.message || err}`);
+          }
+        } else {
+          pdfLog('No structured paper was available, so the LaTeX fallback had nothing to typeset');
+        }
+      }
+
+      if (!pdfBuffer || pdfBuffer.length === 0) {
+        pdfLog(`FAILED after ${Date.now() - pdfStartedAt}ms: every engine was unavailable or failed all passes`);
+        const diag = compileRes.diagnostics;
+        console.error(
+          [
+            '[PDF COMPILER]',
+            `Compiler: ${diag?.engine || 'none'}`,
+            `Command: ${diag?.command || 'none'}`,
+            `Source: ${diag?.sourcePath || '(not saved)'} (${diag?.sourceLines || '?'} lines)`,
+            `First error: ${diag?.firstError || compileRes.error || 'unknown'}`,
+            `Line: ${diag?.firstErrorLine ?? 'unknown'}`,
+            'Engines tried:',
+            ...(diag?.attempts || []).map(
+              a => `  - ${a.engine}: ${a.ok ? 'ok' : 'failed'} in ${a.ms}ms${a.error ? ` - ${String(a.error).slice(0, 300)}` : ''}`
+            ),
+            'Compiler output:',
+            (diag?.log || '(none)').slice(0, 3000),
+          ].join('\n')
+        );
+        return res.status(422).json({
+          success: false,
+          error: compileRes.error || 'Failed to compile or typeset PDF paper.',
+          diagnostics: diag,
+          passDiagnostics: compileRes.passDiagnostics,
+          latex: compileRes.latex,
+          // The fallback's own failure, so the caller sees why the last resort
+          // could not help rather than only the primary engine's complaint.
+          latexFallback: latexFallback
+            ? {
+                code: latexFallback.code,
+                engine: latexFallback.engine,
+                exitCode: latexFallback.exitCode,
+                error: latexFallback.error,
+                texPath: latexFallback.texPath,
+                logPath: latexFallback.logPath,
+                // Reachable even though the build failed: a failed .tex is the
+                // one you most need to read.
+                sourceUrl: latexFallback.buildDir
+                  ? `/api/latex-fallback/source/${path.basename(latexFallback.buildDir)}`
+                  : undefined,
+                log: String(latexFallback.log || '').slice(0, 4000),
+              }
+            : undefined,
+        });
+      }
+
+      const safeTitle = (subject || 'Question_Paper').replace(/[^a-zA-Z0-9_\-]/g, '_');
+      const filename = `${safeTitle}_Set4_${Date.now()}.pdf`;
+      const localOutputDir = path.join(process.cwd(), 'public', 'compiled_papers');
+      if (!fs.existsSync(localOutputDir)) fs.mkdirSync(localOutputDir, { recursive: true });
+      pdfLog(`Writing PDF... ${pdfBuffer.length} bytes to ${filename}`);
+      fs.writeFileSync(path.join(localOutputDir, filename), pdfBuffer);
+
+      // The download link is the local endpoint from the moment the bytes are on
+      // disk. Cloudinary is only an upgrade on top of that, and a slow CDN must
+      // not hold the response open: the browser waits on this request to learn
+      // that the paper exists.
+      let pdfUrl = `/api/generated-paper/${encodeURIComponent(filename)}`;
+      const uploadStartedAt = Date.now();
+      try {
+        const cRes = await Promise.race([
+          uploadDocumentToCloudinary(
+            `data:application/pdf;base64,${pdfBuffer.toString('base64')}`,
+            filename,
+            'zeroleak/generated-papers'
+          ),
+          new Promise<null>(resolve => setTimeout(() => resolve(null), 12_000).unref?.()),
+        ]);
+        if (cRes?.secure_url) pdfUrl = cRes.secure_url;
+        pdfLog(`Cloudinary upload finished in ${Date.now() - uploadStartedAt}ms (mirror=${cRes ? 'yes' : 'no'})`);
+      } catch (err: any) {
+        console.warn(`[PDF] Cloudinary upload failed after ${Date.now() - uploadStartedAt}ms: ${err?.message || err}`);
+      }
+
+      const checksumSha256 = crypto.createHash('sha256').update(pdfBuffer).digest('hex');
+
+      // Verify the artifact before claiming success: the examiner is told a paper
+      // exists only once a real, openable PDF is on disk.
+      let pageCount = 0;
+      try {
+        pageCount = (await pdfParse(pdfBuffer)).numpages || 0;
+      } catch (err: any) {
+        console.warn(`[PDF] The produced buffer could not be re-opened: ${err?.message || err}`);
+      }
+
+      const outputPath = path.join(localOutputDir, filename);
+      const existsOnDisk = fs.existsSync(outputPath);
+      console.log(`[PDF] Output path: ${outputPath}`);
+      console.log(`[PDF] File exists: ${existsOnDisk}`);
+      console.log(`[PDF] File size: ${pdfBuffer.length} bytes`);
+      console.log(`[PDF] Pages: ${pageCount}`);
+
+      if (!existsOnDisk || pageCount <= 0) {
+        pdfLog(`FAILED after ${Date.now() - pdfStartedAt}ms: the built file could not be re-opened as a readable document`);
+        return res.status(422).json({
+          success: false,
+          error: 'A PDF was built but it could not be verified as a readable document, so it was not returned.',
+        });
+      }
+      pdfLog(`COMPLETE in ${Date.now() - pdfStartedAt}ms: ${filename} (${pageCount} page(s), ${pdfBuffer.length} bytes, engine=${usedEngine})`);
+
+      return res.json({
+        success: true,
+        pdfUrl,
+        filename,
+        sizeBytes: pdfBuffer.length,
+        pageCount,
+        checksumSha256,
+        warnings,
+        latex: compileRes.latex || sourceLatex,
+        passCount: compileRes.passCount,
+        compilerService: usedEngine,
+        // Evidence for the engine that answered: which tiers ran, the source that
+        // was compiled, and the first real error if a pass failed before the
+        // local engine rescued the paper.
+        diagnostics: compileRes.diagnostics,
+        passDiagnostics: compileRes.passDiagnostics,
+        elapsedMs: Date.now() - pdfStartedAt,
+        structuredData: structuredData || (paperText ? parsePaperTextToStructure(paperText, { subject, universityName, paperCode, totalMarks, durationHours }) : undefined),
+        // When the fallback produced the paper, hand back its source so the
+        // document behind the PDF can be inspected or downloaded.
+        latexFallback: latexFallback?.success
+          ? {
+              engine: latexFallback.engine,
+              texPath: latexFallback.texPath,
+              logPath: latexFallback.logPath,
+              sourceUrl: latexFallback.buildDir ? `/api/latex-fallback/source/${path.basename(latexFallback.buildDir)}` : undefined,
+              source: latexFallback.texPath && fs.existsSync(latexFallback.texPath)
+                ? fs.readFileSync(latexFallback.texPath, 'utf8')
+                : undefined,
+            }
+          : undefined,
+      });
+    } catch (e: any) {
+      console.error('[Compile Validated LaTeX Error]', e);
+      pdfLog(`FAILED after ${Date.now() - pdfStartedAt}ms: ${e?.message || e}`);
+      return res.status(500).json({ success: false, error: e.message || 'Compilation failed' });
+    }
+  });
+
+  /**
+   * Download a paper the typesetting route actually wrote to disk.
+   *
+   * The bytes are re-read and re-checked on the way out, so a link can never
+   * pretend a paper exists: a missing file is a 404 and a corrupt one is a 422,
+   * both as JSON rather than an HTML error page.
+   */
+  app.get('/api/generated-paper/:filename', authenticateOptional, async (req: Request, res: Response) => {
+    const requested = String(req.params.filename || '');
+    // Only ever serve a plain file name out of the compiled-papers directory.
+    if (!requested || requested !== path.basename(requested) || !/\.pdf$/i.test(requested)) {
+      return res.status(400).json({ success: false, error: 'Invalid generated paper filename.' });
+    }
+
+    const outputDir = path.join(process.cwd(), 'public', 'compiled_papers');
+    const filePath = path.join(outputDir, requested);
+    const resolved = path.resolve(filePath);
+    if (!resolved.startsWith(path.resolve(outputDir) + path.sep)) {
+      return res.status(400).json({ success: false, error: 'Invalid generated paper path.' });
+    }
+
+    if (!fs.existsSync(resolved)) {
+      console.warn(`[PDF] Download requested for a paper that is not on disk: ${requested}`);
+      return res.status(404).json({ success: false, error: `Generated PDF not found: ${requested}` });
+    }
+
+    try {
+      const buffer = fs.readFileSync(resolved);
+      if (buffer.length === 0 || buffer.subarray(0, 5).toString('latin1') !== '%PDF-') {
+        return res.status(422).json({ success: false, error: 'The stored file is not a readable PDF.' });
+      }
+      res.setHeader('Content-Type', 'application/pdf');
+      res.setHeader('Content-Length', String(buffer.length));
+      res.setHeader('Content-Disposition', `inline; filename="${requested}"`);
+      return res.end(buffer);
+    } catch (err: any) {
+      console.error(`[PDF] Could not serve ${requested}:`, err?.message || err);
+      return res.status(500).json({ success: false, error: 'Could not read the generated PDF.' });
+    }
+  });
+
+  /**
+   * The .tex behind a fallback-built paper.
+   *
+   * The source is deliberately retrievable: when a paper will not typeset, the
+   * document that was sent to the compiler is the only useful evidence, and it
+   * must not disappear with the request that made it.
+   */
+  app.get('/api/latex-fallback/source/:build', authenticateOptional, async (req: Request, res: Response) => {
+    const build = String(req.params.build || '');
+    if (!/^latex_build_\d+$/.test(build)) {
+      return res.status(400).json({ success: false, error: 'Invalid LaTeX build identifier.' });
+    }
+
+    const buildDir = path.join(process.cwd(), 'public', 'generated_papers', build);
+    const texPath = path.join(buildDir, 'generated_question_paper.tex');
+    if (!path.resolve(texPath).startsWith(path.resolve(path.join(process.cwd(), 'public', 'generated_papers')) + path.sep)) {
+      return res.status(400).json({ success: false, error: 'Invalid LaTeX build path.' });
+    }
+    if (!fs.existsSync(texPath)) {
+      console.warn(`[LATEX FALLBACK] Source requested but not on disk: ${texPath}`);
+      return res.status(404).json({ success: false, error: `LaTeX source not found for ${build}` });
+    }
+
+    const source = fs.readFileSync(texPath, 'utf8');
+    const logPath = path.join(buildDir, 'generated_question_paper.log');
+    const asDownload = String(req.query.download || '') === '1';
+    if (asDownload) {
+      res.setHeader('Content-Type', 'application/x-tex; charset=utf-8');
+      res.setHeader('Content-Disposition', `attachment; filename="generated_question_paper.tex"`);
+      return res.end(source);
+    }
+    return res.json({
+      success: true,
+      build,
+      texPath,
+      bytes: Buffer.byteLength(source, 'utf8'),
+      log: fs.existsSync(logPath) ? fs.readFileSync(logPath, 'utf8').slice(0, 20_000) : null,
+      source,
+    });
+  });
+
+  /**
+   * Preflight for the LaTeX fallback.
+   *
+   * Answers "is the failure the paper or the environment?" before a paper is
+   * generated: it detects a compiler and compiles a minimal document, then a
+   * document exercising every element of the template.
+   */
+  app.get('/api/latex-fallback/health', authenticateOptional, async (_req: Request, res: Response) => {
+    try {
+      const health = await latexFallbackHealth();
+      return res.json({
+        success: health.connected,
+        ...health,
+        hint: health.connected
+          ? undefined
+          : 'Install MiKTeX or TeX Live to compile locally. Until then the fallback uses the configured remote compilers, which cannot receive image files.',
+      });
+    } catch (err: any) {
+      return res.status(500).json({ success: false, error: err?.message || 'LaTeX preflight failed' });
     }
   });
 
@@ -4998,8 +6125,18 @@ async function startServer() {
           return { ...q, options: opts };
         });
 
-        const mcqs = parsedQuestions.filter(q => q.question_type === 'MCQ' || (Array.isArray(q.options) && q.options.length >= 2));
-        const theory = parsedQuestions.filter(q => q.question_type !== 'MCQ' && (!q.options || q.options.length < 2));
+        const isTrueMcq = (q: any) => {
+          const marks = Number(q.marks || q.question_marks || 1);
+          if (marks > 2) return false;
+          const txt = (q.content_text || '').trim();
+          if (/^(explain|describe|illustrate|discuss|state and explain|derive|differentiate|write a short note|what is|define)/i.test(txt)) {
+            return false;
+          }
+          return q.question_type === 'MCQ' || (Array.isArray(q.options) && q.options.length >= 2);
+        };
+
+        const mcqs = parsedQuestions.filter(isTrueMcq);
+        const theory = parsedQuestions.filter(q => !isTrueMcq(q));
         const theorySec1 = theory.slice(0, Math.ceil(theory.length / 2));
         const theorySec2 = theory.slice(Math.ceil(theory.length / 2));
 
@@ -8098,7 +9235,7 @@ async function startServer() {
       const db = await getDb();
       const orgId = req.user!.org_id;
 
-      const papers = executeQuery(
+      let papers = executeQuery(
         db,
         `SELECT id, original_filename, subject, examination_category, processing_status, page_count, question_count, uploaded_at
          FROM question_papers
@@ -8106,6 +9243,35 @@ async function startServer() {
          ORDER BY uploaded_at DESC`,
         [orgId]
       );
+
+      // The in-memory SQLite mirror can lag the live database. Without this the
+      // generator shows an empty source list while the uploaded papers plainly
+      // exist, so nothing can be generated from them.
+      if (papers.length === 0) {
+        try {
+          const pgPool = getPostgresPool();
+          if (pgPool) {
+            const pgPapers = await pgPool.query(
+              `SELECT id, original_filename, subject, examination_category, processing_status, page_count, question_count, uploaded_at
+                 FROM question_papers
+                WHERE org_id = $1
+                ORDER BY uploaded_at DESC NULLS LAST`,
+              [orgId]
+            );
+            if (pgPapers.rows.length > 0) {
+              papers = pgPapers.rows as typeof papers;
+              for (const p of pgPapers.rows) {
+                const keys = Object.keys(p);
+                const vals = Object.values(p).map(v => (typeof v === 'object' && v !== null ? JSON.stringify(v) : v));
+                const marks = keys.map(() => '?').join(',');
+                try {
+                  db.run(`INSERT OR REPLACE INTO question_papers (${keys.join(',')}) VALUES (${marks})`, vals as any[]);
+                } catch {}
+              }
+            }
+          }
+        } catch {}
+      }
 
       const enrichedPapers = await Promise.all(papers.map(async p => {
         let questionStats = executeQuery(
@@ -8377,6 +9543,197 @@ async function startServer() {
       return res.status(500).json({ success: false, error: err.message });
     }
   });
+
+  // 3b. Pattern-faithful composition.
+  //
+  // Where /api/multi-paper/generate rebuilds a paper from a blueprint, this keeps
+  // the uploaded papers' main questions exactly as they were and only recombines
+  // their sub-questions - then emits real LaTeX, with `tabular` for tables and
+  // `\includegraphics` for the original figures, and compiles it.
+  app.post(
+    '/api/multi-paper/compose-pattern-paper',
+    authenticateToken,
+    requireRole(['EXAM_MANAGER', 'ORG_OWNER']),
+    async (req: Request, res: Response) => {
+      try {
+        const db = await getDb();
+        const orgId = req.user!.org_id;
+        const examId = String(req.body.exam_id || '').trim() || null;
+        const setLetter = String(req.body.set_letter || 'P').toUpperCase();
+        const selectedSourcePaperIds: string[] = req.body.source_paper_ids || req.body.selectedSourcePaperIds || [];
+        const compile = req.body.compile !== false;
+
+        if (!Array.isArray(selectedSourcePaperIds) || selectedSourcePaperIds.length === 0) {
+          return res.status(400).json({ success: false, error: 'Select at least one source paper to compose from.' });
+        }
+
+        const placeholders = selectedSourcePaperIds.map(() => '?').join(',');
+        let pool = executeQuery(
+          db,
+          `SELECT * FROM questions WHERE org_id = ? AND question_paper_id IN (${placeholders})`,
+          [orgId, ...selectedSourcePaperIds]
+        ) as ComposerQuestion[];
+
+        // The in-memory SQLite mirror lags the live database, and it can lag for only
+        // SOME of the selected papers. Top up per missing source paper rather than
+        // only when the whole pool is empty, otherwise a paper that plainly exists
+        // silently drops out of the composed set and the paper comes out short.
+        const mirroredPaperIds = new Set(
+          pool.map(q => q.question_paper_id).filter((id): id is string => Boolean(id))
+        );
+        const missingPaperIds = selectedSourcePaperIds.filter(id => !mirroredPaperIds.has(id));
+
+        if (missingPaperIds.length > 0) {
+          try {
+            const pgPool = getPostgresPool();
+            if (pgPool) {
+              const pgRes = await pgPool.query(
+                `SELECT * FROM questions WHERE org_id = $1 AND question_paper_id = ANY($2)`,
+                [orgId, missingPaperIds]
+              );
+              if (pgRes.rows.length > 0) {
+                pool = [...pool, ...(pgRes.rows as ComposerQuestion[])];
+                for (const q of pgRes.rows) {
+                  const keys = Object.keys(q);
+                  const vals = Object.values(q).map(v => (typeof v === 'object' && v !== null ? JSON.stringify(v) : v));
+                  const qMarks = keys.map(() => '?').join(',');
+                  try {
+                    db.run(`INSERT OR REPLACE INTO questions (${keys.join(',')}) VALUES (${qMarks})`, vals as any[]);
+                  } catch {}
+                }
+              }
+            }
+          } catch {}
+        }
+
+        if (pool.length === 0) {
+          return res.status(400).json({
+            success: false,
+            error: 'No extracted questions found in the selected source papers. Upload and extract them first.',
+          });
+        }
+
+        const examRows = examId ? executeQuery(db, 'SELECT * FROM examinations WHERE id = ?', [examId]) : [];
+        const exam = examRows[0] || {};
+
+        // Pattern resolution order: explicit request body, then the pattern detected
+        // and stored when the papers were uploaded.
+        let sections: PatternSectionInput[] | undefined = Array.isArray(req.body.pattern) ? req.body.pattern : undefined;
+        if (!sections && examId) {
+          const cfg = executeQuery(
+            db,
+            'SELECT blueprint_json, theory_pattern_json FROM examination_configurations WHERE exam_id = ?',
+            [examId]
+          )[0];
+          const raw = cfg?.theory_pattern_json || cfg?.blueprint_json;
+          if (raw) {
+            try {
+              const parsed = typeof raw === 'string' ? JSON.parse(raw) : raw;
+              if (Array.isArray(parsed?.sections)) sections = parsed.sections;
+            } catch {
+              /* malformed stored pattern - fall through to an error below */
+            }
+          }
+        }
+
+        const frames = deriveMainQuestionFrames(sections, {});
+        if (frames.length === 0) {
+          return res.status(422).json({
+            success: false,
+            error:
+              'No usable pattern found. Upload the source papers so their pattern is detected, or send pattern.sections[].',
+          });
+        }
+
+        const result = await composePatternPaperDocument({
+          exam: {
+            universityName: exam.university_name,
+            examName: exam.name,
+            subject: exam.subject,
+            paperCode: exam.code || exam.paper_code,
+            setLetter,
+            durationMinutes: exam.duration_minutes,
+            totalMarks: exam.total_marks,
+          },
+          frames,
+          pool,
+          seed: `${examId || 'adhoc'}:${setLetter}:${selectedSourcePaperIds.join(',')}`,
+          maxSourceContributionPercent: req.body.max_source_contribution_percent,
+          qualityGate: (q) => assessExtractedQuestion({ content_text: q.content_text, subject: q.subject }).ok,
+          compile,
+        });
+
+        // How much of the source pattern the selected papers could actually fill.
+        // A thin pool means upstream extraction is poor, so say so instead of
+        // handing back a nearly empty paper as an unqualified success.
+        const expectedMarks = result.paper.frames.reduce(
+          (sum, f) => sum + f.attemptCount * f.marksPerSubQuestion,
+          0
+        );
+        const shortFrames = result.paper.frames
+          .filter(f => f.subQuestions.length < f.attemptCount)
+          .map(f => f.questionNumber);
+        const coveragePercent =
+          expectedMarks > 0 ? Math.round((result.paper.totalMarks / expectedMarks) * 100) : 0;
+        const warnings = [...result.warnings];
+        if (shortFrames.length > 0) {
+          warnings.unshift(
+            `The selected papers can only fill ${coveragePercent}% of the pattern (${result.paper.totalMarks}/${expectedMarks} marks). ` +
+              `Short main questions: ${shortFrames.join(', ')}. Re-extract those papers or add another source paper with more usable questions.`
+          );
+        }
+
+        let pdfUrl: string | undefined;
+        let filename: string | undefined;
+        let pdfHash: string | undefined;
+
+        if (result.pdf && result.pdf.length > 0) {
+          const safeSubject = String(exam.subject || 'Question_Paper').replace(/[^a-zA-Z0-9_\-]/g, '_');
+          filename = `${safeSubject}_Set${setLetter}_${Date.now()}.pdf`;
+          const localOutputDir = path.join(process.cwd(), 'public', 'compiled_papers');
+          if (!fs.existsSync(localOutputDir)) fs.mkdirSync(localOutputDir, { recursive: true });
+          fs.writeFileSync(path.join(localOutputDir, filename), result.pdf);
+          pdfUrl = `/compiled_papers/${filename}`;
+          pdfHash = crypto.createHash('sha256').update(result.pdf).digest('hex');
+          try {
+            const cRes = await uploadDocumentToCloudinary(
+              `data:application/pdf;base64,${result.pdf.toString('base64')}`,
+              filename,
+              'zeroleak/generated-papers'
+            );
+            if (cRes?.secure_url) pdfUrl = cRes.secure_url;
+          } catch {}
+        }
+
+        return res.json({
+          success: true,
+          message: coveragePercent === 100
+            ? (pdfUrl
+                ? `Composed a pattern-faithful Set ${setLetter} paper and compiled it to PDF.`
+                : `Composed a pattern-faithful Set ${setLetter} paper. LaTeX is ready but no PDF was produced - see warnings.`)
+            : `Composed Set ${setLetter}, but the selected papers only fill ${coveragePercent}% of the pattern (${result.paper.totalMarks}/${expectedMarks} marks). See warnings.`,
+          examId,
+          setLetter,
+          frames: result.paper.frames,
+          totalMarks: result.paper.totalMarks,
+          expectedMarks,
+          coveragePercent,
+          shortFrames,
+          sourceBreakdown: result.paper.sourceBreakdown,
+          figures: result.figures,
+          latex: result.latex,
+          compiledBy: result.compiledBy,
+          pdfUrl,
+          filename,
+          pdfHash,
+          warnings,
+        });
+      } catch (err: any) {
+        console.error('Pattern-paper composition error:', err);
+        return res.status(500).json({ success: false, error: err.message });
+      }
+    }
+  );
 
   // 4. List Generated Dynamic Papers
   app.get('/api/multi-paper/generated', authenticateToken, requireRole(['EXAM_MANAGER', 'ORG_OWNER', 'AUDITOR']), async (req: Request, res: Response) => {
@@ -10303,6 +11660,11 @@ async function startServer() {
     },
   }));
 
+  // Diagrams lifted out of an uploaded paper, reused unchanged by the new paper.
+  const extractedFiguresDir = path.join(process.cwd(), 'public', 'extracted_figures');
+  if (!fs.existsSync(extractedFiguresDir)) fs.mkdirSync(extractedFiguresDir, { recursive: true });
+  app.use('/extracted_figures', express.static(extractedFiguresDir));
+
   const uploadsDir = path.join(process.cwd(), 'public', 'uploads');
   if (!fs.existsSync(uploadsDir)) fs.mkdirSync(uploadsDir, { recursive: true });
   app.use('/uploads', express.static(uploadsDir, {
@@ -10405,19 +11767,25 @@ async function startServer() {
     }
   }
 
-  // Auto-seed development test account and all 5 role demo accounts
+  console.log('[ZeroLeak Startup] 1/6 Ensuring organizations exist...');
   await ensureAllOrganizationsExist();
+  console.log('[ZeroLeak Startup] 2/6 Creating dev account...');
   await createDevelopmentTestAccount();
+  console.log('[ZeroLeak Startup] 3/6 Seeding demo data...');
   await seedAcademicDemoDataInternal();
+  console.log('[ZeroLeak Startup] 4/6 Cleaning legacy questions...');
   const db = await getDb();
   cleanLegacyDummyQuestions(db);
   saveDb();
+  console.log('[ZeroLeak Startup] 5/6 Starting HTTP listener...');
 
   app.listen(PORT, '0.0.0.0', () => {
     console.log(`[ZeroLeak Security Engine] Server running on http://0.0.0.0:${PORT}`);
   });
 }
 
+console.log('[ZeroLeak Startup] Bootstrapping...');
 startServer().catch(err => {
   console.error('Fatal server startup error:', err);
 });
+

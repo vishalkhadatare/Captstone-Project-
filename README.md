@@ -184,7 +184,10 @@ RSA_KEY_CONFIGURATION="RSA-2048-PKCS1"
 ### 4. Run the app
 
 ```bash
-# Development (Vite + Express on http://localhost:3000)
+# The desktop shell - this is the way to run ZeroLeak.
+npm run desktop
+
+# Development server only (Vite + Express on http://localhost:3000)
 npm run dev
 
 # Production build
@@ -193,6 +196,26 @@ npm run start
 ```
 
 The app will be available at **http://localhost:3000**.
+
+#### Why the desktop shell, and not just a browser tab
+
+`npm run desktop` runs the same app inside Electron, and that changes what the
+built-in browser can do:
+
+| | `npm run dev` in Chrome | `npm run desktop` |
+| --- | --- | --- |
+| Each browser tab | an `<iframe>` (shares this page's cookies) | real Chromium, own session, persists |
+| Any website in the panel | only sites that permit framing | **every** site |
+| OpenAI Prism sign-in | impossible - reframed by Google/OpenAI | works, and stays signed in |
+| Links that open a new window | leave for Chrome | stay inside the app |
+
+An embedded frame cannot load a site that sends `X-Frame-Options` or a
+`frame-ancestors` policy - Google, Overleaf, GitHub and every OAuth login do -
+and that header is the site's own decision, not a bug. Real Chromium tabs have no
+such restriction, which is why the shell is the recommended way to run ZeroLeak.
+
+`npm run desktop:smoke` asserts this end to end (30 checks) without opening a real
+browser.
 
 ---
 

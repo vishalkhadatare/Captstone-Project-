@@ -22,6 +22,9 @@ import {
   Lock,
   Building2,
   X,
+  FileText,
+  Code2,
+  ExternalLink,
 } from 'lucide-react';
 import { api } from '../../api';
 import {
@@ -38,6 +41,24 @@ interface DynamicMultiPaperGeneratorProps {
   examinations?: Examination[];
   selectedExamId?: string;
   onNavigateSubTab?: (subTab: string) => void;
+}
+
+interface ComposePatternResult {
+  setLetter: string;
+  totalMarks: number;
+  expectedMarks: number;
+  coveragePercent: number;
+  shortFrames: string[];
+  frames: Array<{
+    questionNumber: string;
+    instruction: string;
+    subQuestions: Array<{ label: string; id: string; content: string; marks: number }>;
+  }>;
+  figures: Array<{ questionId: string; name: string; source: string }>;
+  latex: string;
+  compiledBy?: string;
+  pdfUrl?: string;
+  warnings: string[];
 }
 
 export const DynamicMultiPaperGenerator: React.FC<DynamicMultiPaperGeneratorProps> = ({
@@ -88,6 +109,18 @@ export const DynamicMultiPaperGenerator: React.FC<DynamicMultiPaperGeneratorProp
   const [generating, setGenerating] = useState(false);
   const [generationSuccess, setGenerationSuccess] = useState<string | null>(null);
   const [generationError, setGenerationError] = useState<string | null>(null);
+
+  // Pattern-Faithful Composition State
+  //
+  // Where the engine above rebuilds a paper from a blueprint, this keeps the
+  // uploaded papers' main questions exactly as they are, recombines their
+  // sub-questions into a new combination, and emits + compiles real LaTeX.
+  const [composing, setComposing] = useState(false);
+  const [composeError, setComposeError] = useState<string | null>(null);
+  const [composeResult, setComposeResult] = useState<ComposePatternResult | null>(null);
+  const [composeSetLetter, setComposeSetLetter] = useState('P');
+  const [showComposeLatex, setShowComposeLatex] = useState(false);
+  const [copiedLatex, setCopiedLatex] = useState(false);
 
   // Generated Papers State
   const [generatedPapers, setGeneratedPapers] = useState<GeneratedPaper[]>([]);
@@ -351,6 +384,36 @@ export const DynamicMultiPaperGenerator: React.FC<DynamicMultiPaperGeneratorProp
     }
   };
 
+  // Compose a pattern-faithful paper from the uploaded source papers.
+  //
+  // Main questions are preserved verbatim; only the sub-questions are
+  // recombined, so the result follows the uploaded papers' pattern without
+  // inventing questions that were never asked in the source.
+  const handleComposePatternPaper = async () => {
+    setComposing(true);
+    setComposeError(null);
+    setComposeResult(null);
+    setShowComposeLatex(false);
+
+    try {
+      const res = await api.multiPaper.composePatternPaper({
+        exam_id: selectedExamId || undefined,
+        set_letter: composeSetLetter || 'P',
+        source_paper_ids: selectedPaperIds,
+      });
+
+      if (res.success) {
+        setComposeResult(res);
+      } else {
+        setComposeError(res.message || 'Pattern-faithful composition failed.');
+      }
+    } catch (err: any) {
+      setComposeError(err.message || 'Error occurred while composing the pattern-faithful paper.');
+    } finally {
+      setComposing(false);
+    }
+  };
+
   // Inspect Generated Paper
   const handleInspectPaper = async (paper: GeneratedPaper) => {
     setLoadingInspection(true);
@@ -456,7 +519,13 @@ export const DynamicMultiPaperGenerator: React.FC<DynamicMultiPaperGeneratorProp
   // Aggregated Pool Metrics
   const poolStats = useMemo(() => {
     const selected = sourcePapers.filter((p) => selectedPaperIds.includes(p.id));
-    const totalQ = selected.reduce((sum, p) => sum + (p.actualQuestionCount || p.question_count || 0), 0);
+    // Prefer the server's real linked-question count. Falling back to the stored
+    // `question_count` column when the real count is 0 advertises questions that
+    // do not exist, and generation then fails with an empty pool.
+    const totalQ = selected.reduce(
+      (sum, p) => sum + (p.actualQuestionCount ?? p.question_count ?? 0),
+      0
+    );
     const allSubs = new Set<string>();
     selected.forEach((p) => {
       if (p.subject) allSubs.add(p.subject);
@@ -1173,6 +1242,180 @@ export const DynamicMultiPaperGenerator: React.FC<DynamicMultiPaperGeneratorProp
                 <p className="text-[11px] text-center text-slate-500">
                   Each set is cryptographically signed, fingerprinted, and ready for randomized distribution.
                 </p>
+
+                {/* Pattern-faithful composition: same pattern, same main questions,
+                    a fresh combination of sub-questions, rendered to real LaTeX. */}
+                <div className="pt-3 border-t space-y-2">
+                  <div className="flex items-stretch gap-2">
+                    <button
+                      onClick={handleComposePatternPaper}
+                      disabled={composing || selectedPaperIds.length === 0}
+                      className={`flex-1 py-3 px-4 rounded-xl font-bold text-xs transition-all flex items-center justify-center gap-2 $
+                        composing || selectedPaperIds.length === 0
+                          ? 'bg-slate-200 text-slate-400 cursor-not-allowed'
+                          : 'bg-gradient-to-r from-indigo-600 to-violet-700 hover:from-indigo-500 hover:to-violet-600 text-white shadow-md shadow-indigo-900/20 cursor-pointer'
+                      }`}
+                    >
+                      {composing ? (
+                        <>
+                          <RefreshCw className="w-4 h-4 animate-spin" />
+                          Composing From Uploaded Papers...
+                        </>
+                      ) : (
+                        <>
+                          <FileText className="w-4 h-4" />
+                          Compose New Paper From Uploaded Pattern
+                        </>
+                      )}
+                    </button>
+                    <select
+                      value={composeSetLetter}
+                      onChange={(e) => setComposeSetLetter(e.target.value)}
+                      className="px-2 rounded-xl border border-slate-300 bg-white text-xs font-bold text-slate-700 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                      title="Set letter to print on the composed paper"
+                    >
+                      {['P', 'A', 'B', 'C', 'D'].map((l) => (
+                        <option key={l} value={l}>
+                          Set {l}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                  <p className="text-[11px] text-center text-slate-500">
+                    Keeps the uploaded papers' main questions verbatim, draws a new combination of sub-questions,
+                    renders tables &amp; diagrams to LaTeX and compiles the PDF.
+                  </p>
+                </div>
+
+                {composeError && (
+                  <div className="p-3 rounded-lg bg-rose-50 border border-rose-200 text-rose-700 text-xs flex items-start gap-2">
+                    <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" />
+                    <span>{composeError}</span>
+                  </div>
+                )}
+
+                {composeResult && (
+                  <div className="rounded-xl border border-indigo-200 bg-indigo-50/60 p-3 space-y-3">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span className="inline-flex items-center gap-1.5 px-2 py-1 rounded-lg bg-indigo-600 text-white text-[10px] font-black uppercase tracking-wide">
+                        <FileText className="w-3 h-3" /> Set {composeResult.setLetter}
+                      </span>
+                      <span
+                        className={`px-2 py-1 rounded-lg border text-[10px] font-bold ${
+                          composeResult.coveragePercent >= 100
+                            ? 'bg-white border-indigo-200 text-indigo-800'
+                            : 'bg-amber-100 border-amber-300 text-amber-800'
+                        }`}
+                        title={`Fills ${composeResult.totalMarks} of the ${composeResult.expectedMarks} marks the pattern asks for`}
+                      >
+                        {composeResult.totalMarks}/{composeResult.expectedMarks} Marks ({composeResult.coveragePercent}%)
+                      </span>
+                      <span className="px-2 py-1 rounded-lg bg-white border border-indigo-200 text-[10px] font-bold text-indigo-800">
+                        {composeResult.frames.reduce((n, f) => n + f.subQuestions.length, 0)} Sub-questions
+                      </span>
+                      {composeResult.compiledBy && (
+                        <span className="px-2 py-1 rounded-lg bg-white border border-indigo-200 text-[10px] font-bold text-indigo-800">
+                          Compiled by {composeResult.compiledBy}
+                        </span>
+                      )}
+                      {composeResult.pdfUrl && (
+                        <a
+                          href={composeResult.pdfUrl}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="ml-auto inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white text-[11px] font-bold transition-colors"
+                        >
+                          <ExternalLink className="w-3.5 h-3.5" /> Open PDF
+                        </a>
+                      )}
+                    </div>
+
+                    <div className="space-y-1.5">
+                      {composeResult.frames.map((frame) => (
+                        <div
+                          key={frame.questionNumber}
+                          className="flex items-center justify-between gap-3 rounded-lg bg-white border border-indigo-100 px-2.5 py-1.5"
+                        >
+                          <div className="min-w-0">
+                            <span className="text-[11px] font-black text-indigo-900 mr-2">
+                              {frame.questionNumber}
+                            </span>
+                            <span className="text-[11px] text-slate-600">{frame.instruction}</span>
+                          </div>
+                          <span className="shrink-0 text-[10px] font-bold text-slate-500">
+                            {frame.subQuestions.length} sub-q
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+
+                    {composeResult.coveragePercent < 100 && (
+                      <div className="flex items-start gap-1.5 text-[10px] text-amber-800 bg-amber-100 border border-amber-300 rounded-lg px-2 py-1.5">
+                        <AlertTriangle className="w-3.5 h-3.5 shrink-0 mt-0.5" />
+                        <span>
+                          The selected papers only fill {composeResult.coveragePercent}% of the pattern. Short main
+                          questions: {composeResult.shortFrames.join(', ')}. Re-extract those papers or add another
+                          source paper with more usable questions.
+                        </span>
+                      </div>
+                    )}
+
+                    {composeResult.figures.length > 0 && (
+                      <p className="text-[10px] text-slate-600">
+                        Reused {composeResult.figures.length} source figure
+                        {composeResult.figures.length === 1 ? '' : 's'} as LaTeX resources.
+                      </p>
+                    )}
+
+                    {composeResult.warnings.length > 0 && (
+                      <div className="space-y-1">
+                        {composeResult.warnings.map((w, i) => (
+                          <div
+                            key={i}
+                            className="flex items-start gap-1.5 text-[10px] text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-2 py-1"
+                          >
+                            <AlertTriangle className="w-3 h-3 shrink-0 mt-0.5" />
+                            <span>{w}</span>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+
+                    <div className="flex items-center gap-2 pt-1 border-t border-indigo-200">
+                      <button
+                        onClick={() => setShowComposeLatex((v) => !v)}
+                        className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-white border border-indigo-300 hover:bg-indigo-100 text-indigo-800 text-[11px] font-bold transition-colors"
+                      >
+                        <Code2 className="w-3.5 h-3.5" />
+                        {showComposeLatex ? 'Hide LaTeX' : 'View LaTeX'}
+                      </button>
+                      <button
+                        onClick={() => {
+                          navigator.clipboard.writeText(composeResult.latex);
+                          setCopiedLatex(true);
+                          setTimeout(() => setCopiedLatex(false), 2000);
+                        }}
+                        className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-white border border-indigo-300 hover:bg-indigo-100 text-indigo-800 text-[11px] font-bold transition-colors"
+                      >
+                        {copiedLatex ? (
+                          <>
+                            <Check className="w-3.5 h-3.5 text-emerald-600" /> Copied
+                          </>
+                        ) : (
+                          <>
+                            <Copy className="w-3.5 h-3.5" /> Copy LaTeX
+                          </>
+                        )}
+                      </button>
+                    </div>
+
+                    {showComposeLatex && (
+                      <pre className="max-h-72 overflow-auto rounded-lg bg-slate-900 text-slate-100 text-[10px] leading-relaxed p-3 whitespace-pre-wrap">
+                        {composeResult.latex}
+                      </pre>
+                    )}
+                  </div>
+                )}
               </div>
             </div>
           </div>

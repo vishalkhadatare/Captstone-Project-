@@ -2,14 +2,14 @@ import 'dotenv/config';
 import { ollamaStream } from './server/aiProviders.ts';
 
 /**
- * The app will alternate models: 3B for chat/answering, 7B for extraction. On a CPU-only
+ * The app will alternate models: 4B for chat/answering, 7B for extraction. On a CPU-only
  * host Ollama keeps only ONE model loaded by default, so each switch forces an eviction and
  * reload — the exact condition in which one earlier request stalled for 900s.
  *
  * This alternates deliberately to find out whether that stall is reproducible or was a fluke.
  */
 const BIG = 'qwen2.5vl:7b';
-const FAST = 'qwen2.5:3b';
+const FAST = 'qwen3.5:4b';
 const ROUNDS = 3;
 
 async function ask(model: string, prompt: string, timeoutMs = 240_000) {

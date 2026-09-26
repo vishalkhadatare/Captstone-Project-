@@ -1,0 +1,19 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Prism Auth Harness</title>
+  </head>
+  <body>
+    <!--
+      Manual harness: mounts ONLY the Prism browser modal so the top-level OAuth
+      window flow can be exercised without signing into ZeroLeak.
+
+      Run the dev server (`npm run dev`) and open:
+        http://localhost:3000/tests/manual/prism-auth-harness.html
+    -->
+    <div id="root"></div>
+    <script type="module" src="/tests/manual/prism-auth-harness.tsx"></script>
+  </body>
+</html>

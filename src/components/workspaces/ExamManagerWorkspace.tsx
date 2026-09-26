@@ -914,103 +914,148 @@ export const ExamManagerWorkspace: React.FC<ExamManagerWorkspaceProps> = ({
       {/* DASHBOARD */}
       {activeSubTab === 'dashboard' && (
         <div className="space-y-6">
-          <div className="modern-card p-6 rounded-2xl bg-white border border-slate-200 shadow-sm space-y-5">
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-100 pb-4">
-              <div>
-                <span className="text-[10px] font-bold uppercase tracking-wider text-emerald-700 bg-emerald-50 px-2.5 py-0.5 rounded-full border border-emerald-200">
-                  Examination Authority Portal
-                </span>
-                <h2 className="text-2xl font-bold text-slate-900 mt-2">Examination Operations Dashboard</h2>
-                <p className="text-xs text-slate-500 mt-1">Real-time status of question pools, verified banks, and time-locked enclaves.</p>
+          {/* Futuristic Hero Banner */}
+          <div className="relative overflow-hidden rounded-3xl bg-gradient-to-br from-slate-950 via-[#06201b] to-slate-900 border border-emerald-500/25 p-7 text-white shadow-2xl">
+            <div className="absolute -right-16 -top-16 w-64 h-64 bg-emerald-500/15 rounded-full blur-3xl pointer-events-none" />
+            <div className="absolute right-1/3 -bottom-20 w-80 h-40 bg-teal-500/10 rounded-full blur-3xl pointer-events-none" />
+
+            <div className="relative z-10 flex flex-col md:flex-row md:items-center justify-between gap-5">
+              <div className="space-y-2">
+                <div className="flex items-center gap-2">
+                  <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-[11px] font-black uppercase tracking-wider bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 backdrop-blur-md">
+                    <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
+                    Examination Controller Command Enclave
+                  </span>
+                  <span className="text-xs text-slate-400 font-mono">
+                    ZeroLeak v4.1 Active
+                  </span>
+                </div>
+                <h2 className="text-2xl sm:text-3xl font-black tracking-tight text-white">
+                  Exam Operations & Security Center
+                </h2>
+                <p className="text-xs sm:text-sm text-slate-300 max-w-2xl leading-relaxed">
+                  Real-time cryptographic control over examination blueprints, AI question synthesis, time-locked hardware enclaves, and verification pipelines.
+                </p>
+              </div>
+
+              <div className="flex flex-wrap items-center gap-3">
+                {onSelectSubTab && (
+                  <button
+                    type="button"
+                    onClick={() => onSelectSubTab('paper_generation')}
+                    className="px-4 py-2.5 rounded-xl bg-gradient-to-r from-emerald-500 via-emerald-600 to-teal-600 hover:from-emerald-400 hover:to-teal-500 text-slate-950 font-black text-xs flex items-center gap-2 shadow-lg shadow-emerald-950/40 hover:scale-[1.02] transition-all cursor-pointer"
+                  >
+                    <Sparkles className="w-4 h-4 text-slate-950" />
+                    <span>AI Paper Synthesizer</span>
+                  </button>
+                )}
+                {onSelectSubTab && (
+                  <button
+                    type="button"
+                    onClick={() => onSelectSubTab('create_examination')}
+                    className="px-4 py-2.5 rounded-xl bg-slate-800/80 hover:bg-slate-700/80 text-white font-bold text-xs border border-white/15 flex items-center gap-2 backdrop-blur-md transition-all cursor-pointer"
+                  >
+                    <Plus className="w-4 h-4 text-emerald-400" />
+                    <span>New Blueprint</span>
+                  </button>
+                )}
               </div>
             </div>
 
             {/* 4 Interactive Metric Cards */}
-            <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
+            <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mt-7">
               <button
                 type="button"
                 onClick={() => setDashboardCardFilter('ALL')}
-                className={`p-4 rounded-xl border text-left transition-all cursor-pointer shadow-xs hover:-translate-y-0.5 ${
+                className={`p-4 rounded-2xl border text-left transition-all cursor-pointer backdrop-blur-md hover:-translate-y-1 ${
                   dashboardCardFilter === 'ALL'
-                    ? 'bg-[#00cc5f] text-black border-[#00cc5f] ring-2 ring-[#00cc5f]/30 shadow-md'
-                    : 'bg-white/80 dark:bg-white/[0.04] border-slate-200/90 dark:border-white/10 text-slate-900 dark:text-white hover:border-[#00cc5f]/40'
+                    ? 'bg-gradient-to-br from-emerald-500 to-teal-600 text-slate-950 border-emerald-300 ring-4 ring-emerald-500/30 shadow-xl'
+                    : 'bg-white/5 border-white/10 text-white hover:bg-white/10 hover:border-emerald-500/40'
                 }`}
               >
-                <span className={`text-[11px] block font-medium ${dashboardCardFilter === 'ALL' ? 'text-black/70 font-bold' : 'text-slate-500 dark:text-slate-400'}`}>
-                  Total Examinations
-                </span>
-                <span className="text-2xl font-black block mt-0.5">{examinations.length}</span>
-                <span className={`text-[10px] font-semibold block mt-1 ${dashboardCardFilter === 'ALL' ? 'text-black/80 font-bold' : 'text-[#00873d] dark:text-[#00cc5f]'}`}>
-                  Active Enclaves
+                <div className="flex items-center justify-between">
+                  <span className={`text-[11px] font-bold uppercase tracking-wider ${dashboardCardFilter === 'ALL' ? 'text-slate-950/80' : 'text-slate-400'}`}>
+                    Total Exams
+                  </span>
+                  <Layers className={`w-4 h-4 ${dashboardCardFilter === 'ALL' ? 'text-slate-950' : 'text-emerald-400'}`} />
+                </div>
+                <span className="text-3xl font-black block mt-1.5 tracking-tight">{examinations.length}</span>
+                <span className={`text-[10px] font-bold block mt-1 ${dashboardCardFilter === 'ALL' ? 'text-slate-950/90' : 'text-emerald-400'}`}>
+                  Active Enclaves Configured
                 </span>
               </button>
 
               <button
                 type="button"
                 onClick={() => setDashboardCardFilter('READY')}
-                className={`p-4 rounded-xl border text-left transition-all cursor-pointer shadow-xs hover:-translate-y-0.5 ${
+                className={`p-4 rounded-2xl border text-left transition-all cursor-pointer backdrop-blur-md hover:-translate-y-1 ${
                   dashboardCardFilter === 'READY'
-                    ? 'bg-[#00cc5f] text-black border-[#00cc5f] ring-2 ring-[#00cc5f]/30 shadow-md'
-                    : 'bg-white/80 dark:bg-white/[0.04] border-slate-200/90 dark:border-white/10 text-slate-900 dark:text-white hover:border-[#00cc5f]/40'
+                    ? 'bg-gradient-to-br from-indigo-500 to-blue-600 text-white border-indigo-300 ring-4 ring-indigo-500/30 shadow-xl'
+                    : 'bg-white/5 border-white/10 text-white hover:bg-white/10 hover:border-indigo-500/40'
                 }`}
               >
-                <span className={`text-[11px] block font-medium ${dashboardCardFilter === 'READY' ? 'text-black/70 font-bold' : 'text-slate-500 dark:text-slate-400'}`}>
-                  Pool Questions
-                </span>
-                <span className="text-2xl font-black block mt-0.5">{questions.length}</span>
-                <span className={`text-[10px] font-semibold block mt-1 ${dashboardCardFilter === 'READY' ? 'text-black/80 font-bold' : 'text-slate-500 dark:text-slate-400'}`}>
-                  Total In Repository
+                <div className="flex items-center justify-between">
+                  <span className={`text-[11px] font-bold uppercase tracking-wider ${dashboardCardFilter === 'READY' ? 'text-white/80' : 'text-slate-400'}`}>
+                    Question Pool
+                  </span>
+                  <FileText className={`w-4 h-4 ${dashboardCardFilter === 'READY' ? 'text-white' : 'text-indigo-400'}`} />
+                </div>
+                <span className="text-3xl font-black block mt-1.5 tracking-tight">{questions.length}</span>
+                <span className={`text-[10px] font-bold block mt-1 ${dashboardCardFilter === 'READY' ? 'text-white/90' : 'text-indigo-400'}`}>
+                  Total In Vault Repository
                 </span>
               </button>
 
               <button
                 type="button"
                 onClick={() => setDashboardCardFilter('VERIFIED')}
-                className={`p-4 rounded-xl border text-left transition-all cursor-pointer shadow-xs hover:-translate-y-0.5 ${
+                className={`p-4 rounded-2xl border text-left transition-all cursor-pointer backdrop-blur-md hover:-translate-y-1 ${
                   dashboardCardFilter === 'VERIFIED'
-                    ? 'bg-[#00cc5f] text-black border-[#00cc5f] ring-2 ring-[#00cc5f]/30 shadow-md'
-                    : 'bg-[#00cc5f]/10 dark:bg-[#00cc5f]/15 border-[#00cc5f]/30 text-[#00873d] dark:text-[#00cc5f] hover:border-[#00cc5f]/50'
+                    ? 'bg-gradient-to-br from-teal-500 to-emerald-600 text-slate-950 border-teal-300 ring-4 ring-teal-500/30 shadow-xl'
+                    : 'bg-white/5 border-white/10 text-white hover:bg-white/10 hover:border-teal-500/40'
                 }`}
               >
-                <span className={`text-[11px] block font-medium ${dashboardCardFilter === 'VERIFIED' ? 'text-black/70 font-bold' : 'text-[#00873d] dark:text-[#00cc5f]'}`}>
-                  Verified & Eligible
-                </span>
-                <span className={`text-2xl font-black block mt-0.5 ${dashboardCardFilter === 'VERIFIED' ? 'text-black' : 'text-[#00873d] dark:text-[#00cc5f]'}`}>
-                  {verifiedCount}
-                </span>
-                <span className={`text-[10px] block mt-1 ${dashboardCardFilter === 'VERIFIED' ? 'text-black/80 font-bold' : 'text-[#00873d] dark:text-[#00cc5f] font-bold'}`}>
-                  Ready for Generation
+                <div className="flex items-center justify-between">
+                  <span className={`text-[11px] font-bold uppercase tracking-wider ${dashboardCardFilter === 'VERIFIED' ? 'text-slate-950/80' : 'text-slate-400'}`}>
+                    Verified & Eligible
+                  </span>
+                  <CheckCircle2 className={`w-4 h-4 ${dashboardCardFilter === 'VERIFIED' ? 'text-slate-950' : 'text-teal-400'}`} />
+                </div>
+                <span className="text-3xl font-black block mt-1.5 tracking-tight">{verifiedCount}</span>
+                <span className={`text-[10px] font-bold block mt-1 ${dashboardCardFilter === 'VERIFIED' ? 'text-slate-950/90' : 'text-teal-400'}`}>
+                  Passed AI Verification
                 </span>
               </button>
 
               <button
                 type="button"
                 onClick={() => setDashboardCardFilter('QUARANTINED')}
-                className={`p-4 rounded-xl border text-left transition-all cursor-pointer shadow-xs hover:-translate-y-0.5 ${
+                className={`p-4 rounded-2xl border text-left transition-all cursor-pointer backdrop-blur-md hover:-translate-y-1 ${
                   dashboardCardFilter === 'QUARANTINED'
-                    ? 'bg-rose-950 text-white border-rose-900 ring-2 ring-rose-600/30 shadow-sm'
-                    : 'bg-rose-50/60 border-rose-200 text-rose-950 hover:bg-rose-50 hover:border-rose-300'
+                    ? 'bg-gradient-to-br from-rose-600 to-red-700 text-white border-rose-300 ring-4 ring-rose-500/30 shadow-xl'
+                    : 'bg-white/5 border-white/10 text-white hover:bg-white/10 hover:border-rose-500/40'
                 }`}
               >
-                <span className={`text-[11px] block font-medium ${dashboardCardFilter === 'QUARANTINED' ? 'text-rose-300' : 'text-rose-700'}`}>
-                  Quarantined / Suspects
-                </span>
-                <span className={`text-2xl font-black block mt-0.5 ${dashboardCardFilter === 'QUARANTINED' ? 'text-rose-300' : 'text-rose-800'}`}>
-                  {quarantinedCount}
-                </span>
-                <span className={`text-[10px] block mt-1 ${dashboardCardFilter === 'QUARANTINED' ? 'text-rose-300' : 'text-rose-600 font-bold'}`}>
-                  Flagged Items
+                <div className="flex items-center justify-between">
+                  <span className={`text-[11px] font-bold uppercase tracking-wider ${dashboardCardFilter === 'QUARANTINED' ? 'text-white/80' : 'text-slate-400'}`}>
+                    Quarantined
+                  </span>
+                  <AlertTriangle className={`w-4 h-4 ${dashboardCardFilter === 'QUARANTINED' ? 'text-white' : 'text-rose-400'}`} />
+                </div>
+                <span className="text-3xl font-black block mt-1.5 tracking-tight">{quarantinedCount}</span>
+                <span className={`text-[10px] font-bold block mt-1 ${dashboardCardFilter === 'QUARANTINED' ? 'text-white/90' : 'text-rose-400'}`}>
+                  Flagged For Review
                 </span>
               </button>
             </div>
           </div>
 
           {/* Active List based on Selected Interactive Metric Card */}
-          <div className="modern-card p-6 rounded-2xl bg-white border border-slate-200 shadow-sm space-y-4">
+          <div className="p-6 rounded-3xl bg-white border border-slate-200/90 shadow-sm space-y-4">
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-slate-100 pb-3">
               <h3 className="text-sm font-bold text-slate-900 flex items-center gap-2">
-                <div className="p-1 rounded-md bg-emerald-50 text-emerald-800">
-                  <FolderLock className="w-3.5 h-3.5" />
+                <div className="p-1.5 rounded-lg bg-emerald-50 text-emerald-800 border border-emerald-200">
+                  <FolderLock className="w-4 h-4" />
                 </div>
                 <span>
                   {dashboardCardFilter === 'VERIFIED'
@@ -1036,39 +1081,44 @@ export const ExamManagerWorkspace: React.FC<ExamManagerWorkspaceProps> = ({
 
             {dashboardCardFilter === 'ALL' ? (
               examinations.length === 0 ? (
-                <p className="text-xs text-slate-400 p-4 text-center">No examinations created yet.</p>
+                <p className="text-xs text-slate-400 p-8 text-center">No examinations created yet.</p>
               ) : (
-                <div className="space-y-2">
+                <div className="space-y-3">
                   {examinations.map(ex => (
                     <div
                       key={ex.id}
-                      className="p-3.5 rounded-lg bg-slate-50 border border-slate-200 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs"
+                      className="p-4 rounded-2xl bg-gradient-to-r from-slate-50 to-emerald-50/20 border border-slate-200/90 hover:border-emerald-500/40 hover:shadow-md transition-all flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs"
                     >
-                      <div>
-                        <div className="font-bold text-slate-900">{ex.name}</div>
-                        <div className="text-[11px] text-slate-500 font-mono mt-0.5">
-                          Subject: {ex.subject} • Date: {ex.exam_date} {ex.exam_time} • Unlock: {ex.unlock_time}
+                      <div className="space-y-1">
+                        <div className="flex items-center gap-2">
+                          <span className="font-black text-slate-900 text-sm">{ex.name}</span>
+                          <span className="px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-emerald-100 text-emerald-900 border border-emerald-200">
+                            {ex.status}
+                          </span>
+                        </div>
+                        <div className="text-[11px] text-slate-600 font-medium flex flex-wrap items-center gap-3">
+                          <span className="font-semibold text-emerald-800">Subject: {ex.subject}</span>
+                          <span>•</span>
+                          <span>Date: {ex.exam_date} @ {ex.exam_time}</span>
+                          <span>•</span>
+                          <span className="font-mono text-slate-500">Unlock: {ex.unlock_time}</span>
                         </div>
                       </div>
 
-                      <div className="flex items-center gap-2">
-                        <span className="px-2.5 py-1 rounded text-[10px] font-bold bg-emerald-100 text-emerald-900">
-                          {ex.status}
-                        </span>
-
+                      <div className="flex flex-wrap items-center gap-2">
                         {ex.simulation_status === 'COMPLETED' ? (
                           <span
-                            className="px-2.5 py-1 bg-emerald-50 text-emerald-800 border border-emerald-300 rounded-lg font-bold text-xs flex items-center gap-1 shadow-2xs"
-                            title="Simulation already completed. The final question paper cannot be viewed again in simulation mode."
+                            className="px-3 py-1.5 bg-emerald-50 text-emerald-800 border border-emerald-300 rounded-xl font-bold text-xs flex items-center gap-1.5 shadow-2xs"
+                            title="Simulation completed."
                           >
-                            <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
+                            <CheckCircle2 className="w-4 h-4 text-emerald-600" />
                             <span>Simulation Completed ✓</span>
                           </span>
                         ) : (
                           <button
                             type="button"
                             onClick={() => handleSimulateExam(ex)}
-                            className="px-3 py-1.5 bg-emerald-700 hover:bg-emerald-600 text-white rounded-lg font-bold text-xs shadow-xs flex items-center gap-1 cursor-pointer transition-all"
+                            className="px-3.5 py-1.5 bg-emerald-700 hover:bg-emerald-600 text-white rounded-xl font-bold text-xs shadow-xs flex items-center gap-1.5 cursor-pointer transition-all"
                             title="Start Proctored Final Paper Simulation"
                           >
                             <Camera className="w-3.5 h-3.5" />
@@ -1079,9 +1129,9 @@ export const ExamManagerWorkspace: React.FC<ExamManagerWorkspaceProps> = ({
                         <button
                           onClick={() => handleGeneratePaper(ex.id)}
                           disabled={generating || org?.status !== 'VERIFIED'}
-                          className={`px-3 py-1.5 rounded-lg font-bold text-xs shadow-xs cursor-pointer ${
+                          className={`px-3.5 py-1.5 rounded-xl font-bold text-xs shadow-xs cursor-pointer transition-all ${
                             ex.simulation_status === 'COMPLETED'
-                              ? 'bg-emerald-900 hover:bg-emerald-800 text-white ring-2 ring-emerald-500/30'
+                              ? 'bg-gradient-to-r from-emerald-800 to-teal-800 hover:from-emerald-700 hover:to-teal-700 text-white ring-2 ring-emerald-500/30'
                               : 'bg-slate-900 hover:bg-slate-800 text-white disabled:opacity-40'
                           }`}
                         >

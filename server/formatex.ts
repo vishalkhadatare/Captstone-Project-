@@ -5,18 +5,80 @@ import path from 'node:path';
 import { uploadDocumentToCloudinary } from './cloudinary.ts';
 
 const LATEX_ONLINE_BASE_URL = process.env.LATEX_ONLINE_BASE_URL || 'https://latexonline.cc';
+/**
+ * TeXLive.net (LaTeX-on-HTTP) - the free public compiler behind learnlatex.org.
+ *
+ * POST-only CGI: multipart/form-data to `/cgi-bin/latexcgi`. Two contract
+ * details are enforced by the server and both fail silently rather than loudly:
+ *   - the root document must be submitted under the name `document.tex`, and
+ *   - *any* unexpected form field makes it reject the entire submission,
+ * so the form is built in exactly one place (`buildTexliveNetForm`) instead of
+ * being assembled inline at the call site.
+ *
+ * No API key, no account, no documented quota. Verified against the live
+ * service: a POST returns HTTP 200, `application/pdf`, `%PDF-` magic bytes.
+ */
+const TEXLIVE_NET_BASE_URL = (process.env.TEXLIVE_NET_BASE_URL || 'https://texlive.net').replace(/\/+$/, '');
+/** The only filename texlive.net treats as the root document. */
+const TEXLIVE_NET_ROOT_FILE = 'document.tex';
 const LATEX_SERVICE_URL = process.env.LATEX_SERVICE_URL || 'http://127.0.0.1:3013';
 const TEXAPI_BASE_URL = process.env.TEXAPI_BASE_URL || 'https://texapi.ovh';
 const TEXAPI_API_KEY = process.env.TEXAPI_API_KEY || '';
 const FORMATEX_BASE_URL = process.env.FORMATEX_BASE_URL || 'https://api.formatex.io/api/v1';
 const FORMATEX_API_KEY = process.env.FORMATEX_API_KEY || 'fex_b908adc11e4806a1c4877fb32105c1bb19e533378b3f0b4fd866148f701b061c';
 
+/**
+ * A side file compiled alongside the root document - typically a figure the
+ * .tex references with \includegraphics.
+ *
+ * Images are binary, so they travel base64-encoded; the compiler service
+ * decodes them before writing, because writing PNG bytes as utf8 corrupts them.
+ */
+export interface LatexCompileResource {
+  path: string;
+  content: string;
+  encoding?: 'utf8' | 'base64';
+}
+
 export interface FormatexCompileOptions {
   latex: string;
   engine?: 'pdflatex' | 'xelatex' | 'lualatex' | 'latexmk';
   smart?: boolean;
   timeoutMs?: number;
-  preferEngine?: 'clsi' | 'texapi' | 'latexonline' | 'formatex' | 'auto';
+  preferEngine?: 'clsi' | 'texapi' | 'latexonline' | 'texlive' | 'formatex' | 'auto';
+  /** Side files (figures) for compilers that can accept a multi-file project. */
+  resources?: LatexCompileResource[];
+}
+
+/** One engine's attempt at the document, kept so a failure can name the engine. */
+export interface LatexEngineAttempt {
+  engine: string;
+  command: string;
+  ok: boolean;
+  ms: number;
+  error?: string;
+}
+
+/**
+ * Everything needed to debug a typesetting failure without guessing: which
+ * engines ran, what the source was, and the first real compiler error.
+ */
+export interface LatexDiagnostics {
+  /** Engine that produced the PDF, or the last one tried when everything failed. */
+  engine: string;
+  /** Compiler command actually executed, e.g. `pdflatex -interaction=nonstopmode`. */
+  command: string;
+  /** Absolute path of the source file written to disk before compiling. */
+  sourcePath?: string;
+  sourceLines?: number;
+  sourceBytes?: number;
+  attempts: LatexEngineAttempt[];
+  /** First meaningful compiler error, e.g. `! Undefined control sequence.` */
+  firstError?: string;
+  /** Line number the compiler blamed, when it reported one. */
+  firstErrorLine?: number;
+  /** Raw compiler output, truncated so it can travel in a JSON response. */
+  log?: string;
 }
 
 export interface FormatexCompileResult {
@@ -28,7 +90,100 @@ export interface FormatexCompileResult {
   durationMs?: number;
   jobId?: string;
   compilationsRemaining?: number;
-  compilerService?: 'Self-Hosted LaTeX (CLSI)' | 'TexAPI Cloud' | 'LaTeX.Online (Free)' | 'FormaTeX Cloud';
+  compilerService?:
+    | 'Self-Hosted LaTeX (CLSI)'
+    | 'TexAPI Cloud'
+    | 'LaTeX.Online (Free)'
+    | 'TeXLive.net (Free)'
+    | 'FormaTeX Cloud';
+  diagnostics?: LatexDiagnostics;
+}
+
+/** Where the exact document handed to the compiler is kept for inspection. */
+const LATEX_DEBUG_DIR = path.join(process.cwd(), 'scratch', 'latex-debug');
+
+/**
+ * Write the document that is about to be handed to the compiler.
+ *
+ * A compile error is only actionable next to the source that produced it, and
+ * the previous pipeline kept the LaTeX in memory only - there was nothing to
+ * open or re-run by hand. Best effort: a read-only filesystem must not stop the
+ * paper from compiling.
+ */
+function saveLatexSource(latex: string, label: string): { sourcePath?: string; lines?: number; bytes?: number } {
+  try {
+    if (!fs.existsSync(LATEX_DEBUG_DIR)) fs.mkdirSync(LATEX_DEBUG_DIR, { recursive: true });
+    const stamp = new Date().toISOString().replace(/[:.]/g, '-');
+    const sourcePath = path.join(LATEX_DEBUG_DIR, `${stamp}-${label}-generated_paper.tex`);
+    fs.writeFileSync(sourcePath, latex, 'utf8');
+    return { sourcePath, lines: latex.split('\n').length, bytes: Buffer.byteLength(latex, 'utf8') };
+  } catch (err: any) {
+    console.warn(`[PDF] Could not save the generated LaTeX source: ${err?.message || err}`);
+    return {};
+  }
+}
+
+/**
+ * Pull the FIRST meaningful error out of a LaTeX log.
+ *
+ * The tail of a LaTeX log is full of cascading noise ("Fatal error occurred",
+ * "Emergency stop") that all follow from one earlier fault. The first line
+ * starting with `!` is the actual cause, and the following `l.<n>` carries the
+ * line number.
+ */
+function extractFirstLatexError(log?: string): { message?: string; line?: number } {
+  if (!log) return {};
+  const lines = log.split(/\r?\n/);
+  for (let i = 0; i < lines.length; i++) {
+    const match = lines[i].match(/^\s*!\s*(.+)$/);
+    if (!match) continue;
+    const context = lines.slice(i, i + 14).join('\n');
+    const lineMatch = context.match(/^l\.(\d+)/m) || context.match(/\.tex:?(\d+):/);
+    return { message: `! ${match[1].trim()}`, line: lineMatch ? Number(lineMatch[1]) : undefined };
+  }
+  // Some cloud services wrap the log; fall back to their own error phrasing.
+  const fallback = log.match(/(?:^|\n)\s*!\s*(.+)/);
+  return fallback ? { message: `! ${fallback[1].trim()}` } : {};
+}
+
+/** The command each engine runs, so the diagnostics can name it exactly. */
+const ENGINE_COMMANDS: Record<string, string> = {
+  clsi: 'pdflatex -interaction=nonstopmode (self-hosted CLSI service)',
+  texapi: 'pdflatex -interaction=nonstopmode (TexAPI cloud)',
+  latexonline: 'pdflatex -interaction=nonstopmode (LaTeX.Online)',
+  texlive: 'pdflatex -interaction=nonstopmode (TeXLive.net free service)',
+  formatex: 'pdflatex -interaction=nonstopmode (FormaTeX cloud)',
+};
+
+/**
+ * Engines that cost nothing and need no credential.
+ *
+ * The auto chain tries these before any metered tier, and `freeAiLatexTools.ts`
+ * asserts its own free-engine list against this one so the two cannot drift.
+ */
+export const FREE_LATEX_ENGINES = ['clsi', 'latexonline', 'texlive'] as const;
+
+/** Assemble the diagnostics object for one engine result. */
+function buildDiagnostics(params: {
+  engine: string;
+  attempts: LatexEngineAttempt[];
+  source?: { sourcePath?: string; lines?: number; bytes?: number };
+  log?: string;
+  error?: string;
+}): LatexDiagnostics {
+  const log = params.log || params.error || '';
+  const first = extractFirstLatexError(params.log || params.error);
+  return {
+    engine: params.engine,
+    command: ENGINE_COMMANDS[params.engine] || params.engine,
+    sourcePath: params.source?.sourcePath,
+    sourceLines: params.source?.lines,
+    sourceBytes: params.source?.bytes,
+    attempts: params.attempts,
+    firstError: first.message,
+    firstErrorLine: first.line,
+    log: log ? log.slice(0, 8000) : undefined,
+  };
 }
 
 /**
@@ -182,6 +337,130 @@ export async function compileWithLatexOnline(options: {
 }
 
 /**
+ * Build the exact multipart form texlive.net accepts.
+ *
+ * Exported so the one-mistake-that-kills-a-submission (an unknown or misspelled
+ * field, or a root document not named `document.tex`) is caught by a test rather
+ * than discovered as an unexplained compile failure.
+ */
+export function buildTexliveNetForm(latex: string, command: string = 'pdflatex'): FormData {
+  const engine = (['pdflatex', 'xelatex', 'lualatex'] as const).includes(command as any)
+    ? command
+    : 'pdflatex';
+  const form = new FormData();
+  form.append('engine', engine);
+  // `return=pdf` asks for the raw PDF; the default is an HTML PDF.js viewer.
+  form.append('return', 'pdf');
+  form.append('filename[]', TEXLIVE_NET_ROOT_FILE);
+  form.append('filecontents[]', latex);
+  return form;
+}
+
+/**
+ * Compile LaTeX with the free public TeXLive.net service.
+ *
+ * The second quota-free compiler in the chain: latexonline.cc and this one share
+ * no infrastructure, so a paper still builds when either is down and when the
+ * self-hosted container is not running at all. Neither costs a key or a quota.
+ */
+export async function compileWithTexliveNet(options: {
+  latex: string;
+  command?: 'pdflatex' | 'xelatex' | 'lualatex';
+  timeoutMs?: number;
+}): Promise<FormatexCompileResult> {
+  const { latex, command = 'pdflatex', timeoutMs = 45000 } = options;
+  if (!latex || !latex.trim()) {
+    return { success: false, error: 'No LaTeX source provided for compilation.' };
+  }
+
+  const startTime = Date.now();
+  try {
+    const res = await fetch(`${TEXLIVE_NET_BASE_URL}/cgi-bin/latexcgi`, {
+      method: 'POST',
+      // Content-Type is deliberately not set: fetch owns the multipart boundary,
+      // and hand-setting it drops the boundary from the header.
+      body: buildTexliveNetForm(latex, command),
+      signal: AbortSignal.timeout(timeoutMs),
+    });
+
+    const durationMs = Date.now() - startTime;
+    const buffer = Buffer.from(await res.arrayBuffer());
+
+    // A failed compile still answers HTTP 200 with a log page, so the magic
+    // bytes - not the status code - decide whether a PDF came back.
+    if (res.ok && buffer.subarray(0, 5).toString('latin1') === '%PDF-') {
+      return {
+        success: true,
+        pdfBuffer: buffer,
+        engine: command,
+        compilerService: 'TeXLive.net (Free)',
+        durationMs,
+      };
+    }
+
+    const log = buffer.toString('utf8');
+    return {
+      success: false,
+      error: `TeXLive.net compilation failed (HTTP ${res.status}): ${
+        extractFirstLatexError(log).message || log.replace(/\s+/g, ' ').slice(0, 300) || 'no response body'
+      }`,
+      log,
+      durationMs,
+      compilerService: 'TeXLive.net (Free)',
+    };
+  } catch (err: any) {
+    return {
+      success: false,
+      error: err?.message || 'TeXLive.net compilation request failed',
+      durationMs: Date.now() - startTime,
+      compilerService: 'TeXLive.net (Free)',
+    };
+  }
+}
+
+/**
+ * Check connectivity of the free TeXLive.net compiler.
+ */
+export async function getTexliveNetHealth(): Promise<{
+  connected: boolean;
+  service: string;
+  engine?: string;
+  url?: string;
+  error?: string;
+}> {
+  const probe = '\\documentclass{article}\\begin{document}ZeroLeak Health Check\\end{document}';
+  try {
+    const res = await fetch(`${TEXLIVE_NET_BASE_URL}/cgi-bin/latexcgi`, {
+      method: 'POST',
+      body: buildTexliveNetForm(probe, 'pdflatex'),
+      signal: AbortSignal.timeout(30000),
+    });
+    const buffer = Buffer.from(await res.arrayBuffer());
+    if (res.ok && buffer.subarray(0, 5).toString('latin1') === '%PDF-') {
+      return {
+        connected: true,
+        service: 'TeXLive.net (Free)',
+        engine: 'pdflatex',
+        url: TEXLIVE_NET_BASE_URL,
+      };
+    }
+    return {
+      connected: false,
+      service: 'TeXLive.net (Free)',
+      url: TEXLIVE_NET_BASE_URL,
+      error: `HTTP ${res.status}: ${buffer.toString('utf8').replace(/\s+/g, ' ').slice(0, 200)}`,
+    };
+  } catch (err: any) {
+    return {
+      connected: false,
+      service: 'TeXLive.net (Free)',
+      url: TEXLIVE_NET_BASE_URL,
+      error: err?.message || 'unreachable',
+    };
+  }
+}
+
+/**
  * Compile LaTeX using the self-hosted latex-service container.
  *
  * Runs on the local Docker network via `latex-service/server.js`, which exposes
@@ -192,8 +471,9 @@ export async function compileWithLocalClsi(options: {
   latex: string;
   command?: 'pdflatex' | 'xelatex' | 'lualatex';
   timeoutMs?: number;
+  resources?: LatexCompileResource[];
 }): Promise<FormatexCompileResult> {
-  const { latex, command = 'pdflatex', timeoutMs = 60000 } = options;
+  const { latex, command = 'pdflatex', timeoutMs = 60000, resources = [] } = options;
   if (!latex || !latex.trim()) {
     return { success: false, error: 'No LaTeX source provided for compilation.' };
   }
@@ -207,6 +487,10 @@ export async function compileWithLocalClsi(options: {
         latex,
         compiler: command,
         timeout: Math.ceil(timeoutMs / 1000),
+        // Only the self-hosted engine can resolve side files; the cloud engines
+        // take a single document, so figures degrade to the placeholder branch
+        // the generator writes (see \IfFileExists in patternPaperComposer).
+        ...(resources.length ? { resources } : {}),
       }),
       signal: AbortSignal.timeout(timeoutMs + 5000),
     });
@@ -582,6 +866,17 @@ export function cleanAndSanitizeLatex(rawText: string): string {
   const mathSegments: string[] = [];
   const placeholder = (i: number) => `ZZMATHBLOCK${i}ZZ`;
 
+  // Protect whole LaTeX environments before escaping anything. A `tabular` or a
+  // `tikzpicture` carries its own `&`, `_` and `%` syntax; escaping those turned
+  // working tables and diagrams into broken ones, which is a large part of why
+  // no extracted table or diagram ever reached the PDF.
+  const envRegex = /\\begin\{(tabularx?|tabular\*|array|matrix|pmatrix|bmatrix|vmatrix|tikzpicture|align\*?)\}[\s\S]*?\\end\{\1\}/g;
+  text = text.replace(envRegex, (match) => {
+    const idx = mathSegments.length;
+    mathSegments.push(match);
+    return placeholder(idx);
+  });
+
   // Protect all LaTeX math environments
   const mathRegex = /(\$\$[\s\S]+?\$\$|\$[^$\r\n]+?\$|\\\[[\s\S]+?\\\]|\\\([\s\S]+?\\\))/g;
   text = text.replace(mathRegex, (match) => {
@@ -606,8 +901,201 @@ export function cleanAndSanitizeLatex(rawText: string): string {
   return text;
 }
 
+/** A question as the AI/parser reported it, including any LaTeX it carries. */
+export interface UniversityLatexQuestion {
+  number?: string;
+  text?: string;
+  marks?: string | number;
+  options?: string[];
+  table?: string;
+  tikz?: string;
+  orText?: string;
+  orMarks?: string | number;
+  orTikz?: string;
+}
+
+/** One printed section of the pattern detected in the uploaded papers. */
+export interface UniversityLatexSection {
+  title?: string;
+  instructions?: string;
+  totalMarks?: string | number;
+  questions?: UniversityLatexQuestion[];
+}
+
+const ROMAN_NUMERALS = ['I', 'II', 'III', 'IV', 'V', 'VI', 'VII', 'VIII', 'IX', 'X', 'XI', 'XII'];
+
+/** Print a marks value the way the paper does, without doubling the word "Marks". */
+function formatMarks(value: unknown): string {
+  if (value === null || value === undefined) return '';
+  const raw = String(value).trim();
+  if (!raw) return '';
+  if (/mark/i.test(raw)) return raw;
+  return raw === '1' ? '1 Mark' : `${raw} Marks`;
+}
+
 /**
- * Generate a complete, publication-grade university/board question paper in clean LaTeX
+ * Split a question body into its prose and the LaTeX table/diagram blocks it
+ * carries, so the extras can be centred instead of running into the sentence.
+ */
+/**
+ * A reference to a figure that was lifted out of the source paper, written by
+ * the model as `[FIGURE:1]`. The examiner's rule is that an existing diagram is
+ * reused unchanged rather than redrawn, so the model points at the extracted
+ * asset instead of producing TikZ for it.
+ */
+const FIGURE_MARKER = /\[\[\s*FIGURE\s*[:\s]\s*(\d{1,2})\s*\]\]|\[\s*FIGURE\s*[:\s]\s*(\d{1,2})\s*\]/gi;
+
+export function splitLatexExtras(text: string): {
+  body: string;
+  tables: string[];
+  diagrams: string[];
+  figureRefs: number[];
+} {
+  let body = String(text ?? '');
+  const tables: string[] = [];
+  const diagrams: string[] = [];
+  const figureRefs: number[] = [];
+
+  body = body.replace(/\\begin\{tabularx?\}[\s\S]*?\\end\{tabularx?\}/gi, (match) => {
+    tables.push(match);
+    return '';
+  });
+  body = body.replace(/\\begin\{tikzpicture\}[\s\S]*?\\end\{tikzpicture\}/gi, (match) => {
+    diagrams.push(match);
+    return '';
+  });
+  body = body.replace(FIGURE_MARKER, (_match, braced, plain) => {
+    const value = Number(braced || plain);
+    if (Number.isFinite(value) && value > 0 && !figureRefs.includes(value)) figureRefs.push(value);
+    return '';
+  });
+
+  return {
+    body: body.replace(/[ \t]+\n/g, '\n').replace(/\n{3,}/g, '\n\n').trim(),
+    tables,
+    diagrams,
+    figureRefs,
+  };
+}
+
+/**
+ * Print an extracted source figure where the model pointed at it.
+ *
+ * The file is looked up with `\IfFileExists` so a figure the compiler never
+ * received cannot abort the whole paper; it degrades to a labelled box instead.
+ */
+export function renderSourceFigureLatex(figureNumber: number): string {
+  const file = `figure-${figureNumber}.png`;
+  return [
+    '\\begin{center}',
+    `  \\IfFileExists{${file}}{\\includegraphics[width=0.72\\textwidth]{${file}}}` +
+      `{\\fbox{\\parbox{0.6\\textwidth}{\\centering\\small [Diagram ${figureNumber} from the source paper]}}}`,
+    '\\end{center}',
+  ].join('\n');
+}
+
+/**
+ * Render a supplied pattern as the paper body.
+ *
+ * Every section, every question and every mark the source declared is printed -
+ * nothing is capped, sliced or re-labelled - because a paper that silently
+ * drops half its questions and invents its own marking scheme is worse than one
+ * that refuses to build. Question text is treated as LaTeX so `tabular` tables
+ * and `tikzpicture` diagrams travel straight through to the compiler.
+ */
+export function renderPatternSectionsLatex(sections: UniversityLatexSection[]): string {
+  const blocks: string[] = [];
+
+  sections.forEach((section, sIdx) => {
+    const questions = Array.isArray(section?.questions) ? section.questions.filter(Boolean) : [];
+    const title = cleanAndSanitizeLatex(
+      String(section?.title || `SECTION ${ROMAN_NUMERALS[sIdx] || sIdx + 1}`).trim()
+    );
+    const sectionMarks = formatMarks(section?.totalMarks);
+    const instructions = section?.instructions ? cleanAndSanitizeLatex(String(section.instructions).trim()) : '';
+
+    const lines: string[] = [
+      '\\vspace{2mm}',
+      '\\begin{center}',
+      `  {\\large \\textbf{\\color{boardblue}${title}}}${sectionMarks ? ` \\hfill \\textbf{[${sectionMarks}]}` : ''}`,
+      '\\end{center}',
+    ];
+
+    if (instructions) {
+      // Every block is closed with an explicit paragraph break: LaTeX joins
+      // consecutive source lines into one paragraph, which made the section
+      // instruction run straight into Q.1 and split the option table in half.
+      lines.push('\\vspace{1mm}', `\\noindent \\textbf{${instructions}}\\par`, '\\vspace{1mm}');
+    }
+
+    if (questions.length === 0) {
+      lines.push('\\vspace{1mm}', '\\noindent \\textit{[No questions were extracted for this section.]}');
+    }
+
+    questions.forEach((question, qIdx) => {
+      const label = cleanAndSanitizeLatex(String(question?.number || `Q.${qIdx + 1}`).trim());
+      const { body, tables, diagrams, figureRefs } = splitLatexExtras(String(question?.text || ''));
+      const marks = formatMarks(question?.marks);
+
+      const rendered: string[] = [
+        `\\noindent \\textbf{${label}} ${cleanAndSanitizeLatex(body)}${marks ? ` \\hfill \\textbf{[${marks}]}` : ''}\\par`,
+      ];
+
+      // A question's own table or diagram is typeset as real LaTeX, not prose.
+      for (const table of [...tables, String(question?.table || '')]) {
+        if (table.trim()) rendered.push('', '\\begin{center}', '\\small', table.trim(), '\\end{center}');
+      }
+      for (const diagram of [...diagrams, String(question?.tikz || '')]) {
+        if (diagram.trim()) rendered.push('', '\\begin{center}', diagram.trim(), '\\end{center}');
+      }
+      // A diagram the source paper already contains is reused as the pixels that
+      // were lifted out of it: never redrawn, never approximated.
+      for (const figureNumber of figureRefs) {
+        rendered.push('', renderSourceFigureLatex(figureNumber));
+      }
+
+      const options = Array.isArray(question?.options)
+        ? question.options
+            .map((opt) => cleanAndSanitizeLatex(String(opt).replace(/^\(?[a-dA-D]\)\s*/, '').trim()))
+            .filter(Boolean)
+        : [];
+      if (options.length > 0) {
+        rendered.push('', '\\vspace{1mm}', '{\\small', '\\begin{tabularx}{\\linewidth}{@{}X X@{}}');
+        for (let i = 0; i < options.length; i += 2) {
+          const left = `\\textbf{${String.fromCharCode(97 + i)})} ${options[i]}`;
+          const right = options[i + 1] ? `\\textbf{${String.fromCharCode(97 + i + 1)})} ${options[i + 1]}` : '';
+          rendered.push(`  ${left} & ${right} \\\\[1mm]`);
+        }
+        rendered.push('\\end{tabularx}', '}');
+      }
+
+      if (question?.orText) {
+        const orMarks = formatMarks(question?.orMarks);
+        rendered.push(
+          '',
+          '\\begin{center}\\textbf{--- OR ---}\\end{center}',
+          `\\noindent ${cleanAndSanitizeLatex(String(question.orText))}${orMarks ? ` \\hfill \\textbf{[${orMarks}]}` : ''}`
+        );
+        if (question?.orTikz && String(question.orTikz).trim()) {
+          rendered.push('\\begin{center}', String(question.orTikz).trim(), '\\end{center}');
+        }
+      }
+
+      lines.push(rendered.join('\n'), '\\vspace{2mm}', '');
+    });
+
+    lines.push('\\vspace{3mm}', '\\hrule', '\\vspace{3mm}');
+    blocks.push(lines.join('\n'));
+  });
+
+  return blocks.join('\n');
+}
+
+/**
+ * Generate a complete, publication-grade university/board question paper in clean LaTeX.
+ *
+ * Pass `sections` to print a specific pattern; `mcqs`/`theorySec1`/`theorySec2`
+ * stay supported for callers that only have the three-way split.
  */
 export function generateUniversityLatexDocument(params: {
   exam: any;
@@ -615,6 +1103,7 @@ export function generateUniversityLatexDocument(params: {
   mcqs?: any[];
   theorySec1?: any[];
   theorySec2?: any[];
+  sections?: UniversityLatexSection[];
   durationMinutes?: number;
   totalMarks?: number;
 }): string {
@@ -642,10 +1131,16 @@ export function generateUniversityLatexDocument(params: {
     day: 'numeric',
   });
 
+  const stripItemPrefix = (str: string): string => {
+    if (!str) return '';
+    return str.replace(/^(?:Q\.?\s*\d+[\.\)]\s*|[a-zA-Z0-9][\.\)]\s*|\([a-zA-Z0-9]\)\s*)+/i, '').trim();
+  };
+
   // Prepare MCQs Section
   const mcqLines: string[] = [];
   mcqs.forEach((mcq, mIdx) => {
-    const qText = cleanAndSanitizeLatex(mcq.content_text || mcq.question_text || `Question ${mIdx + 1}`);
+    const rawText = stripItemPrefix(mcq.text || mcq.content_text || mcq.question_text || mcq.question || `Question ${mIdx + 1}`);
+    const qText = cleanAndSanitizeLatex(rawText);
     let opts = mcq.options;
     if (typeof opts === 'string') {
       try { opts = JSON.parse(opts); } catch { opts = []; }
@@ -657,7 +1152,7 @@ export function generateUniversityLatexDocument(params: {
       mcqLines.push(`  \\begin{enumerate}[label={\\textbf{\\alph*)}}]`);
       opts.forEach((opt: any) => {
         const optText = typeof opt === 'object' ? (opt.text || opt.label || '') : String(opt);
-        mcqLines.push(`    \\item ${cleanAndSanitizeLatex(optText)}`);
+        mcqLines.push(`    \\item ${cleanAndSanitizeLatex(stripItemPrefix(optText))}`);
       });
       mcqLines.push(`  \\end{enumerate}`);
     }
@@ -667,20 +1162,28 @@ export function generateUniversityLatexDocument(params: {
   // Prepare Theory Section I
   const theory1Lines: string[] = [];
   theorySec1.forEach((tq, tIdx) => {
-    const tText = cleanAndSanitizeLatex(tq.content_text || tq.question_text || `Theory question ${tIdx + 1}`);
-    const marks = tq.marks || 4;
+    const rawText = stripItemPrefix(tq.text || tq.content_text || tq.question_text || tq.question || `Theory question ${tIdx + 1}`);
+    const tText = cleanAndSanitizeLatex(rawText);
+    const marks = tq.marks || 7;
     theory1Lines.push(`  \\item ${tText} \\hfill \\textbf{[${marks}]} \\vspace{1.5mm}`);
   });
 
   // Prepare Theory Section II
   const theory2Lines: string[] = [];
   theorySec2.forEach((tq, tIdx) => {
-    const tText = cleanAndSanitizeLatex(tq.content_text || tq.question_text || `Analytical problem ${tIdx + 1}`);
-    const marks = tq.marks || 4;
+    const rawText = stripItemPrefix(tq.text || tq.content_text || tq.question_text || tq.question || `Analytical problem ${tIdx + 1}`);
+    const tText = cleanAndSanitizeLatex(rawText);
+    const marks = tq.marks || 7;
     theory2Lines.push(`  \\item ${tText} \\hfill \\textbf{[${marks}]} \\vspace{1.5mm}`);
   });
 
-  const mcqSectionLatex = mcqLines.length > 0 ? `
+  const hasMcqs = mcqLines.length > 0;
+  const qSec1A = hasMcqs ? 'Q.2' : 'Q.1';
+  const qSec1B = hasMcqs ? 'Q.3' : 'Q.2';
+  const qSec2A = hasMcqs ? 'Q.4' : 'Q.3';
+  const qSec2B = hasMcqs ? 'Q.5' : 'Q.4';
+
+  const mcqSectionLatex = hasMcqs ? `
 % --- Section: Q.1 MCQs ---
 \\noindent
 \\textbf{\\large Q.1 Choose the correct alternatives for the following questions.} \\hfill \\textbf{[${mcqs.length} Marks]}
@@ -701,14 +1204,14 @@ ${mcqLines.join('\n')}
 \\vspace{2mm}
 
 \\noindent
-\\textbf{Q.2 Answer the following questions (Attempt Any Four):} \\hfill \\textbf{[16 Marks]}
+\\textbf{${qSec1A} Answer the following questions (Attempt Any Four):} \\hfill \\textbf{[16 Marks]}
 \\begin{enumerate}[label=\\textbf{\\alph*)} , leftmargin=6mm, itemsep=2mm]
 ${(theory1Lines.slice(0, 5).length > 0 ? theory1Lines.slice(0, 5) : theory1Lines).join('\n')}
 \\end{enumerate}
 
 \\vspace{3mm}
 \\noindent
-\\textbf{Q.3 Answer the following questions in detail (Attempt Any Two):} \\hfill \\textbf{[12 Marks]}
+\\textbf{${qSec1B} Answer the following questions in detail (Attempt Any Two):} \\hfill \\textbf{[12 Marks]}
 \\begin{enumerate}[label=\\textbf{\\alph*)} , leftmargin=6mm, itemsep=2mm]
 ${(theory1Lines.slice(5).length > 0 ? theory1Lines.slice(5) : theory1Lines.slice(0, 2)).join('\n')}
 \\end{enumerate}
@@ -725,14 +1228,14 @@ ${(theory1Lines.slice(5).length > 0 ? theory1Lines.slice(5) : theory1Lines.slice
 \\vspace{2mm}
 
 \\noindent
-\\textbf{Q.4 Answer the following questions (Attempt Any Four):} \\hfill \\textbf{[16 Marks]}
+\\textbf{${qSec2A} Answer the following questions (Attempt Any Four):} \\hfill \\textbf{[16 Marks]}
 \\begin{enumerate}[label=\\textbf{\\alph*)} , leftmargin=6mm, itemsep=2mm]
 ${(theory2Lines.slice(0, 5).length > 0 ? theory2Lines.slice(0, 5) : theory2Lines).join('\n')}
 \\end{enumerate}
 
 \\vspace{3mm}
 \\noindent
-\\textbf{Q.5 Solve / Explain the following technical problems:} \\hfill \\textbf{[12 Marks]}
+\\textbf{${qSec2B} Solve / Explain the following technical problems:} \\hfill \\textbf{[12 Marks]}
 \\begin{enumerate}[label=\\textbf{\\alph*)} , leftmargin=6mm, itemsep=2mm]
 ${(theory2Lines.slice(5).length > 0 ? theory2Lines.slice(5) : theory2Lines.slice(0, 2)).join('\n')}
 \\end{enumerate}
@@ -748,6 +1251,18 @@ ${(theory2Lines.slice(5).length > 0 ? theory2Lines.slice(5) : theory2Lines.slice
 \\end{enumerate}
 ` : '';
 
+  // A detected or supplied pattern wins outright. The legacy three-slot template
+  // above caps each section at five questions and hardcodes "Answer any four"
+  // with fixed 16/12 mark blocks, so running pattern data through it silently
+  // shrank the paper - a 70-mark paper that carried five questions and 5 marks.
+  const patternSections = Array.isArray(params.sections) ? params.sections : [];
+  const usesPattern = patternSections.some(
+    (section) => Array.isArray(section?.questions) && section.questions.length > 0
+  );
+  const bodyLatex = usesPattern
+    ? renderPatternSectionsLatex(patternSections)
+    : [mcqSectionLatex, section1Latex, section2Latex, fallbackQuestions].join('\n');
+
   return `\\documentclass[11pt,a4paper]{article}
 \\usepackage[top=20mm,bottom=20mm,left=18mm,right=18mm]{geometry}
 \\usepackage{amsmath,amssymb,amsfonts}
@@ -755,6 +1270,10 @@ ${(theory2Lines.slice(5).length > 0 ? theory2Lines.slice(5) : theory2Lines.slice
 \\usepackage{fancyhdr}
 \\usepackage{booktabs}
 \\usepackage{tabularx}
+\\usepackage{array}
+\\usepackage{graphicx}
+\\usepackage{tikz}
+\\usetikzlibrary{arrows.meta,positioning,shapes.geometric,calc,decorations.pathreplacing,fit,backgrounds}
 \\usepackage{microtype}
 \\usepackage{xcolor}
 
@@ -824,10 +1343,7 @@ ${(theory2Lines.slice(5).length > 0 ? theory2Lines.slice(5) : theory2Lines.slice
 \\hrule
 \\vspace{3mm}
 
-${mcqSectionLatex}
-${section1Latex}
-${section2Latex}
-${fallbackQuestions}
+${bodyLatex}
 
 \\vspace{6mm}
 \\begin{center}
@@ -921,61 +1437,223 @@ export async function compileLatexWithFormatex(options: FormatexCompileOptions):
 }
 
 /**
- * Universal Four-Tier LaTeX Compiler:
+ * Universal LaTeX Compiler tiers:
  * 1. Primary: Self-hosted latex-service container (CLSI-shaped API) - no quota, no API key
  * 2. Fallback: TexAPI Cloud (https://texapi.ovh) - X-API-KEY auth, 20 req/min, skipped when no key
  * 3. Fallback: Free LaTeX.Online cloud compiler (https://latexonline.cc)
- * 4. Last resort: FormaTeX Cloud REST API (https://api.formatex.io) - metered
+ * 4. Fallback: Free TeXLive.net compiler (https://texlive.net) - no key, no quota
+ * 5. Last resort: FormaTeX Cloud REST API (https://api.formatex.io) - metered
  */
+export function isolateAndFormatLatexTablesAndDiagrams(latex: string): string {
+  if (!latex) return '';
+  let out = latex;
+
+  // 1. Ensure Preamble has all necessary packages and TikZ libraries
+  if (out.includes('\\documentclass')) {
+    const requiredPackages = [
+      '\\usepackage{amsmath,amssymb,amsfonts}',
+      '\\usepackage{tabularx}',
+      '\\usepackage{booktabs}',
+      '\\usepackage{array}',
+      '\\usepackage{xcolor}',
+      '\\usepackage{tikz}',
+      '\\usetikzlibrary{arrows.meta,positioning,shapes.geometric,calc,decorations.pathreplacing}',
+      '\\usepackage{adjustbox}',
+      '\\usepackage{enumitem}',
+    ];
+
+    for (const pkg of requiredPackages) {
+      const pkgName = pkg.match(/\\usepackage(?:\[.*?\])?\{([^}]+)\}/)?.[1];
+      if (pkgName && !out.includes(`{${pkgName}}`)) {
+        out = out.replace(/\\begin\{document\}/i, `${pkg}\n\\begin{document}`);
+      } else if (pkg.startsWith('\\usetikzlibrary') && !out.includes('\\usetikzlibrary')) {
+        out = out.replace(/\\begin\{document\}/i, `${pkg}\n\\begin{document}`);
+      }
+    }
+  }
+
+  // 2. Isolate and center tabular/tabularx blocks in question body so they never inline inside paragraphs
+  out = out.replace(/(\\begin\{tabular\}\s*\{([^}]+)\}[\s\S]*?\\end\{tabular\})/g, (match, tableBody) => {
+    // Preserve the header SET box without breaking header tabularx
+    if (tableBody.includes('\\textbf{SET}') || tableBody.includes('Seat No')) {
+      return tableBody;
+    }
+    return `\n\\par\\vspace{1.5mm}\n{\\centering\\small\n${tableBody}\n\\par}\n\\vspace{1.5mm}\n`;
+  });
+
+  // Clean duplicate center wraps
+  out = out.replace(/\\begin\{center\}\s*\\begin\{center\}/g, '\\begin{center}');
+  out = out.replace(/\\end\{center\}\s*\\end\{center\}/g, '\\end{center}');
+
+  // 3. Isolate and center tikzpicture blocks with responsive scaling
+  out = out.replace(/(\\begin\{tikzpicture\}(?:\[[\s\S]*?\])?[\s\S]*?\\end\{tikzpicture\})/g, (match, tikzBody) => {
+    let scaledTikz = tikzBody;
+    if (!scaledTikz.includes('scale=')) {
+      scaledTikz = scaledTikz.replace(/\\begin\{tikzpicture\}/, '\\begin{tikzpicture}[scale=0.88, every node/.style={transform shape}]');
+    }
+    return `\n\\par\\vspace{2mm}\n\\begin{center}\n${scaledTikz}\n\\end{center}\n\\vspace{2mm}\\par\n`;
+  });
+
+  // Clean duplicate center wraps for tikz
+  out = out.replace(/\\begin\{center\}\s*\\begin\{center\}/g, '\\begin{center}');
+  out = out.replace(/\\end\{center\}\s*\\end\{center\}/g, '\\end{center}');
+
+  return out;
+}
+
+export function repairLatexErrors(latex: string, errorLog: string = ''): string {
+  let healed = isolateAndFormatLatexTablesAndDiagrams(latex);
+
+  // 1. Fix unescaped % outside of comments
+  healed = healed.replace(/(?<!\\)%/g, '\\%');
+
+  // 2. Fix unescaped & outside of tabular/matrix/tabularx/align
+  if (errorLog.includes('Misplaced alignment tab character') || errorLog.includes('&')) {
+    const lines = healed.split('\n');
+    let insideTableOrMath = false;
+    healed = lines.map(line => {
+      if (line.includes('\\begin{tabular') || line.includes('\\begin{matrix') || line.includes('\\begin{align')) {
+        insideTableOrMath = true;
+      }
+      if (line.includes('\\end{tabular') || line.includes('\\end{matrix') || line.includes('\\end{align')) {
+        insideTableOrMath = false;
+        return line;
+      }
+      if (!insideTableOrMath) {
+        return line.replace(/(?<!\\)&/g, '\\&');
+      }
+      return line;
+    }).join('\n');
+  }
+
+  // 3. Fix unescaped _ or #
+  healed = healed.replace(/(?<!\\)_/g, '\\_');
+  healed = healed.replace(/(?<!\\)#/g, '\\#');
+
+  // 4. If TikZ is fatally broken in log, replace the broken tikzpicture with a clean schematic box
+  if (errorLog.toLowerCase().includes('tikz') || errorLog.toLowerCase().includes('pgf') || errorLog.toLowerCase().includes('dimension too large')) {
+    healed = healed.replace(/\\begin\{tikzpicture\}[\s\S]*?\\end\{tikzpicture\}/g, () => {
+      return `\\begin{center}\\fbox{\\parbox{0.85\\linewidth}{\\centering \\textbf{[ SYSTEM ARCHITECTURE / SCHEMATIC DIAGRAM ]}\\\\\\vspace{2mm}{\\small Refer to question specification for schematic nodes and state transitions. }}}\\end{center}`;
+    });
+  }
+
+  // 5. Ensure \\end{document} is present
+  if (!healed.includes('\\end{document}')) {
+    healed += '\n\\end{document}';
+  }
+
+  return healed;
+}
+
+export function sanitizeLatexSource(rawLatex: string): string {
+  if (!rawLatex) return '';
+  let clean = rawLatex.trim();
+  // Strip markdown code fences if present
+  clean = clean.replace(/^```(?:latex|tex)?\s*/i, '').replace(/```\s*$/i, '');
+  // Fix model emitting \[[3pt] or \\[3pt] instead of spacing
+  // `\\[3pt]` is valid LaTeX - a line break plus vertical space - and must
+  // survive untouched. The rule that used to live here consumed one of its two
+  // backslashes, leaving a dangling `\\par`; TeX then typeset the literal word
+  // "par" in the middle of the paper header. Only a lone `\[3pt]` is a mistake.
+  clean = clean.replace(/(?<!\\)\\\[\s*(\d+(?:pt|mm|cm|ex|in))\s*\]/g, '\n\\par\\vspace{$1}\n');
+  // Fix accidental \\[ [Marks] or \\ [Marks]
+  clean = clean.replace(/\\+\s*\[\s*(\d+)\s*(?:Marks?|marks?)?\s*\]/g, ' \\hfill [$1 Marks]');
+  return clean;
+}
+
 export async function compileLatexUniversal(options: FormatexCompileOptions): Promise<FormatexCompileResult> {
   const { preferEngine = 'auto' } = options;
   const targetEngine = (options.engine === 'xelatex' || options.engine === 'lualatex') ? options.engine : 'pdflatex';
+  options.latex = sanitizeLatexSource(options.latex);
+
+  // Persist the exact document before any engine sees it.
+  const source = saveLatexSource(options.latex, 'v1');
+  const attempts: LatexEngineAttempt[] = [];
+  const record = (engine: string, ok: boolean, ms: number, error?: string) => {
+    attempts.push({ engine, command: ENGINE_COMMANDS[engine] || engine, ok, ms, error });
+  };
+  /** Attach the collected evidence to whatever this call returns. */
+  const withDiagnostics = (
+    result: FormatexCompileResult,
+    engine: string
+  ): FormatexCompileResult => ({
+    ...result,
+    diagnostics:
+      result.diagnostics ||
+      buildDiagnostics({ engine, attempts, source, log: result.log || result.error, error: result.error }),
+  });
 
   if (preferEngine === 'formatex') {
-    return await compileLatexWithFormatex(options);
+    const r = await compileLatexWithFormatex(options);
+    record('formatex', r.success, r.durationMs || 0, r.error);
+    return withDiagnostics(r, 'formatex');
   }
 
   if (preferEngine === 'latexonline') {
-    return await compileWithLatexOnline({
+    const r = await compileWithLatexOnline({
       latex: options.latex,
       command: targetEngine,
       timeoutMs: options.timeoutMs || 35000,
     });
+    record('latexonline', r.success, r.durationMs || 0, r.error);
+    return withDiagnostics(r, 'latexonline');
   }
 
   if (preferEngine === 'clsi') {
-    return await compileWithLocalClsi({
+    const r = await compileWithLocalClsi({
       latex: options.latex,
       command: targetEngine,
       timeoutMs: options.timeoutMs || 60000,
+      resources: options.resources,
     });
+    record('clsi', r.success, r.durationMs || 0, r.error);
+    return withDiagnostics(r, 'clsi');
+  }
+
+  if (preferEngine === 'texlive') {
+    const r = await compileWithTexliveNet({
+      latex: options.latex,
+      command: targetEngine,
+      timeoutMs: options.timeoutMs || 45000,
+    });
+    record('texlive', r.success, r.durationMs || 0, r.error);
+    return withDiagnostics(r, 'texlive');
   }
 
   if (preferEngine === 'texapi') {
-    return await compileWithTexApi({
+    const r = await compileWithTexApi({
       latex: options.latex,
       command: targetEngine,
       timeoutMs: options.timeoutMs || 60000,
     });
+    record('texapi', r.success, r.durationMs || 0, r.error);
+    return withDiagnostics(r, 'texapi');
   }
 
   // Auto tier 1: self-hosted engine. The only tier with no quota to exhaust.
+  const tier1Start = Date.now();
   try {
     const local = await compileWithLocalClsi({
       latex: options.latex,
       command: targetEngine,
       timeoutMs: options.timeoutMs || 60000,
+      resources: options.resources,
     });
     if (local.success && local.pdfBuffer && local.pdfBuffer.length > 0) {
-      return local;
+      console.log(`[PDF] Engine clsi produced the paper in ${Date.now() - tier1Start}ms`);
+      record('clsi', true, Date.now() - tier1Start);
+      return withDiagnostics(local, 'clsi');
     }
-    console.warn(`[LatexCompiler] Self-hosted LaTeX failed: ${local.error}. Falling back to TexAPI...`);
+    console.warn(`[PDF] Engine clsi failed in ${Date.now() - tier1Start}ms: ${local.error}. Trying texapi...`);
+    record('clsi', false, Date.now() - tier1Start, local.log || local.error);
   } catch (err: any) {
-    console.warn(`[LatexCompiler] Self-hosted LaTeX exception: ${err.message}. Falling back to TexAPI...`);
+    console.warn(`[PDF] Engine clsi threw in ${Date.now() - tier1Start}ms: ${err.message}. Trying texapi...`);
+    record('clsi', false, Date.now() - tier1Start, err.message);
   }
 
   // Auto tier 2: TexAPI Cloud (20 req/min; skipped when no key is configured)
   if (TEXAPI_API_KEY) {
+    const tier2Start = Date.now();
     try {
       const texapi = await compileWithTexApi({
         latex: options.latex,
@@ -983,15 +1661,22 @@ export async function compileLatexUniversal(options: FormatexCompileOptions): Pr
         timeoutMs: options.timeoutMs || 60000,
       });
       if (texapi.success && texapi.pdfBuffer && texapi.pdfBuffer.length > 0) {
-        return texapi;
+        console.log(`[PDF] Engine texapi produced the paper in ${Date.now() - tier2Start}ms`);
+        record('texapi', true, Date.now() - tier2Start);
+        return withDiagnostics(texapi, 'texapi');
       }
-      console.warn(`[LatexCompiler] TexAPI failed: ${texapi.error}. Falling back to LaTeX.Online...`);
+      console.warn(`[PDF] Engine texapi failed in ${Date.now() - tier2Start}ms: ${texapi.error}. Trying latexonline...`);
+      record('texapi', false, Date.now() - tier2Start, texapi.log || texapi.error);
     } catch (err: any) {
-      console.warn(`[LatexCompiler] TexAPI exception: ${err.message}. Falling back to LaTeX.Online...`);
+      console.warn(`[PDF] Engine texapi threw in ${Date.now() - tier2Start}ms: ${err.message}. Trying latexonline...`);
+      record('texapi', false, Date.now() - tier2Start, err.message);
     }
+  } else {
+    console.warn('[PDF] Engine texapi skipped: TEXAPI_API_KEY is not configured.');
   }
 
   // Auto tier 3: free cloud compiler
+  const tier3Start = Date.now();
   try {
     const online = await compileWithLatexOnline({
       latex: options.latex,
@@ -1000,15 +1685,47 @@ export async function compileLatexUniversal(options: FormatexCompileOptions): Pr
     });
 
     if (online.success && online.pdfBuffer && online.pdfBuffer.length > 0) {
-      return online;
+      console.log(`[PDF] Engine latexonline produced the paper in ${Date.now() - tier3Start}ms`);
+      record('latexonline', true, Date.now() - tier3Start);
+      return withDiagnostics(online, 'latexonline');
     }
-    console.warn(`[LatexCompiler] LaTeX.Online attempt failed: ${online.error}. Falling back to FormaTeX...`);
+    console.warn(`[PDF] Engine latexonline failed in ${Date.now() - tier3Start}ms: ${online.error}. Trying formatex...`);
+    record('latexonline', false, Date.now() - tier3Start, online.log || online.error);
   } catch (err: any) {
-    console.warn(`[LatexCompiler] LaTeX.Online exception: ${err.message}. Falling back to FormaTeX...`);
+    console.warn(`[PDF] Engine latexonline threw in ${Date.now() - tier3Start}ms: ${err.message}. Trying formatex...`);
+    record('latexonline', false, Date.now() - tier3Start, err.message);
+  }
+
+  // Auto tier 3b: free TeXLive.net. Shares no infrastructure with
+  // latexonline.cc, so the two free tiers fail independently and neither needs
+  // a key or has a quota to exhaust.
+  const tier3bStart = Date.now();
+  try {
+    const texlive = await compileWithTexliveNet({
+      latex: options.latex,
+      command: targetEngine,
+      timeoutMs: options.timeoutMs || 45000,
+    });
+    if (texlive.success && texlive.pdfBuffer && texlive.pdfBuffer.length > 0) {
+      console.log(`[PDF] Engine texlive.net produced the paper in ${Date.now() - tier3bStart}ms`);
+      record('texlive', true, Date.now() - tier3bStart);
+      return withDiagnostics(texlive, 'texlive');
+    }
+    console.warn(`[PDF] Engine texlive.net failed in ${Date.now() - tier3bStart}ms: ${texlive.error}. Trying formatex...`);
+    record('texlive', false, Date.now() - tier3bStart, texlive.log || texlive.error);
+  } catch (err: any) {
+    console.warn(`[PDF] Engine texlive.net threw in ${Date.now() - tier3bStart}ms: ${err.message}. Trying formatex...`);
+    record('texlive', false, Date.now() - tier3bStart, err.message);
   }
 
   // Auto tier 4: metered cloud API
-  return await compileLatexWithFormatex(options);
+  const tier4Start = Date.now();
+  const formatexResult = await compileLatexWithFormatex(options);
+  console.log(
+    `[PDF] Engine formatex ${formatexResult.success ? 'produced the paper' : 'failed'} in ${Date.now() - tier4Start}ms`
+  );
+  record('formatex', formatexResult.success, Date.now() - tier4Start, formatexResult.log || formatexResult.error);
+  return withDiagnostics(formatexResult, 'formatex');
 }
 
 /**
@@ -1021,7 +1738,7 @@ export async function generateAndUploadFormatexPdf(params: {
   theorySec1?: any[];
   theorySec2?: any[];
   customLatex?: string;
-  preferEngine?: 'clsi' | 'texapi' | 'latexonline' | 'formatex' | 'auto';
+  preferEngine?: 'clsi' | 'texapi' | 'latexonline' | 'texlive' | 'formatex' | 'auto';
 }): Promise<{
   success: boolean;
   pdfUrl?: string;
@@ -1092,4 +1809,225 @@ export async function generateAndUploadFormatexPdf(params: {
     compilerService: compilation.compilerService || 'LaTeX.Online (Free)',
   };
 }
+
+export interface ValidatedLatexCompilationResult {
+  success: boolean;
+  pdfBuffer?: Buffer;
+  latex: string;
+  passCount: number;
+  compilerService?: string;
+  durationMs: number;
+  error?: string;
+  /** Which engines ran, what source they got, and the first real compiler error. */
+  diagnostics?: LatexDiagnostics;
+  /** Every pass's diagnostics, most recent last. */
+  passDiagnostics?: LatexDiagnostics[];
+}
+
+/**
+ * Merge the evidence from every pass into one report.
+ *
+ * A failure is usually only visible on one pass, so the caller gets the union:
+ * every engine attempt in order, the first error seen anywhere, and the source
+ * file of the pass whose error is being reported.
+ */
+function mergeDiagnostics(runs: LatexDiagnostics[]): LatexDiagnostics | undefined {
+  if (runs.length === 0) return undefined;
+  const attempts = runs.flatMap(run => run.attempts);
+  const withError = runs.find(run => run.firstError);
+  const last = runs[runs.length - 1];
+  const blamed = withError || last;
+  return {
+    engine: blamed.engine,
+    command: blamed.command,
+    sourcePath: blamed.sourcePath,
+    sourceLines: blamed.sourceLines,
+    sourceBytes: blamed.sourceBytes,
+    attempts,
+    firstError: withError?.firstError,
+    firstErrorLine: withError?.firstErrorLine,
+    log: blamed.log,
+  };
+}
+
+/** Keep the compiler's own output beside the source that produced it. */
+function saveCompilerLog(sourcePath: string | undefined, log: string | undefined, label: string) {
+  if (!sourcePath || !log) return;
+  try {
+    fs.writeFileSync(`${sourcePath}.${label}.log`, log, 'utf8');
+  } catch {
+    /* diagnostics are best effort */
+  }
+}
+
+/**
+ * Multi-pass backend verification & self-healing LaTeX compilation engine.
+ * Pass 1: Isolates and formats all tables and TikZ diagrams with responsive layout constraints.
+ * Pass 2: Inspects compilation errors (unescaped math/tabs/dimension limits) and automatically applies self-healing transforms.
+ * Pass 3: Recompiles with structured standard template if AI raw syntax had structural corruption.
+ */
+/**
+ * Print the failure as a compiler report rather than a shrug.
+ *
+ * The log carries the command, the source file, the first real error and its
+ * line number, so the next reader does not have to reproduce the run to find
+ * out what TeX objected to.
+ */
+function reportCompilerFailure(passName: string, result: FormatexCompileResult, runs: LatexDiagnostics[]) {
+  const merged = mergeDiagnostics(runs);
+  if (!merged) return;
+  saveCompilerLog(merged.sourcePath, merged.log, passName.replace(/\s+/g, '-'));
+  console.error(
+    [
+      '[PDF COMPILER]',
+      `Pass: ${passName}`,
+      `Compiler: ${merged.engine}`,
+      `Command: ${merged.command}`,
+      `Source: ${merged.sourcePath || '(not saved)'} (${merged.sourceLines || '?'} lines, ${merged.sourceBytes || '?'} bytes)`,
+      `First error: ${merged.firstError || result.error || 'unknown'}`,
+      `Line: ${merged.firstErrorLine ?? 'unknown'}`,
+      'Engines tried:',
+      ...merged.attempts.map(a => `  - ${a.engine}: ${a.ok ? 'ok' : 'failed'} in ${a.ms}ms${a.error ? ` - ${String(a.error).slice(0, 400)}` : ''}`),
+      'Compiler output:',
+      (merged.log || '(none)').slice(0, 4000),
+    ].join('\n')
+  );
+}
+
+export async function compileValidatedLatexWithSelfHealing(options: {
+  latex: string;
+  title?: string;
+  structuredFallback?: any;
+  preferEngine?: 'clsi' | 'texapi' | 'latexonline' | 'texlive' | 'formatex' | 'auto';
+  timeoutMs?: number;
+  /** Figure files the document references, for compilers that accept them. */
+  resources?: LatexCompileResource[];
+}): Promise<ValidatedLatexCompilationResult> {
+  const startTime = Date.now();
+  const { preferEngine = 'auto', timeoutMs = 60000 } = options;
+  const passDiagnostics: LatexDiagnostics[] = [];
+
+  // Pass 1: Layout Isolation & Normalization
+  let currentLatex = isolateAndFormatLatexTablesAndDiagrams(options.latex);
+  currentLatex = sanitizeLatexSource(currentLatex);
+
+  console.log('[PDF] Compile pass 1 starting (layout isolation + normalization)...');
+  let pass1Res = await compileLatexUniversal({
+    latex: currentLatex,
+    engine: 'pdflatex',
+    smart: true,
+    preferEngine,
+    timeoutMs,
+    resources: options.resources,
+  });
+
+  if (pass1Res.diagnostics) passDiagnostics.push(pass1Res.diagnostics);
+
+  if (pass1Res.success && pass1Res.pdfBuffer && pass1Res.pdfBuffer.length > 0) {
+    console.log(`[PDF] Compile pass 1 succeeded in ${Date.now() - startTime}ms via ${pass1Res.compilerService}`);
+    return {
+      success: true,
+      pdfBuffer: pass1Res.pdfBuffer,
+      latex: currentLatex,
+      passCount: 1,
+      compilerService: pass1Res.compilerService,
+      durationMs: Date.now() - startTime,
+      diagnostics: pass1Res.diagnostics,
+      passDiagnostics,
+    };
+  }
+
+  console.warn(`[PDF] Compile pass 1 failed after ${Date.now() - startTime}ms (${pass1Res.error}). Triggering pass 2 self-healing repair...`);
+  reportCompilerFailure('pass 1', pass1Res, passDiagnostics);
+
+  // Pass 2: Error-guided regex & structure healing
+  const healedLatex = repairLatexErrors(currentLatex, pass1Res.error || pass1Res.log || '');
+  let pass2Res = await compileLatexUniversal({
+    latex: healedLatex,
+    engine: 'pdflatex',
+    smart: true,
+    preferEngine,
+    timeoutMs,
+    resources: options.resources,
+  });
+  if (pass2Res.diagnostics) passDiagnostics.push(pass2Res.diagnostics);
+
+  if (pass2Res.success && pass2Res.pdfBuffer && pass2Res.pdfBuffer.length > 0) {
+    console.log(`[PDF] Compile pass 2 self-healing succeeded in ${Date.now() - startTime}ms via ${pass2Res.compilerService}`);
+    return {
+      success: true,
+      pdfBuffer: pass2Res.pdfBuffer,
+      latex: healedLatex,
+      passCount: 2,
+      compilerService: pass2Res.compilerService,
+      durationMs: Date.now() - startTime,
+      diagnostics: pass2Res.diagnostics,
+      passDiagnostics,
+    };
+  }
+
+  console.warn(`[PDF] Compile pass 2 failed after ${Date.now() - startTime}ms (${pass2Res.error}). Triggering pass 3 fallback template...`);
+  reportCompilerFailure('pass 2', pass2Res, passDiagnostics);
+
+  // Pass 3: Fallback using clean university template
+  if (options.structuredFallback && options.structuredFallback.sections) {
+    const rawStructureLatex = generateUniversityLatexDocument({
+      exam: {
+        university_name: options.structuredFallback.universityName,
+        name: options.structuredFallback.examName,
+        subject: options.structuredFallback.subject || options.title,
+        paper_code: options.structuredFallback.paperCode,
+        duration_minutes: 180,
+        total_marks: options.structuredFallback.totalMarks || 70,
+      },
+      // The set letter belongs to the source paper; only fall back when the
+      // structure carries none.
+      setLetter: options.structuredFallback.setLetter || '4',
+      // Hand over the whole pattern: the three-slot split dropped every section
+      // past the third and capped the rest at five questions each.
+      sections: options.structuredFallback.sections,
+    });
+
+    const pass3Latex = isolateAndFormatLatexTablesAndDiagrams(rawStructureLatex);
+    let pass3Res = await compileLatexUniversal({
+      latex: pass3Latex,
+      engine: 'pdflatex',
+      smart: true,
+      preferEngine,
+      timeoutMs,
+      resources: options.resources,
+    });
+    if (pass3Res.diagnostics) passDiagnostics.push(pass3Res.diagnostics);
+
+    if (pass3Res.success && pass3Res.pdfBuffer && pass3Res.pdfBuffer.length > 0) {
+      console.log(`[PDF] Compile pass 3 succeeded in ${Date.now() - startTime}ms via ${pass3Res.compilerService}`);
+      return {
+        success: true,
+        pdfBuffer: pass3Res.pdfBuffer,
+        latex: pass3Latex,
+        passCount: 3,
+        compilerService: pass3Res.compilerService,
+        durationMs: Date.now() - startTime,
+        diagnostics: pass3Res.diagnostics,
+        passDiagnostics,
+      };
+    }
+    reportCompilerFailure('pass 3', pass3Res, passDiagnostics);
+  }
+
+  const merged = mergeDiagnostics(passDiagnostics);
+  console.error(
+    `[PDF] All 3 compile passes failed after ${Date.now() - startTime}ms. First error: ${merged?.firstError || pass2Res.error || pass1Res.error}`
+  );
+  return {
+    success: false,
+    latex: healedLatex || currentLatex,
+    passCount: 3,
+    durationMs: Date.now() - startTime,
+    error: merged?.firstError || pass2Res.error || pass1Res.error || 'All LaTeX compilation passes failed.',
+    diagnostics: merged,
+    passDiagnostics,
+  };
+}
+
 

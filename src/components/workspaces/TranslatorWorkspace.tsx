@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import {
+  Globe,
   Languages,
   Sparkles,
   CheckCircle2,
@@ -25,6 +26,7 @@ import { User, Question, QuestionTranslation } from '../../types';
 import { api } from '../../api';
 import { NavSubTab } from '../Sidebar';
 import { AuthorityProctorEnclave } from '../proctor/AuthorityProctorEnclave';
+import { OpenAIPrismBrowserModal } from '../OpenAIPrismBrowserModal';
 
 interface TranslatorWorkspaceProps {
   currentUser: User | null;
@@ -73,6 +75,11 @@ export const TranslatorWorkspace: React.FC<TranslatorWorkspaceProps> = ({
   const [translations, setTranslations] = useState<QuestionTranslation[]>([]);
   const [loading, setLoading] = useState(true);
   const [statusMessage, setStatusMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
+
+  // Prism, the LaTeX editor, opened over this workspace. The panel is the same
+  // streamed real browser the paper-generation screen uses - a translator
+  // writing regional-script LaTeX needs the same editor, not a second one.
+  const [showPrismBrowser, setShowPrismBrowser] = useState(false);
 
   // Translation Workbench State
   const [selectedQuestion, setSelectedQuestion] = useState<Question | null>(null);
@@ -446,13 +453,25 @@ export const TranslatorWorkspace: React.FC<TranslatorWorkspaceProps> = ({
                   Translate questions into official languages with AI linguistic assistance or custom translator authored override.
                 </p>
               </div>
-              <button
-                onClick={loadData}
-                className="px-3 py-1.5 rounded-lg border border-slate-200 hover:bg-slate-50 text-slate-700 text-xs font-semibold flex items-center gap-1.5 cursor-pointer"
-              >
-                <RefreshCw className={`w-3.5 h-3.5 ${loading ? 'animate-spin' : ''}`} />
-                <span>Refresh Queue</span>
-              </button>
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={loadData}
+                  className="px-3 py-1.5 rounded-lg border border-slate-200 hover:bg-slate-50 text-slate-700 text-xs font-semibold flex items-center gap-1.5 cursor-pointer"
+                >
+                  <RefreshCw className={`w-3.5 h-3.5 ${loading ? 'animate-spin' : ''}`} />
+                  <span>Refresh Queue</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => setShowPrismBrowser(true)}
+                  className="px-3 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1.5 bg-gradient-to-r from-purple-700 to-indigo-700 hover:from-purple-600 hover:to-indigo-600 text-white shadow-xs border border-purple-400/30 transition-all cursor-pointer shrink-0"
+                  title="Open Prism, the LaTeX editor, in this screen"
+                >
+                  <Globe className="w-3.5 h-3.5 text-purple-200" />
+                  <span>🌐 Prism</span>
+                </button>
+              </div>
             </div>
 
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
@@ -992,6 +1011,16 @@ export const TranslatorWorkspace: React.FC<TranslatorWorkspaceProps> = ({
                   <option key={l.code} value={l.code}>{l.name}</option>
                 ))}
               </select>
+
+              <button
+                type="button"
+                onClick={() => setShowPrismBrowser(true)}
+                className="px-3 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1.5 bg-gradient-to-r from-purple-700 to-indigo-700 hover:from-purple-600 hover:to-indigo-600 text-white shadow-xs border border-purple-400/30 transition-all cursor-pointer shrink-0"
+                title="Open Prism, the LaTeX editor, in this screen"
+              >
+                <Globe className="w-3.5 h-3.5 text-purple-200" />
+                <span>🌐 Prism</span>
+              </button>
             </div>
           </div>
 
@@ -1059,6 +1088,15 @@ export const TranslatorWorkspace: React.FC<TranslatorWorkspaceProps> = ({
           </div>
         </div>
       )}
+
+      {/* OpenAI Prism & LaTeX In-Project Browser Modal.
+          Outside the two tab branches above, so the editor stays reachable from
+          the verification ledger as well as the workbench. */}
+      <OpenAIPrismBrowserModal
+        isOpen={showPrismBrowser}
+        onClose={() => setShowPrismBrowser(false)}
+        initialUrl="https://prism.openai.com/"
+      />
     </div>
   );
 };

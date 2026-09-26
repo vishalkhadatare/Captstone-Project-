@@ -1,0 +1,86 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <title>Popup probe (child)</title>
+    <style>
+      html, body { margin: 0; height: 100%; }
+      button {
+        position: absolute;
+        inset: 0;
+        width: 100%;
+        height: 100%;
+        border: 0;
+        font: 700 18px system-ui;
+        background: #1e293b;
+        color: #f8fafc;
+        cursor: pointer;
+      }
+      pre {
+        position: absolute;
+        left: 4px;
+        top: 4px;
+        z-index: 2;
+        margin: 0;
+        padding: 3px 6px;
+        background: #020617;
+        color: #4ade80;
+        font: 11px/1.35 monospace;
+        pointer-events: none;
+      }
+    </style>
+  </head>
+  <body>
+    <!-- Full-bleed on purpose: any centre click from the harness lands here. -->
+    <button id="go">OPEN-POPUP-PROBE</button>
+    <pre id="result">no-attempt</pre>
+    <script>
+      const variant = new URLSearchParams(location.search).get('variant') || 'unknown';
+      const resultEl = document.getElementById('result');
+
+      const report = (payload) => {
+        const text = JSON.stringify(payload);
+        resultEl.textContent = text;
+        try {
+          parent.postMessage({ type: 'ZLPOPUP', variant, ...payload }, '*');
+        } catch {
+          /* reporting is best effort */
+        }
+        return text;
+      };
+
+      window.__probe = () => {
+        let handle = null;
+        let error = null;
+
+        try {
+          handle = window.open(
+            'http://127.0.0.1:3000/tests/manual/popup-probe-child.html?opened=1',
+            `ZLPopupProbe_${variant}`,
+            'width=420,height=320',
+          );
+        } catch (err) {
+          error = String(err);
+        }
+
+        // Tidy up so the probe does not litter windows.
+        setTimeout(() => {
+          try {
+            if (handle) handle.close();
+          } catch {
+            /* ignore */
+          }
+        }, 2500);
+
+        return report({
+          openedNull: handle === null,
+          handle: String(handle),
+          error,
+          hasActivation: document.hasTransientUserActivation ? document.hasTransientUserActivation() : null,
+        });
+      };
+
+      document.getElementById('go').addEventListener('click', () => window.__probe());
+    </script>
+  </body>
+</html>

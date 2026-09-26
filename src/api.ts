@@ -247,7 +247,9 @@ export async function ollamaChatStream(
     plainText?: boolean;
   },
   onDelta: (delta: string) => void,
-  signal?: AbortSignal
+  signal?: AbortSignal,
+  /** Called when a provider died mid-stream: drop whatever has been shown so far. */
+  onReset?: () => void
 ): Promise<string> {
   const res = await fetch('/api/ai/ollama-chat-stream', {
     method: 'POST',
@@ -296,6 +298,13 @@ export async function ollamaChatStream(
           continue;
         }
         if (event?.error) throw new Error(event.error);
+        if (event?.reset) {
+          // The provider that produced `full` is gone; its partial reply must not
+          // be glued onto the next provider's output.
+          full = '';
+          onReset?.();
+          continue;
+        }
         if (event?.delta) {
           full += event.delta;
           onDelta(event.delta);
@@ -359,6 +368,23 @@ async function request<T>(endpoint: string, options: RequestInit = {}): Promise<
   }
 
   return data;
+}
+
+/**
+ * What the compiler actually did, so a failed paper can be debugged from the UI
+ * instead of from a vague one-liner.
+ */
+export interface CompileDiagnostics {
+  engine: string;
+  command: string;
+  /** Absolute path of the LaTeX source written to disk before compiling. */
+  sourcePath?: string;
+  sourceLines?: number;
+  sourceBytes?: number;
+  attempts: Array<{ engine: string; command: string; ok: boolean; ms: number; error?: string }>;
+  firstError?: string;
+  firstErrorLine?: number;
+  log?: string;
 }
 
 export const api = {
@@ -564,6 +590,23 @@ export const api = {
       wordCount: number;
       info?: any;
     }>('/api/pdf/extract-text', { method: 'POST', body: JSON.stringify(payload) }),
+  extractPdfFigures: (payload: { file_data?: string; file_name?: string; max_figures?: number }) =>
+    request<{
+      success: boolean;
+      figures: Array<{
+        index: number;
+        name: string;
+        url: string;
+        page: number;
+        kind: 'raster' | 'vector-region';
+        width: number;
+        height: number;
+        /** The crop's own bytes, so reuse never depends on a second request. */
+        base64: string;
+      }>;
+      warnings: string[];
+      error?: string;
+    }>('/api/papers/extract-figures', { method: 'POST', body: JSON.stringify(payload) }),
   groqChat: (payload: { messages: Array<{ role: string; content: string }>; model?: string; temperature?: number; max_tokens?: number }) =>
     request<{ success: boolean; message: { content: string }; text: string }>('/api/ai/groq-chat', { method: 'POST', body: JSON.stringify(payload) }),
   ollamaChat: (payload: { messages: Array<{ role: string; content: string }>; model?: string; temperature?: number; plainText?: boolean }) =>
@@ -602,7 +645,220 @@ export const api = {
   getLatexOnlineHealth: () => request<{ connected: boolean; service?: string; engine?: string; error?: string }>('/api/latex-online/health'),
   getLatexServiceHealth: () => request<{ connected: boolean; service?: string; url?: string; compilers?: string[]; error?: string }>('/api/latex-service/health'),
   getTexApiHealth: () => request<{ connected: boolean; service?: string; url?: string; error?: string }>('/api/texapi/health'),
-  compileFormatexPdf: (examId: string, payload?: { setLetter?: string; customLatex?: string; preferEngine?: 'clsi' | 'texapi' | 'latexonline' | 'formatex' | 'auto' }) =>
+  getTexliveNetHealth: () => request<{ connected: boolean; service?: string; engine?: string; url?: string; error?: string }>('/api/texlive/health'),
+  getLatexToolStatus: () => request<{
+    editors: { total: number; ids: string[] };
+    engines: Array<{ engine: string; name: string; connected: boolean; error?: string }>;
+    enginesOnline: number;
+    localAi: { provider: 'ollama'; reachable: boolean; model: string; error?: string };
+    freeCloudAiConfigured: Array<{ id: string; label: string; freeTier: string }>;
+    fullyFreePathAvailable: boolean;
+    notes: string[];
+  }>('/api/latex-tools/status'),
+  getLatexToolCatalogue: () => request<{
+    editors: Array<{
+      id: string;
+      name: string;
+      kind: string;
+      homepage: string;
+      repo?: string;
+      license: string;
+      ai: string;
+      aiEndpoint?: string;
+      freeBasis: string;
+      evidence: string;
+      caveat?: string;
+    }>;
+    engines: Array<{ engine: string; name: string; url: string; license: string; freeBasis: string; evidence: string }>;
+    excluded: Array<{ id: string; name: string; homepage: string; reason: string }>;
+    webTools: Array<{
+      id: string;
+      name: string;
+      kind: 'cloud-editor' | 'model-demo';
+      url: string;
+      model: string;
+      ai: string;
+      keylessBasis: string;
+      evidence: string;
+      embed: 'verified' | 'blocked';
+      embedEvidence: string;
+      caveat?: string;
+    }>;
+  }>('/api/latex-tools/catalogue'),
+  /**
+   * Everything the embedded browser needs, owned by the backend: navigation
+   * policy, bookmarks and the live tool status. Readable without a token so the
+   * panel works on the paper page before sign-in.
+   */
+  getBrowserConfig: () =>
+    request<{
+      generatedAt: string;
+      policy: {
+        searchTemplate: string;
+        searchHost: string;
+        searchEmbeds: boolean;
+        newTabUrl: string;
+        homeUrl: string;
+        maxTabs: number;
+        allowedSchemes: string[];
+        refusedSchemes: Array<{ scheme: string; reason: string }>;
+        framePolicy: Array<{ host: string; embeddable: boolean; evidence: string }>;
+      };
+      bookmarks: Array<{
+        id: string;
+        name: string;
+        url: string;
+        icon: string;
+        group: 'core' | 'ai';
+        model?: string;
+        keylessBasis?: string;
+        badge?: string;
+        embedBlocked?: boolean;
+        status?: 'ok' | 'asleep' | 'down' | 'unknown';
+        liveNote?: string;
+      }>;
+      toolStatus: Array<{
+        id: string;
+        url: string;
+        reachable: boolean;
+        status?: number;
+        embeddable: boolean;
+        embedReason: string;
+        interactive: boolean;
+        sleeping: boolean;
+        ms: number;
+        error?: string;
+      }>;
+      usableToolsNow: number;
+      notes: string[];
+    }>('/api/browser/config'),
+  getAiLatexWebTools: () =>
+    request<{
+      probedAt: string;
+      usableNow: number;
+      tools: Array<{
+        id: string;
+        url: string;
+        reachable: boolean;
+        status?: number;
+        embeddable: boolean;
+        embedReason: string;
+        interactive: boolean;
+        sleeping: boolean;
+        ms: number;
+        error?: string;
+      }>;
+    }>('/api/latex-tools/web-tools'),
+  runLatexToolSelfTest: () =>
+    request<{
+      ok: boolean;
+      ranAt: string;
+      items: Array<{
+        kind: 'engine' | 'ai';
+        id: string;
+        label: string;
+        ok: boolean;
+        ms: number;
+        detail: string;
+        error?: string;
+      }>;
+      enginesWorking: number;
+      enginesTested: number;
+      aiWorking: number;
+      aiTested: number;
+      endToEnd: {
+        ok: boolean;
+        provider?: string;
+        engine?: string;
+        pdfBytes?: number;
+        latex?: string;
+        ms: number;
+        error?: string;
+      };
+    }>('/api/latex-tools/selftest', { method: 'POST' }),
+  compileUniversalLatex: (payload: { latex: string; title?: string; preferEngine?: 'clsi' | 'texapi' | 'latexonline' | 'texlive' | 'formatex' | 'auto' }) =>
+    request<{ success: boolean; pdfUrl: string; filename: string; sizeBytes: number; checksumSha256: string; compilerService?: string; error?: string }>('/api/latex/compile-universal', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    }),
+  compileValidatedLatex: (payload: {
+    latex?: string;
+    structuredData?: any;
+    paperText?: string;
+    subject?: string;
+    universityName?: string;
+    paperCode?: string;
+    totalMarks?: number;
+    durationHours?: number;
+    /** Set letter printed on the source paper, e.g. "P" or "4". */
+    setLetter?: string;
+    /** Figures cropped from the source paper, shipped to the compiler as files. */
+    resources?: Array<{ path: string; content: string; encoding?: 'utf8' | 'base64' }>;
+    /** Published figure crops the paper references, read back by the server. */
+    sourceFigureUrls?: string[];
+    preferEngine?: 'clsi' | 'texapi' | 'latexonline' | 'texlive' | 'formatex' | 'auto';
+  }, requestOptions: { signal?: AbortSignal } = {}) =>
+    request<{
+      success: boolean;
+      pdfUrl: string;
+      filename: string;
+      sizeBytes: number;
+      checksumSha256: string;
+      /** Things that went wrong without stopping the paper, e.g. figures dropped. */
+      warnings?: string[];
+      latex?: string;
+      passCount?: number;
+      compilerService?: string;
+      /** How long the server spent typesetting, in milliseconds. */
+      elapsedMs?: number;
+      /** Which engines ran, the source that was compiled, and the first real error. */
+      diagnostics?: CompileDiagnostics;
+      passDiagnostics?: CompileDiagnostics[];
+      /**
+       * The dedicated LaTeX engine's attempt. Present on success when it rescued
+       * the paper, and on failure so the last resort's own error is visible.
+       */
+      latexFallback?: {
+        engine?: string;
+        code?: string;
+        exitCode?: number | null;
+        error?: string;
+        log?: string;
+        texPath?: string;
+        logPath?: string;
+        /** Endpoint that serves the .tex this paper was built from. */
+        sourceUrl?: string;
+        source?: string;
+      };
+      error?: string;
+    }>('/api/paper-synthesizer/compile-validated-latex', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+      signal: requestOptions.signal,
+    }),
+  generateSynthesizedPdf: (payload: {
+    paperText?: string;
+    structuredData?: any;
+    subject?: string;
+    universityName?: string;
+    paperCode?: string;
+    totalMarks?: number;
+    durationHours?: number;
+  }) =>
+    request<{
+      success: boolean;
+      pdfUrl: string;
+      filename: string;
+      sizeBytes: number;
+      checksumSha256: string;
+      engine?: string;
+      structuredData?: any;
+      error?: string;
+    }>('/api/paper-synthesizer/generate-pdfkit-pdf', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    }),
+  compileFormatexPdf: (examId: string, payload?: { setLetter?: string; customLatex?: string; preferEngine?: 'clsi' | 'texapi' | 'latexonline' | 'texlive' | 'formatex' | 'auto' }) =>
     request<{ success: boolean; pdfUrl: string; latex: string; sizeBytes: number; checksumSha256: string; compilerService?: string; error?: string }>(`/api/examinations/${examId}/compile-formatex-pdf`, {
       method: 'POST',
       body: JSON.stringify(payload || {}),
@@ -953,6 +1209,48 @@ export const api = {
         method: 'POST',
         body: JSON.stringify(payload),
       }),
+    /**
+     * Pattern-faithful composition: keeps the uploaded papers' main questions
+     * and recombines their sub-questions, then emits and compiles LaTeX.
+     */
+    composePatternPaper: (payload: {
+      exam_id?: string;
+      set_letter?: string;
+      source_paper_ids: string[];
+      pattern?: Array<Record<string, unknown>>;
+      max_source_contribution_percent?: number;
+      compile?: boolean;
+    }) =>
+      request<{
+        success: boolean;
+        message: string;
+        setLetter: string;
+        totalMarks: number;
+        /** Marks the source pattern actually asks for, versus `totalMarks` filled. */
+        expectedMarks: number;
+        coveragePercent: number;
+        shortFrames: string[];
+        sourceBreakdown: Record<string, number>;
+        frames: Array<{
+          questionNumber: string;
+          instruction: string;
+          type: string;
+          subQuestionCount: number;
+          attemptCount: number;
+          marksPerSubQuestion: number;
+          subQuestions: Array<{ label: string; id: string; content: string; marks: number }>;
+        }>;
+        figures: Array<{ questionId: string; name: string; source: string }>;
+        latex: string;
+        compiledBy?: string;
+        pdfUrl?: string;
+        filename?: string;
+        pdfHash?: string;
+        warnings: string[];
+      }>('/api/multi-paper/compose-pattern-paper', {
+        method: 'POST',
+        body: JSON.stringify(payload),
+      }),
     getGeneratedPapers: (examId?: string) =>
       request<{ success: boolean; papers: GeneratedPaper[] }>(
         `/api/multi-paper/generated${examId ? `?examId=${encodeURIComponent(examId)}` : ''}`
@@ -1066,4 +1364,194 @@ export function getErrorMessage(error: any): string {
   }
 
   return error.message || 'An error occurred. Please try again.';
+}
+
+/** A frame pushed by `/api/browser/stream`. */
+export interface BrowserStatusFrame {
+  type: 'browser-status' | 'error';
+  at?: string;
+  /** The assembled bookmarks, statuses already decided by the backend. */
+  bookmarks?: Array<{
+    id: string;
+    name: string;
+    url: string;
+    icon: string;
+    group: 'core' | 'ai';
+    model?: string;
+    keylessBasis?: string;
+    badge?: string;
+    embedBlocked?: boolean;
+    status?: 'ok' | 'asleep' | 'down' | 'unknown';
+    liveNote?: string;
+  }>;
+  tools?: Array<{
+    id: string;
+    url: string;
+    reachable: boolean;
+    status?: number;
+    embeddable: boolean;
+    embedReason: string;
+    interactive: boolean;
+    sleeping: boolean;
+    ms: number;
+    error?: string;
+  }>;
+  usableNow?: number;
+  notes?: string[];
+  error?: string;
+}
+
+/**
+ * Subscribe to live tool status from the backend.
+ *
+ * Server-Sent Events rather than polling, and rather than a WebSocket: the push
+ * is one-way, `EventSource` reconnects on its own after a server restart, and it
+ * is already how this server streams. Returns an unsubscribe function, so a
+ * caller that unmounts cannot leave a retrying connection behind.
+ */
+export function subscribeBrowserStatus(onFrame: (frame: BrowserStatusFrame) => void): () => void {
+  if (typeof EventSource === 'undefined') return () => undefined;
+
+  let source: EventSource | null = null;
+  try {
+    source = new EventSource('/api/browser/stream');
+  } catch {
+    return () => undefined;
+  }
+
+  source.onmessage = (event) => {
+    try {
+      onFrame(JSON.parse(event.data) as BrowserStatusFrame);
+    } catch {
+      // A malformed frame is not worth tearing the stream down for.
+    }
+  };
+
+  return () => {
+    try {
+      source?.close();
+    } catch {
+      // already closed
+    }
+    source = null;
+  };
+}
+
+// ---------------------------------------------------------------------------
+// The streamed browser: a real Chromium, which is what browser mode needs
+// ---------------------------------------------------------------------------
+//
+// An `<iframe>` can never host a sign-in (see the note in server.ts: the
+// providers answer with `frame-ancestors 'self'` / `X-Frame-Options: DENY`, and
+// Chrome partitions the cookies a login would need). So browser mode asks the
+// server for a real browser instead, and draws its frames here.
+
+export type StreamedBrowserState = 'stopped' | 'starting' | 'ready' | 'error';
+
+export interface StreamedBrowserStatus {
+  state: StreamedBrowserState;
+  url: string;
+  title: string;
+  loading: boolean;
+  canGoBack: boolean;
+  canGoForward: boolean;
+  viewport: { width: number; height: number };
+  frameSeq: number;
+  lastFrameAt: number | null;
+  lastReportAt: number | null;
+  viewers: number;
+  updatedAt: number;
+  error: string | null;
+  /** Plain-language availability, decided by the server. */
+  reason: string;
+  /** A short line from the browser itself - where a download was saved. */
+  notice: string | null;
+}
+
+export interface StreamedBrowserFrame {
+  seq: number;
+  at: number;
+  mime: 'image/jpeg';
+  base64: string;
+  width: number;
+  height: number;
+  bytes: number;
+}
+
+export type BrowserLiveEvent =
+  | { type: 'status'; status: StreamedBrowserStatus }
+  | { type: 'frame'; frame: StreamedBrowserFrame };
+
+export type StreamedBrowserCommand =
+  | { type: 'navigate'; url: string }
+  | { type: 'back' | 'forward' | 'reload' | 'stop' }
+  | { type: 'resize'; viewport: { width: number; height: number } };
+
+/** Is a streamed browser running, and what is it showing? */
+export const getBrowserHostStatus = () =>
+  request<{ status: StreamedBrowserStatus; running: boolean }>('/api/browser/host/status');
+
+/** Start a real browser for browser mode. Resolves with the reason if it cannot. */
+export const startBrowserHost = () =>
+  request<{ ok: boolean; reason: string; status: StreamedBrowserStatus }>('/api/browser/host/start', {
+    method: 'POST',
+  });
+
+export const stopBrowserHost = () =>
+  request<{ status: StreamedBrowserStatus }>('/api/browser/host/stop', { method: 'POST' });
+
+export const sendBrowserCommand = (command: StreamedBrowserCommand) =>
+  request<{ ok: boolean; reason: string }>('/api/browser/command', {
+    method: 'POST',
+    body: JSON.stringify(command),
+  });
+
+/**
+ * Forward one input event to the streamed browser.
+ *
+ * Fire-and-forget on purpose: a mouse move at 60Hz must not queue a promise per
+ * event, and a dropped click is not worth blocking the handler that captures it.
+ * The server validates everything anyway, so a refusal is a no-op rather than a
+ * failure the renderer has to handle.
+ */
+export const sendBrowserInput = (event: unknown): void => {
+  void request<{ ok: boolean; reason: string }>('/api/browser/input', {
+    method: 'POST',
+    body: JSON.stringify(event),
+  }).catch(() => undefined);
+};
+
+/**
+ * Subscribe to the streamed browser: its state, and its frames.
+ *
+ * Same transport as the tool status stream, and for the same reasons - one-way
+ * push, self-reconnecting, already how this server streams. Frames are large, so
+ * the caller must not keep them: draw each one and let it go.
+ */
+export function subscribeBrowserLive(onEvent: (event: BrowserLiveEvent) => void): () => void {
+  if (typeof EventSource === 'undefined') return () => undefined;
+
+  let source: EventSource | null = null;
+  try {
+    source = new EventSource('/api/browser/live');
+  } catch {
+    return () => undefined;
+  }
+
+  source.onmessage = (event) => {
+    try {
+      onEvent(JSON.parse(event.data) as BrowserLiveEvent);
+    } catch {
+      // A malformed frame must not tear the stream down.
+    }
+  };
+
+  return () => {
+    try {
+      source?.close();
+    } catch {
+      // already closed
+    }
+    source = null;
+  };
 }

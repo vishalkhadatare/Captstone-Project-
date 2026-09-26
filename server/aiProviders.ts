@@ -1,3 +1,4 @@
+import 'dotenv/config';
 import { GoogleGenAI } from '@google/genai';
 import os from 'os';
 
@@ -14,6 +15,7 @@ import os from 'os';
  */
 
 export type ProviderId =
+  | 'nvidia'
   | 'agentrouter'
   | 'groq'
   | 'gemini'
@@ -49,6 +51,8 @@ export interface ChatOptions {
   minimumProvider?: ProviderId;
   /** Pin the Ollama context window. Auto-sized from prompt length when omitted. */
   num_ctx?: number;
+  /** Force reasoning on/off for local thinking models. Defaults to OLLAMA_THINK. */
+  think?: boolean;
 }
 
 export interface ChatAttempt {
@@ -86,6 +90,7 @@ interface ProviderDef {
 }
 
 const DEFAULT_ORDER: ProviderId[] = [
+  'nvidia',
   'agentrouter',
   'groq',
   'gemini',
@@ -104,9 +109,10 @@ export const OLLAMA_EMBED_MODEL = process.env.OLLAMA_EMBED_MODEL || 'nomic-embed
  * Smaller, faster model for interactive chat and per-question answering.
  *
  * Generation speed here is bounded by model size — the 7B runs at ~10 generated tokens/sec
- * on this CPU, so every answer costs real seconds. A 3B roughly doubles that. The larger
- * OLLAMA_MODEL is kept for extraction and paper generation, where reading a whole paper
- * correctly matters more than latency.
+ * on this CPU, so every answer costs real seconds. The qwen3.5 4B default is a full
+ * generation newer than the qwen2.5 models it replaced and answers markedly more accurately
+ * at a size that still fits a CPU. The larger OLLAMA_MODEL is kept for extraction and paper
+ * generation, where reading a whole paper correctly matters more than latency.
  *
  * Defaults to OLLAMA_MODEL, so nothing changes until a fast model is configured.
  */
@@ -162,7 +168,33 @@ export const OLLAMA_NUM_THREADS =
     ? Math.max(1, Number(process.env.OLLAMA_NUM_THREADS))
     : Math.min(8, Math.ceil(os.cpus().length / 2));
 
+/**
+ * Turn reasoning/thinking off for local models that have a thinking mode (qwen3.x, gemma4…).
+ *
+ * A thinking model streams its reasoning into a separate `message.thinking` field, but those
+ * tokens still count against num_predict and this app never surfaces them — so a 4B reasoning
+ * model can spend the whole 4096-token output budget deliberating and return an empty answer,
+ * after making the user wait out the reasoning on a CPU. The replies here are short and
+ * factual, so reasoning buys little. Ollama ignores the flag on models without a thinking
+ * mode, so it is safe to send unconditionally.
+ *
+ * Set OLLAMA_THINK=true to leave reasoning enabled.
+ */
+export const OLLAMA_THINK = (process.env.OLLAMA_THINK || 'false').toLowerCase() === 'true';
+
 const PROVIDERS: Record<ProviderId, ProviderDef> = {
+  nvidia: {
+    id: 'nvidia',
+    label: 'NVIDIA NIM',
+    kind: 'openai-compatible',
+    baseUrl: (process.env.NVIDIA_BASE_URL || 'https://integrate.api.nvidia.com/v1').replace(/\/+$/, ''),
+    apiKeyEnv: 'NVIDIA_API_KEY',
+    defaultModel: 'meta/llama-3.2-11b-vision-instruct',
+    modelEnv: 'NVIDIA_MODEL',
+    supportsVision: true,
+    supportsJson: true,
+    freeTier: 'Free developer endpoints on build.nvidia.com',
+  },
   agentrouter: {
     id: 'agentrouter',
     label: 'AgentRouter',
@@ -420,7 +452,8 @@ async function invokeOpenAiCompatible(
   }
 
   const data: any = await response.json();
-  const content = data?.choices?.[0]?.message?.content;
+  const msg = data?.choices?.[0]?.message;
+  const content = msg?.content || msg?.reasoning_content;
   if (!content) throw new ProviderError(`${def.label} returned an empty response.`);
   return content;
 }
@@ -555,6 +588,12 @@ async function invokeGemini(
 export interface OllamaStreamHandlers {
   /** Invoked with each token as it is produced, for live display. */
   onToken?: (delta: string) => void;
+  /**
+   * The caller's live buffer is no longer valid: a provider died mid-stream and
+   * another one is about to start. Anything already streamed must be discarded,
+   * or the fallback's output is appended to a half-finished document.
+   */
+  onReset?: () => void;
   /** Caller-owned abort, e.g. the browser closed the page mid-generation. */
   signal?: AbortSignal;
 }
@@ -579,7 +618,11 @@ export async function ollamaStream(
   handlers: OllamaStreamHandlers = {}
 ): Promise<string> {
   const def = PROVIDERS.ollama;
-  const model = getModel(def, options.model);
+  let model = getModel(def, options.model);
+  // Normalize cloud model names to local model when routing to local engine
+  if (model.includes('/') || model.toLowerCase().includes('deepseek')) {
+    model = process.env.OLLAMA_FAST_MODEL || process.env.OLLAMA_MODEL || 'qwen3.5:4b';
+  }
   const apiKey = process.env.OLLAMA_API_KEY;
   const headers: Record<string, string> = { 'Content-Type': 'application/json' };
   if (apiKey && !looksUnconfigured(apiKey)) headers.Authorization = `Bearer ${apiKey}`;
@@ -604,6 +647,9 @@ export async function ollamaStream(
     // token is generated. 60 min makes the whole interactive session feel
     // instant on subsequent turns.
     keep_alive: '60m',
+    // See OLLAMA_THINK: without this a thinking model burns its entire num_predict budget on
+    // reasoning the UI never shows, and on CPU the user waits out the whole trace first.
+    think: options.think ?? OLLAMA_THINK,
     options: {
       temperature: options.temperature ?? 0.1,
       // Dynamic context window: pick the smallest window that comfortably
@@ -738,6 +784,231 @@ export async function ollamaStream(
   }
   return content;
 }
+
+/**
+ * Stream responses directly from NVIDIA NIM API (OpenAI-compatible SSE),
+ * providing cloud-speed responses for interactive chat and LaTeX generation.
+ */
+export async function nvidiaStream(
+  messages: ChatMessage[],
+  options: ChatOptions = {},
+  handlers: OllamaStreamHandlers = {}
+): Promise<string> {
+  const def = PROVIDERS.nvidia;
+  const apiKey = getApiKey(def);
+  if (!apiKey) throw new ProviderError('NVIDIA NIM API key is not configured.');
+
+  const model = (options.model && options.model.includes('/'))
+    ? options.model
+    : (process.env.NVIDIA_MODEL || def.defaultModel);
+  const headers: Record<string, string> = {
+    Authorization: `Bearer ${apiKey}`,
+    'Content-Type': 'application/json',
+    Accept: 'text/event-stream',
+  };
+
+  const body: any = {
+    model,
+    messages: messages.map(m => ({ role: m.role, content: m.content })),
+    temperature: options.temperature ?? 0.2,
+    top_p: 0.95,
+    max_tokens: options.max_tokens ?? 8192,
+    stream: true,
+  };
+  if (options.json && !model.includes('deepseek')) body.response_format = { type: 'json_object' };
+
+  const deadline = AbortSignal.timeout(options.timeoutMs ?? 75_000);
+  const signal = handlers.signal ? AbortSignal.any([deadline, handlers.signal]) : deadline;
+
+  const response = await fetch(`${def.baseUrl}/chat/completions`, {
+    method: 'POST',
+    headers,
+    body: JSON.stringify(body),
+    signal,
+  });
+
+  if (!response.ok) {
+    const errText = await response.text().catch(() => '');
+    throw new ProviderError(`NVIDIA HTTP ${response.status}: ${errText.slice(0, 300)}`, response.status);
+  }
+  if (!response.body) throw new ProviderError('NVIDIA returned no response body.');
+
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let pending = '';
+  let reasoningContent = '';
+  let content = '';
+
+  try {
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      pending += decoder.decode(value, { stream: true });
+
+      let newlineIndex: number;
+      while ((newlineIndex = pending.indexOf('\n')) !== -1) {
+        const line = pending.slice(0, newlineIndex).trim();
+        pending = pending.slice(newlineIndex + 1);
+        if (!line || !line.startsWith('data:')) continue;
+
+        const dataStr = line.slice(5).trim();
+        if (dataStr === '[DONE]') {
+          return content || reasoningContent;
+        }
+
+        let chunk: any;
+        try {
+          chunk = JSON.parse(dataStr);
+        } catch {
+          continue;
+        }
+
+        if (chunk?.error) {
+          throw new ProviderError(
+            `NVIDIA SSE Error: ${chunk.error.message || JSON.stringify(chunk.error)}`,
+            chunk.error.code || 500
+          );
+        }
+
+        const delta = chunk?.choices?.[0]?.delta?.content || chunk?.choices?.[0]?.delta?.text || '';
+        const deltaReasoning = chunk?.choices?.[0]?.delta?.reasoning_content || '';
+
+        if (deltaReasoning) {
+          reasoningContent += deltaReasoning;
+        }
+
+        if (delta) {
+          content += delta;
+          handlers.onToken?.(delta);
+        }
+      }
+    }
+  } finally {
+    reader.cancel().catch(() => {});
+  }
+
+  const finalResult = content || reasoningContent;
+  if (!finalResult) {
+    throw new ProviderError('NVIDIA returned empty response.');
+  }
+  return finalResult;
+}
+
+/**
+ * Standard non-streaming call to NVIDIA NIM.
+ * Reliable when the streaming worker pool is congested or throws ResourceExhausted.
+ */
+export async function nvidiaNonStream(
+  messages: ChatMessage[],
+  options: ChatOptions = {}
+): Promise<string> {
+  const def = PROVIDERS.nvidia;
+  const apiKey = getApiKey(def);
+  if (!apiKey) throw new ProviderError('NVIDIA NIM API key is not configured.');
+
+  const model = (options.model && options.model.includes('/'))
+    ? options.model
+    : (process.env.NVIDIA_MODEL || def.defaultModel);
+  const headers: Record<string, string> = {
+    Authorization: `Bearer ${apiKey}`,
+    'Content-Type': 'application/json',
+  };
+
+  const body: any = {
+    model,
+    messages: messages.map(m => ({ role: m.role, content: m.content })),
+    temperature: options.temperature ?? 0.2,
+    top_p: 0.95,
+    max_tokens: options.max_tokens ?? 8192,
+    stream: false,
+  };
+  if (options.json && !model.includes('deepseek')) body.response_format = { type: 'json_object' };
+
+  const deadline = AbortSignal.timeout(options.timeoutMs ?? 75_000);
+  let response = await fetch(`${def.baseUrl}/chat/completions`, {
+    method: 'POST',
+    headers,
+    body: JSON.stringify(body),
+    signal: deadline,
+  });
+
+  if (!response.ok) {
+    const errText = await response.text().catch(() => '');
+    throw new ProviderError(`NVIDIA HTTP ${response.status}: ${errText.slice(0, 300)}`, response.status);
+  }
+
+  const data: any = await response.json();
+  const text = data?.choices?.[0]?.message?.content || data?.choices?.[0]?.message?.reasoning_content || '';
+  if (!text) throw new ProviderError('NVIDIA non-stream returned empty response.');
+  return text;
+}
+
+/**
+ * How long one long-form streaming attempt may run before its provider is
+ * declared dead.
+ *
+ * A complete multi-section paper with LaTeX tables and TikZ diagrams is minutes
+ * of generation, not seconds: measured end to end, a 70-mark / 16-question paper
+ * takes ~290s on the NVIDIA NIM endpoint. The previous 15s cap guillotined the
+ * model in the middle of its JSON, the browser kept those partial tokens, and
+ * the surviving fragments were typeset as though they were the whole paper.
+ * Override with AI_STREAM_TIMEOUT_MS.
+ */
+const SMART_STREAM_TIMEOUT_MS = Number(process.env.AI_STREAM_TIMEOUT_MS) || 600_000;
+
+/** Headroom for one full paper in a single response; TikZ-heavy sets exceed 8192. */
+const SMART_STREAM_MAX_TOKENS = Number(process.env.AI_STREAM_MAX_TOKENS) || 16_000;
+
+/**
+ * High-speed stream: prefers NVIDIA NIM cloud stream if configured.
+ * Automatically fails over seamlessly to local engine if NVIDIA NIM times out or is overloaded.
+ */
+export async function smartStream(
+  messages: ChatMessage[],
+  options: ChatOptions = {},
+  handlers: OllamaStreamHandlers = {}
+): Promise<string> {
+  if (isProviderConfigured('nvidia')) {
+    let targetModel = (options.model && options.model.includes('/'))
+      ? options.model
+      : (process.env.NVIDIA_MODEL || PROVIDERS.nvidia.defaultModel);
+    // Auto-map decommissioned DeepSeek endpoints on NVIDIA NIM to fast Meta Vision Instruct
+    if (targetModel.toLowerCase().includes('deepseek')) {
+      targetModel = 'meta/llama-3.2-11b-vision-instruct';
+    }
+    try {
+      console.log(`[ZeroLeak AI] Streaming via NVIDIA NIM (${targetModel})...`);
+      const res = await nvidiaStream(
+        messages,
+        {
+          timeoutMs: SMART_STREAM_TIMEOUT_MS,
+          max_tokens: SMART_STREAM_MAX_TOKENS,
+          ...options,
+          model: targetModel,
+        },
+        handlers
+      );
+      console.log(`[ZeroLeak AI] NVIDIA NIM stream completed successfully (${res.length} chars).`);
+      return res;
+    } catch (err: any) {
+      if (handlers.signal?.aborted) throw err;
+      console.warn('[ZeroLeak AI] NVIDIA NIM stream timed out or unavailable, attempting fast local AI fallback:', err?.message || err);
+      // This attempt already streamed its partial tokens to the caller. Tell it
+      // to drop them before the fallback writes anything, otherwise the two
+      // replies concatenate and the result parses as neither.
+      try {
+        handlers.onReset?.();
+      } catch (resetErr) {
+        console.warn('[ZeroLeak AI] stream reset handler failed:', (resetErr as Error)?.message || resetErr);
+      }
+    }
+  }
+  console.log('[ZeroLeak AI] Streaming via local fast AI engine...');
+  return await ollamaStream(messages, options, handlers);
+}
+
+
+
 
 async function invokeProvider(
   id: ProviderId,

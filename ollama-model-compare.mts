@@ -9,7 +9,7 @@ import { ollamaStream } from './server/aiProviders.ts';
  *
  * Ground truth is asserted explicitly rather than eyeballed.
  */
-const CANDIDATES = process.argv.slice(2).length ? process.argv.slice(2) : ['qwen2.5vl:7b', 'qwen2.5:3b'];
+const CANDIDATES = process.argv.slice(2).length ? process.argv.slice(2) : ['qwen2.5vl:7b', 'qwen3.5:4b'];
 const NUM_CTX = 16384;
 
 const SOLVER_SYSTEM_PROMPT = [

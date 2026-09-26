@@ -25,7 +25,10 @@ const PORT = Number(process.env.PORT || 3013);
 const HOST = process.env.HOST || '0.0.0.0';
 const WORK_ROOT = process.env.WORK_ROOT || path.join(os.tmpdir(), 'latex-service');
 const DEFAULT_TIMEOUT_MS = Number(process.env.COMPILE_TIMEOUT_MS || 60000);
-const MAX_BODY_BYTES = Number(process.env.MAX_BODY_BYTES || 8 * 1024 * 1024);
+// Generous because a request can now carry figure images alongside the .tex,
+// and base64 inflates them by ~33%. A paper with a handful of diagrams lands
+// far below this, while an accidental upload cannot exhaust memory.
+const MAX_BODY_BYTES = Number(process.env.MAX_BODY_BYTES || 32 * 1024 * 1024);
 
 const COMPILERS = {
   pdflatex: ['-pdf'],
@@ -87,7 +90,13 @@ async function compile({ dir, resources, rootResourcePath, compiler, timeoutMs }
       throw Object.assign(new Error(`Resource path escapes project dir: ${r.path}`), { status: 400 });
     }
     await fs.mkdir(path.dirname(target), { recursive: true });
-    await fs.writeFile(target, r.content ?? '', 'utf8');
+    // Figures arrive base64-encoded: they are binary, and writing them as utf8
+    // corrupts the bytes so \includegraphics cannot read the image.
+    if (r.encoding === 'base64') {
+      await fs.writeFile(target, Buffer.from(String(r.content ?? ''), 'base64'));
+    } else {
+      await fs.writeFile(target, r.content ?? '', 'utf8');
+    }
     written.push(r.path);
   }
 
@@ -139,7 +148,7 @@ function normalizeCompileRequest(body) {
   if (Array.isArray(compileReq.resources) && compileReq.resources.length) {
     const resources = compileReq.resources
       .filter((r) => typeof r.content === 'string')
-      .map((r) => ({ path: r.path || 'main.tex', content: r.content }));
+      .map((r) => ({ path: r.path || 'main.tex', content: r.content, encoding: r.encoding }));
     return {
       resources,
       rootResourcePath: compileReq.rootResourcePath || 'main.tex',
@@ -151,9 +160,17 @@ function normalizeCompileRequest(body) {
   }
 
   if (typeof body.latex === 'string' && body.latex.trim()) {
+    // Optional side files (e.g. figures) submitted alongside the root document,
+    // so a caller that has the .tex can still supply the images it references.
+    const extraResources = Array.isArray(body.resources)
+      ? body.resources
+          .filter((r) => r && typeof r.content === 'string')
+          .map((r) => ({ path: r.path || 'resource', content: r.content, encoding: r.encoding }))
+      : [];
+    const rootName = extraResources.some((r) => r.path === 'main.tex') ? 'main.tex' : 'main.tex';
     return {
-      resources: [{ path: 'main.tex', content: body.latex }],
-      rootResourcePath: 'main.tex',
+      resources: [{ path: rootName, content: body.latex }, ...extraResources.filter((r) => r.path !== rootName)],
+      rootResourcePath: rootName,
       compiler: body.compiler || 'pdflatex',
       timeoutMs: body.timeout ? body.timeout * 1000 : DEFAULT_TIMEOUT_MS,
     };

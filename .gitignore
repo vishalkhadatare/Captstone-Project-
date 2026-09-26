@@ -2,6 +2,8 @@ node_modules/
 build/
 dist/
 coverage/
+# The ngrok agent is a 33MB binary downloaded per machine, never a source file.
+.ngrok/
 .DS_Store
 *.log
 .env
@@ -49,4 +51,9 @@ test_results/
 output/
 tests/synthetic_data/
 public/uploads/
+.freebuff/
+public/compiled_papers/*.pdf
+!public/compiled_papers/test_sample_paper.pdf
+public/extracted_figures/
+public/generated_papers/
 

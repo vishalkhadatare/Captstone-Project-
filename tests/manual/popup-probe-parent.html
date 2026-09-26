@@ -1,0 +1,68 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <title>Popup probe (parent)</title>
+    <style>
+      body { margin: 0; font: 13px system-ui; background: #0f172a; color: #e2e8f0; }
+      pre { margin: 0; padding: 8px; background: #020617; color: #4ade80; font-size: 12px; white-space: pre-wrap; }
+      iframe { display: block; width: 100%; height: 140px; border: 0; }
+      .sep { height: 2px; background: #334155; }
+    </style>
+  </head>
+  <body>
+    <!--
+      Diagnostic: does an iframe with the modal's EXACT sandbox flags actually
+      allow `window.open()`?
+
+      The framed page is loaded from 127.0.0.1 while this page is on localhost,
+      so the frame is genuinely cross-origin (same server, different host) — a
+      faithful stand-in for prism.openai.com without touching a third party.
+
+      Click each frame: a real CDP click at the frame's centre lands on the
+      child's full-bleed button, which gives the CHILD document real user
+      activation, exactly like a user clicking inside the Prism pane. The child
+      reports back via postMessage, and the results land in #out below.
+    -->
+    <pre id="out">waiting for clicks…</pre>
+    <div class="sep"></div>
+    <script type="module">
+      const CHILD = 'http://127.0.0.1:3000/tests/manual/popup-probe-child.html';
+
+      const VARIANTS = [
+        [
+          'A_exact_modal_sandbox',
+          'allow-same-origin allow-scripts allow-forms allow-popups allow-popups-to-escape-sandbox allow-top-navigation-by-user-activation allow-modals allow-downloads allow-storage-access-by-user-activation',
+        ],
+        ['B_allow_popups_only', 'allow-popups'],
+        ['C_no_sandbox_attribute', null],
+        ['D_no_allow_popups_control', 'allow-same-origin allow-scripts allow-forms'],
+      ];
+
+      const results = {};
+      const frames = [];
+
+      for (const [name, sandbox] of VARIANTS) {
+        const frame = document.createElement('iframe');
+        if (sandbox !== null) frame.setAttribute('sandbox', sandbox);
+        frame.src = `${CHILD}?variant=${encodeURIComponent(name)}`;
+        frame.title = name;
+        document.body.appendChild(frame);
+        frames.push({ name, frame });
+      }
+
+      const render = () => {
+        document.getElementById('out').textContent = JSON.stringify(results, null, 1);
+      };
+
+      window.addEventListener('message', (event) => {
+        if (!event.data || event.data.type !== 'ZLPOPUP') return;
+        const hit = frames.find((entry) => entry.frame.contentWindow === event.source);
+        results[hit ? hit.name : 'unknown_source'] = event.data;
+        render();
+      });
+
+      render();
+    </script>
+  </body>
+</html>

@@ -23,7 +23,8 @@ import {
   ChevronUp,
   Square,
   ListChecks,
-  Paperclip
+  Paperclip,
+  FileCode
 } from 'lucide-react';
 import { api, ollamaChatStream } from '../../api';
 import { Examination, PaperVersion } from '../../types';
@@ -98,7 +99,7 @@ export const QuestionPaperPdfModal: React.FC<QuestionPaperPdfModalProps> = ({
     fetchPaper(initialVersionId);
   }, [exam.id, initialVersionId]);
 
-  const [compilingEngine, setCompilingEngine] = useState<'texapi' | 'latexonline' | 'formatex' | null>(null);
+  const [compilingEngine, setCompilingEngine] = useState<'texapi' | 'latexonline' | 'texlive' | 'formatex' | null>(null);
 
   // --- Local LaTeX assistant (Ollama) -------------------------------------
   // Injects the FULL structure of the active question paper (questions, marks,
@@ -110,52 +111,70 @@ export const QuestionPaperPdfModal: React.FC<QuestionPaperPdfModalProps> = ({
    * that tells the model exactly what questions exist, their marks, and structure.
    * This is the key to getting LaTeX output that matches the uploaded paper.
    */
+  const stripPrefix = (text: string): string => {
+    if (!text) return '';
+    return text.replace(/^(?:Q\.?\s*\d+[\.\)]\s*|[a-zA-Z0-9][\.\)]\s*|\([a-zA-Z0-9]\)\s*)+/i, '').trim();
+  };
+
+  const isTrueObjectiveMcq = (q: any): boolean => {
+    const marks = Number(q?.marks || 1);
+    if (marks > 2) return false;
+    const txt = (q?.content_text || '').trim();
+    if (/^(explain|describe|illustrate|discuss|state and explain|derive|differentiate|write a short note|what is|define)/i.test(txt)) {
+      return false;
+    }
+    return q?.question_type === 'MCQ' || (Array.isArray(q?.options) && q.options.length >= 2);
+  };
+
+  /**
+   * Serialises the active paperData into a clean academic description
+   * that tells the model exactly what questions exist, their marks, and structure.
+   * Note: NEVER emits "Answer: A" so the model does not inject fake answer keys into exam papers.
+   */
   const buildPaperContext = (): string => {
     if (!paperData) return '';
 
-    const exam_ = paperData.exam;
+    const exam_ = paperData.exam || exam;
     const version = paperData.version;
     const questions: any[] = paperData.questions || [];
 
-    const mcqs = questions.filter(
-      (q: any) => q.question_type === 'MCQ' || (Array.isArray(q.options) && q.options.length >= 2)
-    );
-    const theories = questions.filter(
-      (q: any) => q.question_type !== 'MCQ' && (!q.options || q.options.length < 2)
-    );
+    const mcqs = questions.filter(isTrueObjectiveMcq);
+    const theories = questions.filter((q: any) => !isTrueObjectiveMcq(q));
 
     const lines: string[] = [];
-    lines.push(`PAPER TITLE: ${exam_.name || 'Examination'}`);
-    lines.push(`SUBJECT: ${exam_.subject || 'General'}`);
-    lines.push(`PAPER CODE: ${version?.paper_code || 'N/A'}`);
-    lines.push(`TOTAL QUESTIONS: ${questions.length} (${mcqs.length} MCQ, ${theories.length} Theory)`);
+    lines.push(`PAPER TITLE: ${exam_.name || 'University Examination'}`);
+    lines.push(`INSTITUTION: ${exam_.university_name || 'Autonomous Board of Examinations'}`);
+    lines.push(`SUBJECT: ${exam_.subject || 'Core Engineering'}`);
+    lines.push(`PAPER CODE: ${version?.paper_code || exam_.code || 'EXAM-CODE'}`);
+    lines.push(`DURATION: ${exam_.duration_minutes || 180} Minutes | MAX MARKS: ${exam_.total_marks || 70}`);
+    lines.push(`TOTAL QUESTIONS: ${questions.length} (${mcqs.length} Objective/MCQs, ${theories.length} Descriptive/Theory)`);
 
     if (mcqs.length > 0) {
       lines.push('');
-      lines.push('=== SECTION 1: OBJECTIVE / MCQ ===');
+      lines.push(`=== SECTION 1: OBJECTIVE / MULTIPLE CHOICE QUESTIONS (${mcqs.length} Questions) ===`);
       mcqs.forEach((q: any, i: number) => {
+        const cleanText = stripPrefix(q.content_text || '');
         const opts = Array.isArray(q.options)
           ? q.options
               .map((o: any, j: number) => {
                 const label = String.fromCharCode(65 + j);
                 const text = typeof o === 'string' ? o : o?.text ?? '';
-                return `  ${label}) ${text}`;
+                return `  (${label}) ${stripPrefix(text)}`;
               })
               .join('\n')
           : '';
-        lines.push(`Q${i + 1}. [${q.marks || 1} mark] ${q.content_text || ''}`);
+        lines.push(`Q${i + 1}. [${q.marks || 1} mark] ${cleanText}`);
         if (opts) lines.push(opts);
-        if (q.correct_answer) lines.push(`  Answer: ${q.correct_answer}`);
       });
     }
 
     if (theories.length > 0) {
       lines.push('');
-      lines.push('=== SECTION 2: THEORY / DESCRIPTIVE ===');
+      lines.push(`=== SECTION 2: DESCRIPTIVE / THEORY QUESTIONS (${theories.length} Questions) ===`);
       theories.forEach((q: any, i: number) => {
         const num = mcqs.length + i + 1;
-        lines.push(`Q${num}. [${q.marks || 5} marks] ${q.content_text || ''}`);
-        if (q.correct_answer) lines.push(`  Hint: ${q.correct_answer}`);
+        const cleanText = stripPrefix(q.content_text || '');
+        lines.push(`Q${num}. [${q.marks || 5} marks] ${cleanText}`);
       });
     }
 
@@ -165,80 +184,70 @@ export const QuestionPaperPdfModal: React.FC<QuestionPaperPdfModalProps> = ({
   const paperContextBlock = buildPaperContext();
 
   const CHAT_SYSTEM_PROMPT = [
-    'You are a professional LaTeX exam-paper typesetter. Your output must compile on the FIRST try with zero errors.',
-    `Subject: "${exam.subject || 'Examination'}"`,
+    'You are an expert academic examination assistant and LaTeX typesetter for ZeroLeak.',
+    `Subject: "${exam.subject || 'Engineering'}"`,
+    `Institution: "${exam.university_name || 'State University / Autonomous Examination Board'}"`,
+    `Paper Code: "${paperData?.version?.paper_code || exam.paper_code || exam.code || 'SLR-EXAM-01'}"`,
+    `Max Marks: ${exam.total_marks || exam.max_marks || 70} | Duration: ${exam.duration_minutes || exam.time_limit_mins || 180} Minutes`,
     '',
-    '=== STRICT COMPILATION RULES (violations cause errors) ===',
-    'RULE A — NEVER write \\\\ immediately before [ on the same or next line.',
-    '  BAD:  Some text \\\\ [Max. Marks : 30]',
-    '  GOOD: Some text \\hfill [Max. Marks : 30] \\\\',
-    '  WHY:  LaTeX reads \\\\[...] as a vertical-space command and crashes when it finds text instead of a length.',
-    'RULE B — NEVER use \\textsc{} inside a tabularx X-column without wrapping in \\parbox.',
-    'RULE C — NEVER leave a \\begin{} without a matching \\end{}.',
-    'RULE D — Use \\hfill to push marks to the right margin — do NOT use \\\\ then [marks] on a new line.',
-    'RULE E — In enumerate/itemize, marks go INSIDE the \\item text: \\item Question text \\hfill [5]',
-    'RULE F — Always put \\setlength{\\parindent}{0pt} in the preamble.',
-    'RULE G — Output ONLY the fenced code block ```latex ... ``` with NO prose before or after.',
+    '=== YOUR TASKS ===',
+    '1. ANSWER & SOLVE QUESTIONS: When asked to answer or solve questions (e.g. "answer each and every question", "solve this paper", "answer Q1"):',
+    '   - Provide complete, 100% accurate, high-scoring answers for EVERY question.',
+    '   - For MCQs: Give Question number, correct option (A/B/C/D), option text, and clear reasoning.',
+    '   - For Theory / Descriptive questions: Provide detailed, well-structured academic answers with definitions, steps, key points, formulas, and diagrams/algorithms where applicable.',
+    '2. GENERATE LATEX: When specifically asked to produce LaTeX code for the paper:',
+    '   - Output the code inside a single ```latex ... ``` block.',
+    '   - STRICT RULES FOR QUESTION PAPERS (CRITICAL):',
+    '     * NEVER output answers, answer keys, "Answer: A", or hints in an examination paper. An exam paper only contains questions and marks for students.',
+    '     * NEVER duplicate numbering: do not write "a) a)" or "A) A)" or "1. 1.". Use LaTeX enumerate labels cleanly.',
+    '     * NEVER categorize 5-mark, 6-mark, or descriptive questions under "Choose the correct alternative". True MCQs only go under MCQ questions.',
+    '     * If the paper is a descriptive/theory paper, format questions cleanly as Section-I and Section-II with Q.1, Q.2, etc., and sub-questions (a), (b), (c) with \\hfill [Marks].',
+    '     * NEVER write \\\\ immediately before [ (e.g. use \\hfill [Marks] \\\\, never \\\\ [Marks]).',
+    '     * Ensure all \\begin{} blocks have matching \\end{} blocks.',
+    '     * Use standard packages: amsmath, amssymb, enumitem, fancyhdr, tabularx, geometry.',
+    '3. GENERAL INTERACTION: When the user greets you (e.g. "hi"), greet them warmly and ask if they would like you to (A) Solve and answer each question on the paper, or (B) Generate the LaTeX code.',
     '',
-    '=== PROVEN SAFE SKELETON TO FOLLOW ===',
-    '```',
+    '=== OFFICIAL UNIVERSITY LATEX SKELETON TO FOLLOW ===',
+    '```latex',
     '\\documentclass[11pt,a4paper]{article}',
-    '\\usepackage[top=1.5cm,bottom=1.5cm,left=2cm,right=2cm]{geometry}',
-    '\\usepackage{amsmath,amssymb,enumitem,fancyhdr,tabularx,xcolor,multicol,booktabs}',
+    '\\usepackage[top=1.8cm,bottom=1.8cm,left=2cm,right=2cm]{geometry}',
+    '\\usepackage{amsmath,amssymb,enumitem,fancyhdr,tabularx,xcolor,booktabs}',
     '\\setlength{\\parindent}{0pt}',
     '\\pagestyle{fancy}',
     '\\fancyhf{}',
-    '\\renewcommand{\\headrulewidth}{0pt}',
+    '\\lhead{\\small\\textbf{Seat No.:} \\underline{\\hspace{3cm}}}',
+    `\\rhead{\\small\\textbf{Paper Code: ${paperData?.version?.paper_code || exam.paper_code || exam.code || 'SLR-EXAM-01'}}}`,
+    '\\cfoot{\\thepage}',
+    '\\renewcommand{\\headrulewidth}{0.4pt}',
     '\\begin{document}',
     '',
-    '% --- Header table: Seat No left, Paper Code right ---',
-    '\\begin{tabular*}{\\textwidth}{@{}l@{\\extracolsep{\\fill}}r@{}}',
-    '  \\textbf{Seat No.:} \\underline{\\hspace{3cm}} & \\textbf{Paper Code: SLR-XX-000}',
-    '\\end{tabular*}',
-    '\\vspace{0.3cm}',
-    '',
-    '% --- Title block centred ---',
     '\\begin{center}',
-    '  {\\large\\bfseries University Name} \\\\[2pt]',
-    '  {\\normalsize S.Y.~(B.Tech.) Examination --- Month Year} \\\\[2pt]',
-    '  {\\normalsize\\bfseries Subject Name} \\\\[2pt]',
-    '  {\\small Time: 3 Hours \\hfill Max. Marks: 70}',
+    `  {\\large\\bfseries ${exam.university_name || 'STATE UNIVERSITY / AUTONOMOUS EXAMINATION BOARD'}} \\\\[3pt]`,
+    `  {\\normalsize\\bfseries ${exam.name || 'B.Tech. Semester Examination'}} \\\\[3pt]`,
+    `  {\\normalsize\\bfseries ${exam.subject || 'Core Engineering'}} \\\\[3pt]`,
+    `  {\\small Time: ${Math.round((exam.duration_minutes || 180) / 60)} Hours \\hfill Max. Marks: ${exam.total_marks || 70}}`,
     '\\end{center}',
-    '\\hrule',
-    '\\vspace{0.3cm}',
+    '\\hrule height 1pt',
+    '\\vspace{3mm}',
     '',
-    '% --- Instructions ---',
     '\\textbf{Instructions:}',
-    '\\begin{enumerate}[label=\\arabic*.]',
-    '  \\item Answer Q.1 or Q.2, Q.3 or Q.4, etc.',
+    '\\begin{enumerate}[label=\\arabic*., itemsep=1pt]',
+    '  \\item Figures to the right indicate full marks.',
     '  \\item Neat diagrams must be drawn wherever necessary.',
-    '  \\item Figures to the right side indicate full marks.',
+    '  \\item Assume suitable data if necessary and state them clearly.',
     '\\end{enumerate}',
-    '\\vspace{0.3cm}',
+    '\\vspace{3mm}',
+    '\\hrule',
+    '\\vspace{4mm}',
     '',
-    '% --- MCQ Section ---',
-    '\\noindent\\textbf{Q.1} Choose the correct alternative. \\hfill [14]',
-    '\\begin{multicols}{2}',
-    '\\begin{enumerate}[label=\\alph*)]',
-    '  \\item Question text here. \\hfill [1]',
-    '\\end{enumerate}',
-    '\\end{multicols}',
-    '',
-    '% --- Theory questions ---',
-    '\\noindent\\textbf{Q.2} Question text. \\hfill [5] \\\\',
-    '\\textbf{OR}\\\\',
-    '\\noindent\\textbf{Q.2} Alternative question text. \\hfill [5]',
-    '',
+    '% Structure the questions faithfully from the content below.',
+    '% Use \\hfill [Marks] at the end of every question item.',
     '\\end{document}',
     '```',
     '',
-    '=== MARKS FORMATTING — ALWAYS use \\hfill ===',
-    '  \\item Some question text \\hfill [5]   <- CORRECT',
-    '  \\\\ [5]                                <- WRONG - this crashes LaTeX',
-    '',
     paperContextBlock
-      ? `=== PAPER CONTENT TO REPRODUCE EXACTLY ===\n${paperContextBlock}`
-      : '=== Reproduce this exam paper exactly as described. ===',
+      ? `=== PAPER QUESTIONS & CONTENT TO TYPESET VERBATIM ===\n${paperContextBlock}`
+      : '=== Typeset the examination paper faithfully with all questions and marks. ===',
   ].join('\n');
 
 
@@ -248,16 +257,12 @@ export const QuestionPaperPdfModal: React.FC<QuestionPaperPdfModalProps> = ({
   // and useless when what you want is the answer. Bounded length matters: this machine
   // generates at roughly 3 tokens/sec, so ~120 words keeps each answer near a minute.
   const SOLVER_SYSTEM_PROMPT = [
-    'You are an exam answer assistant for the subject',
-    `"${exam.subject || 'the exam'}".`,
-    'You will be given ONE examination question at a time. Answer only that question.',
-    'Be direct and concise: at most 90 words.',
-    'For a multiple-choice question, state the correct option letter first, then one',
-    'sentence of justification.',
-    'If the question is under-specified, or you are genuinely unsure of the answer, say so',
-    'plainly rather than guessing — a wrong answer presented confidently is worse than an',
-    'admission of uncertainty.',
-    'Do not restate the question, do not write LaTeX documents, and do not use code fences.',
+    'You are an expert exam answer assistant and academic solver for the subject',
+    `"${exam.subject || 'the examination'}".`,
+    'You will be given ONE examination question at a time. Provide a complete, 100% accurate, high-scoring answer.',
+    'For multiple-choice questions, state the correct option letter first, followed by clear justification.',
+    'For descriptive questions, provide structured step-by-step solutions, key definitions, points, and formulas.',
+    'Do not emit code fences unless writing code, and focus on delivering direct, thorough solutions.',
   ].join(' ');
 
   /**
@@ -279,8 +284,15 @@ export const QuestionPaperPdfModal: React.FC<QuestionPaperPdfModalProps> = ({
 
   const MCQ_BATCH_SIZE = 6;
 
-  const isMcqQuestion = (q: any) =>
-    q?.question_type === 'MCQ' || (Array.isArray(q?.options) && q.options.length >= 2);
+  const isMcqQuestion = (q: any) => {
+    const marks = Number(q?.marks || 1);
+    if (marks > 2) return false;
+    const txt = (q?.content_text || '').trim();
+    if (/^(explain|describe|illustrate|discuss|state and explain|derive|differentiate|write a short note|what is|define)/i.test(txt)) {
+      return false;
+    }
+    return q?.question_type === 'MCQ' || (Array.isArray(q?.options) && q.options.length >= 2);
+  };
 
   /** One compact line for a batched MCQ request: the stem plus its options. */
   const formatMcqLine = (q: any, number: number) => {
@@ -336,9 +348,7 @@ export const QuestionPaperPdfModal: React.FC<QuestionPaperPdfModalProps> = ({
   const [chatMessages, setChatMessages] = useState<ChatMsg[]>([
     {
       role: 'assistant',
-      content: paperData
-        ? 'I can see this paper\'s questions. Say **"give me the LaTeX code"** and I will generate a complete, compilable LaTeX document matching this paper\'s structure. You can also attach a PDF above to include its text.'
-        : 'Do you want LaTeX code for this paper? Say "yes, give me the LaTeX code" and I will write it. You can also attach a PDF above to help me match the exact format.',
+      content: 'Hello! I am your AI Exam Assistant. I can **answer and solve each question** on this paper with complete explanations, or **generate error-free LaTeX code** matching the layout. Click **"Answer all questions"** or type what you need below!',
     },
   ]);
 
@@ -379,12 +389,13 @@ export const QuestionPaperPdfModal: React.FC<QuestionPaperPdfModalProps> = ({
 
       // Build the combined system prompt. The paper-context block (from paperData)
       // is already embedded in CHAT_SYSTEM_PROMPT. Uploaded PDF text is appended
-      // here — injected as part of the system role so small local models (qwen2.5:3b)
+      // here — injected as part of the system role so small local models (qwen3.5:4b)
       // honour it rather than ignoring a separate "assistant" context bubble.
+      const isGreeting = /^(hi|hello|hey|greetings|hola)\b/i.test(text.trim());
       let systemContent = CHAT_SYSTEM_PROMPT;
-      if (docs.block) {
+      if (!isGreeting && docs.block) {
         systemContent +=
-          '\n\nADDITIONAL UPLOADED DOCUMENT TEXT (use this verbatim for any missing question text):\n' +
+          '\n\nADDITIONAL UPLOADED DOCUMENT TEXT (use this verbatim for any question text):\n' +
           docs.block;
       }
 
@@ -430,11 +441,58 @@ export const QuestionPaperPdfModal: React.FC<QuestionPaperPdfModalProps> = ({
    */
   const solveAllQuestions = async () => {
     const questions = paperData?.questions ?? [];
-    if (!questions.length || chatBusy) return;
+    if ((!questions.length && !chatDocs.length) || chatBusy) return;
 
     setChatBusy(true);
     const controller = new AbortController();
     chatAbortRef.current = controller;
+
+    // If questions are not in paperData but document(s) are uploaded (e.g. OS.pdf)
+    if (!questions.length && chatDocs.length > 0) {
+      setChatMessages((prev) => [
+        ...prev,
+        { role: 'user', content: 'Please solve and answer each and every question on this uploaded paper with complete, step-by-step solutions.' },
+        { role: 'assistant', content: '' },
+      ]);
+
+      try {
+        const docs = buildDocsContext();
+        await ollamaChatStream(
+          {
+            messages: [
+              {
+                role: 'system',
+                content:
+                  'You are an expert examination solver for ZeroLeak.\n' +
+                  'Your mission: SOLVE AND ANSWER EACH AND EVERY QUESTION found in the uploaded paper text below.\n' +
+                  'Requirements:\n' +
+                  '1. Answer EVERY single question (Q1, Q2, Q3...) and all sub-questions without omitting any.\n' +
+                  '2. For Multiple Choice Questions: State the question number, the correct choice letter, option text, and brief justification.\n' +
+                  '3. For Descriptive / Theory questions: Provide comprehensive, high-scoring answers with step-by-step reasoning, definitions, formulas, and diagrams/algorithms where applicable.\n\n' +
+                  'DOCUMENT TEXT:\n' +
+                  docs.block,
+              },
+              {
+                role: 'user',
+                content: 'Please solve and answer each and every question on this uploaded exam paper.',
+              },
+            ],
+            plainText: true,
+          },
+          (delta) => patchLastReply((current) => current + delta),
+          controller.signal
+        );
+      } catch (err: any) {
+        if (!controller.signal.aborted) {
+          patchLastReply((current) => `${current}\n\n[stopped: ${err?.message || err}]`);
+        }
+      } finally {
+        chatAbortRef.current = null;
+        setSolveProgress(null);
+        setChatBusy(false);
+      }
+      return;
+    }
 
     setChatMessages((prev) => [
       ...prev,
@@ -442,10 +500,6 @@ export const QuestionPaperPdfModal: React.FC<QuestionPaperPdfModalProps> = ({
     ]);
 
     try {
-      // Work in units rather than question-by-question: consecutive MCQs are answered in
-      // batches (one request each), while theory questions get a request of their own.
-      // At ~10 generated tokens/sec with ~1.7s of fixed cost per request, this is the
-      // difference between roughly four minutes and well under two for a full paper.
       type Unit = { kind: 'mcq'; items: { q: any; index: number }[] } | { kind: 'theory'; q: any; index: number };
       const units: Unit[] = [];
       let pendingMcqs: { q: any; index: number }[] = [];
@@ -567,13 +621,10 @@ export const QuestionPaperPdfModal: React.FC<QuestionPaperPdfModalProps> = ({
     if (added.length) {
       setChatDocs((prev) => {
         const updated = [...prev, ...added];
-        // Auto-trigger LaTeX generation as soon as the PDF text is ready.
-        // The user uploads a paper expecting code — prompt on their behalf so
-        // they do not have to type anything after attaching the document.
         if (!chatBusy) {
           // Fire after state settles (next tick) so buildDocsContext picks up the new docs.
           setTimeout(() => {
-            setChatInput('Generate complete, well-structured LaTeX code for this uploaded question paper. Match the exact layout: seat-no box, paper code, title, instructions, and every question with marks exactly as printed.');
+            setChatInput('Please solve and answer each and every question on this uploaded question paper.');
           }, 50);
         }
         return updated;
@@ -619,6 +670,24 @@ export const QuestionPaperPdfModal: React.FC<QuestionPaperPdfModalProps> = ({
     }
   };
 
+  const [compilingChatIdx, setCompilingChatIdx] = useState<number | null>(null);
+
+  const handleCompileChatLatex = async (code: string, idx: number) => {
+    setCompilingChatIdx(idx);
+    try {
+      const res = await api.compileFormatexPdf(exam.id, { customLatex: code, preferEngine: 'latexonline' });
+      if (res.success && res.pdfUrl) {
+        window.open(res.pdfUrl, '_blank');
+      } else {
+        alert(res.error || 'LaTeX compilation failed. Please verify syntax.');
+      }
+    } catch (err: any) {
+      alert(`LaTeX Error: ${err?.message || err}`);
+    } finally {
+      setCompilingChatIdx(null);
+    }
+  };
+
   /** Split a reply into prose and ```latex fenced blocks. */
   const renderChatContent = (content: string) => {
     const parts = content.split(/```(?:latex|tex)?\n?/i);
@@ -628,17 +697,36 @@ export const QuestionPaperPdfModal: React.FC<QuestionPaperPdfModalProps> = ({
         return (
           <div key={i} className="my-1.5 rounded-lg overflow-hidden border border-slate-700">
             <div className="flex items-center justify-between px-2 py-1 bg-slate-800 text-[10px] font-bold text-slate-300">
-              <span>LaTeX</span>
-              <button
-                type="button"
-                onClick={() => copyBlock(code, i)}
-                className="flex items-center gap-1 px-1.5 py-0.5 rounded hover:bg-slate-700 cursor-pointer"
-              >
-                {chatCopied === i ? <Check className="w-3 h-3 text-emerald-400" /> : <Copy className="w-3 h-3" />}
-                <span>{chatCopied === i ? 'Copied' : 'Copy'}</span>
-              </button>
+              <span className="flex items-center gap-1 text-violet-400">
+                <FileCode className="w-3 h-3" />
+                <span>LaTeX Document</span>
+              </span>
+              <div className="flex items-center gap-1.5">
+                <button
+                  type="button"
+                  disabled={compilingChatIdx === i}
+                  onClick={() => handleCompileChatLatex(code, i)}
+                  className="flex items-center gap-1 px-2 py-0.5 rounded bg-indigo-600 hover:bg-indigo-500 text-white cursor-pointer disabled:opacity-50 transition-colors font-medium"
+                  title="Compile this LaTeX code into a PDF via LaTeX.Online"
+                >
+                  {compilingChatIdx === i ? (
+                    <div className="w-2.5 h-2.5 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                  ) : (
+                    <Download className="w-3 h-3" />
+                  )}
+                  <span>{compilingChatIdx === i ? 'Compiling...' : 'Compile & View PDF'}</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => copyBlock(code, i)}
+                  className="flex items-center gap-1 px-1.5 py-0.5 rounded hover:bg-slate-700 cursor-pointer text-slate-300"
+                >
+                  {chatCopied === i ? <Check className="w-3 h-3 text-emerald-400" /> : <Copy className="w-3 h-3" />}
+                  <span>{chatCopied === i ? 'Copied' : 'Copy'}</span>
+                </button>
+              </div>
             </div>
-            <pre className="p-2 bg-slate-900 text-emerald-200 text-[10px] leading-relaxed overflow-x-auto max-h-64 whitespace-pre">
+            <pre className="p-2 bg-slate-900 text-emerald-200 text-[10px] leading-relaxed overflow-x-auto max-h-64 whitespace-pre font-mono">
               {code}
             </pre>
           </div>
@@ -650,7 +738,9 @@ export const QuestionPaperPdfModal: React.FC<QuestionPaperPdfModalProps> = ({
   };
   // ------------------------------------------------------------------------
 
-  const handleDownloadLatex = async (preferEngine: 'texapi' | 'latexonline' | 'formatex' = 'latexonline') => {
+  const handleDownloadLatex = async (
+    preferEngine: 'texapi' | 'latexonline' | 'texlive' | 'formatex' = 'latexonline'
+  ) => {
     setCompilingEngine(preferEngine);
     try {
       const setLetter = paperData?.version?.version_code?.includes('SET-2')
@@ -754,6 +844,18 @@ export const QuestionPaperPdfModal: React.FC<QuestionPaperPdfModalProps> = ({
             >
               <Zap className={`w-3.5 h-3.5 ${compilingEngine === 'latexonline' ? 'animate-spin' : ''}`} />
               <span>{compilingEngine === 'latexonline' ? 'Compiling...' : '⚡ LaTeX.Online PDF'}</span>
+            </button>
+
+            {/* TeXLive.net PDF Download Button - free, no key, no quota */}
+            <button
+              type="button"
+              onClick={() => handleDownloadLatex('texlive')}
+              disabled={compilingEngine === 'texlive'}
+              className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg font-bold text-xs shadow-xs flex items-center gap-1.5 cursor-pointer transition-all disabled:opacity-50"
+              title="Compile and Download High-Fidelity LaTeX PDF via TeXLive.net (free LaTeX-on-HTTP service, no API key or quota)"
+            >
+              <Zap className={`w-3.5 h-3.5 ${compilingEngine === 'texlive' ? 'animate-spin' : ''}`} />
+              <span>{compilingEngine === 'texlive' ? 'Compiling...' : '⚡ TeXLive.net PDF'}</span>
             </button>
 
             {/* FormaTeX Cloud PDF Download Button */}
@@ -959,7 +1061,7 @@ export const QuestionPaperPdfModal: React.FC<QuestionPaperPdfModalProps> = ({
                     if (e.key === 'Enter') sendChat();
                   }}
                   disabled={chatBusy}
-                  placeholder='Try "yes, give me the LaTeX code"'
+                  placeholder='Ask a question or type "solve each and every question"...'
                   className="flex-1 bg-slate-800 text-slate-100 placeholder-slate-500 text-xs px-3 py-2 rounded-lg border border-slate-700 outline-none focus:border-violet-500 disabled:opacity-50"
                 />
                 <button
@@ -974,19 +1076,41 @@ export const QuestionPaperPdfModal: React.FC<QuestionPaperPdfModalProps> = ({
                 <button
                   type="button"
                   onClick={solveAllQuestions}
-                  disabled={chatBusy || !paperData?.questions?.length}
-                  title="Answer every question on this paper, one at a time"
-                  className="px-3 py-2 bg-slate-700 hover:bg-slate-600 text-white rounded-lg font-bold text-xs flex items-center gap-1.5 cursor-pointer transition-all disabled:opacity-40 shrink-0"
+                  disabled={chatBusy || (!paperData?.questions?.length && !chatDocs.length)}
+                  title="Answer every question on this paper"
+                  className="px-3 py-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg font-bold text-xs flex items-center gap-1.5 cursor-pointer transition-all disabled:opacity-40 shrink-0"
                 >
                   <ListChecks className="w-3.5 h-3.5" />
-                  <span>Answer all</span>
+                  <span>Answer all questions</span>
                 </button>
               </div>
+
+              <div className="flex flex-wrap items-center gap-1.5 pt-1">
+                <button
+                  type="button"
+                  disabled={chatBusy}
+                  onClick={() => {
+                    setChatInput('Please solve and answer each and every question on this paper step-by-step.');
+                  }}
+                  className="text-[10px] px-2 py-0.5 rounded bg-slate-800 hover:bg-slate-700 text-emerald-400 border border-slate-700 cursor-pointer disabled:opacity-40 transition-colors"
+                >
+                  ⚡ Solve each & every question
+                </button>
+                <button
+                  type="button"
+                  disabled={chatBusy}
+                  onClick={() => {
+                    setChatInput('Generate complete LaTeX code for this paper.');
+                  }}
+                  className="text-[10px] px-2 py-0.5 rounded bg-slate-800 hover:bg-slate-700 text-violet-400 border border-slate-700 cursor-pointer disabled:opacity-40 transition-colors"
+                >
+                  📝 Generate LaTeX
+                </button>
+              </div>
+
               <p className="text-[10px] text-slate-500 leading-snug">
-                Runs on your local Ollama model, one question per request — slower than a cloud
-                model but private and free. <span className="text-amber-500/90 font-semibold">Answers
-                are AI-generated and unverified</span>; check them against your answer key before
-                relying on them.
+                Powered by ZeroLeak AI Engine with cloud GPU acceleration. <span className="text-amber-500/90 font-semibold">Answers
+                are AI-generated and unverified</span>; check them against your syllabus before relying on them.
               </p>
             </div>
           )}
@@ -1085,60 +1209,81 @@ export const QuestionPaperPdfModal: React.FC<QuestionPaperPdfModalProps> = ({
 
               {/* Section 1: MCQ / Objective Type Questions */}
               {(() => {
-                const mcqs = paperData.questions.filter((q: any) => q.question_type === 'MCQ' || (Array.isArray(q.options) && q.options.length >= 2));
-                const theory = paperData.questions.filter((q: any) => q.question_type !== 'MCQ' && (!q.options || q.options.length < 2));
+                const stripItemPrefix = (str: string): string => {
+                  if (!str) return '';
+                  return str.replace(/^(?:Q\.?\s*\d+[\.\)]\s*|[a-zA-Z0-9][\.\)]\s*|\([a-zA-Z0-9]\)\s*)+/i, '').trim();
+                };
+
+                const isTrueMcq = (q: any) => {
+                  const marks = Number(q?.marks || 1);
+                  if (marks > 2) return false;
+                  const txt = (q?.content_text || '').trim();
+                  if (/^(explain|describe|illustrate|discuss|state and explain|derive|differentiate|write a short note|what is|define)/i.test(txt)) {
+                    return false;
+                  }
+                  return q?.question_type === 'MCQ' || (Array.isArray(q?.options) && q.options.length >= 2);
+                };
+
+                const mcqs = paperData.questions.filter(isTrueMcq);
+                const theory = paperData.questions.filter((q: any) => !isTrueMcq(q));
                 const theorySec1 = theory.slice(0, Math.ceil(theory.length / 2));
                 const theorySec2 = theory.slice(Math.ceil(theory.length / 2));
 
-                const activeMcqs = mcqs.length > 0 ? mcqs : paperData.questions.slice(0, 14);
+                const hasMcqs = mcqs.length > 0;
+                const qSec1A = hasMcqs ? 'Q.2' : 'Q.1';
+                const qSec1B = hasMcqs ? 'Q.3' : 'Q.2';
+                const qSec2A = hasMcqs ? 'Q.4' : 'Q.3';
+                const qSec2B = hasMcqs ? 'Q.5' : 'Q.4';
 
                 return (
                   <>
-                    <div className="space-y-4 border-b border-slate-300 pb-6">
-                      <div className="flex items-center justify-between font-bold text-xs border-b border-slate-400 pb-1 text-slate-900 font-mono">
-                        <span className="uppercase text-sm font-black">MCQ/Objective Type Questions</span>
-                        <span>Duration: 30 Minutes &nbsp;|&nbsp; Marks: {activeMcqs.length}</span>
-                      </div>
+                    {hasMcqs && (
+                      <div className="space-y-4 border-b border-slate-300 pb-6">
+                        <div className="flex items-center justify-between font-bold text-xs border-b border-slate-400 pb-1 text-slate-900 font-mono">
+                          <span className="uppercase text-sm font-black">MCQ/Objective Type Questions</span>
+                          <span>Duration: 30 Minutes &nbsp;|&nbsp; Marks: {mcqs.length}</span>
+                        </div>
 
-                      <div className="flex items-center justify-between font-bold text-sm text-slate-950">
-                        <span>Q.1 Choose the correct alternatives from the options.</span>
-                        <span className="font-mono text-sm font-black pr-2">{activeMcqs.length}</span>
-                      </div>
+                        <div className="flex items-center justify-between font-bold text-sm text-slate-950">
+                          <span>Q.1 Choose the correct alternatives from the options.</span>
+                          <span className="font-mono text-sm font-black pr-2">{mcqs.length}</span>
+                        </div>
 
-                      <div className="space-y-3.5 pl-2">
-                        {activeMcqs.map((q, idx) => (
-                          <div key={q.id || idx} className="space-y-1.5 text-xs">
-                            <div className="flex items-start gap-2 font-semibold text-slate-950">
-                              <span className="font-bold shrink-0">{idx + 1})</span>
-                              <div className="whitespace-pre-wrap leading-snug">{q.content_text}</div>
-                            </div>
-
-                            {/* MCQ Options a), b), c), d) */}
-                            {Array.isArray(q.options) && q.options.length > 0 && (
-                              <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-1 pl-6 pt-0.5 text-slate-800">
-                                {q.options.map((opt: any, optIdx: number) => {
-                                  const optText = typeof opt === 'string' ? opt : (opt?.text ?? opt?.value ?? '');
-                                  const optLabel = opt?.label || String.fromCharCode(97 + optIdx);
-                                  const isCorrect = q.correct_answer === optLabel || q.correct_answer === String.fromCharCode(65 + optIdx);
-
-                                  return (
-                                    <div key={optIdx} className="flex items-center gap-1.5 text-xs">
-                                      <span className="font-bold shrink-0">{optLabel})</span>
-                                      <span>{optText}</span>
-                                      {showAnswerKey && isCorrect && (
-                                        <span className="ml-1 text-[9px] font-black uppercase text-emerald-700 bg-emerald-100 px-1 py-0.5 rounded">
-                                          [CORRECT]
-                                        </span>
-                                      )}
-                                    </div>
-                                  );
-                                })}
+                        <div className="space-y-3.5 pl-2">
+                          {mcqs.map((q, idx) => (
+                            <div key={q.id || idx} className="space-y-1.5 text-xs">
+                              <div className="flex items-start gap-2 font-semibold text-slate-950">
+                                <span className="font-bold shrink-0">{idx + 1})</span>
+                                <div className="whitespace-pre-wrap leading-snug">{stripItemPrefix(q.content_text)}</div>
                               </div>
-                            )}
-                          </div>
-                        ))}
+
+                              {/* MCQ Options a), b), c), d) */}
+                              {Array.isArray(q.options) && q.options.length > 0 && (
+                                <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-1 pl-6 pt-0.5 text-slate-800">
+                                  {q.options.map((opt: any, optIdx: number) => {
+                                    const optText = typeof opt === 'string' ? opt : (opt?.text ?? opt?.value ?? '');
+                                    const optLabel = opt?.label || String.fromCharCode(97 + optIdx);
+                                    const isCorrect = q.correct_answer === optLabel || q.correct_answer === String.fromCharCode(65 + optIdx);
+
+                                    return (
+                                      <div key={optIdx} className="flex items-center gap-1.5 text-xs">
+                                        <span className="font-bold shrink-0">{optLabel})</span>
+                                        <span>{stripItemPrefix(optText)}</span>
+                                        {showAnswerKey && isCorrect && (
+                                          <span className="ml-1 text-[9px] font-black uppercase text-emerald-700 bg-emerald-100 px-1 py-0.5 rounded">
+                                            [CORRECT]
+                                          </span>
+                                        )}
+                                      </div>
+                                    );
+                                  })}
+                                </div>
+                              )}
+                            </div>
+                          ))}
+                        </div>
                       </div>
-                    </div>
+                    )}
 
                     {/* Section – I Theory */}
                     <div className="space-y-4 border-b border-slate-300 pb-6">
@@ -1151,13 +1296,13 @@ export const QuestionPaperPdfModal: React.FC<QuestionPaperPdfModalProps> = ({
                         <>
                           <div className="space-y-2">
                             <div className="flex items-center justify-between font-bold text-sm text-slate-950">
-                              <span>Q.2 Answer the following questions. (Attempt Any Four)</span>
+                              <span>{qSec1A} Answer the following questions. (Attempt Any Four)</span>
                               <span className="font-mono text-sm font-black pr-2">16</span>
                             </div>
                             <div className="space-y-2 pl-4 text-xs font-medium text-slate-900">
                               {theorySec1.slice(0, 5).map((tQ, tIdx) => (
                                 <div key={tQ.id || tIdx} className="flex items-start justify-between gap-2">
-                                  <span>{String.fromCharCode(97 + tIdx)}) {tQ.content_text}</span>
+                                  <span>{String.fromCharCode(97 + tIdx)}) {stripItemPrefix(tQ.content_text)}</span>
                                   <span className="font-mono font-bold shrink-0">[{tQ.marks || 4}]</span>
                                 </div>
                               ))}
@@ -1167,13 +1312,13 @@ export const QuestionPaperPdfModal: React.FC<QuestionPaperPdfModalProps> = ({
                           {theorySec1.length > 5 && (
                             <div className="space-y-2 pt-2">
                               <div className="flex items-center justify-between font-bold text-sm text-slate-950">
-                                <span>Q.3 Answer the following questions in detail. (Attempt Any Two)</span>
+                                <span>{qSec1B} Answer the following questions in detail. (Attempt Any Two)</span>
                                 <span className="font-mono text-sm font-black pr-2">12</span>
                               </div>
                               <div className="space-y-2 pl-4 text-xs font-medium text-slate-900">
                                 {theorySec1.slice(5).map((tQ, tIdx) => (
                                   <div key={tQ.id || tIdx} className="flex items-start justify-between gap-2">
-                                    <span>{String.fromCharCode(97 + tIdx)}) {tQ.content_text}</span>
+                                    <span>{String.fromCharCode(97 + tIdx)}) {stripItemPrefix(tQ.content_text)}</span>
                                     <span className="font-mono font-bold shrink-0">[{tQ.marks || 6}]</span>
                                   </div>
                                 ))}
@@ -1200,13 +1345,13 @@ export const QuestionPaperPdfModal: React.FC<QuestionPaperPdfModalProps> = ({
                         <>
                           <div className="space-y-2">
                             <div className="flex items-center justify-between font-bold text-sm text-slate-950">
-                              <span>Q.4 Answer the following questions. (Attempt Any Four)</span>
+                              <span>{qSec2A} Answer the following questions. (Attempt Any Four)</span>
                               <span className="font-mono text-sm font-black pr-2">16</span>
                             </div>
                             <div className="space-y-2 pl-4 text-xs font-medium text-slate-900">
                               {theorySec2.slice(0, 5).map((tQ, tIdx) => (
                                 <div key={tQ.id || tIdx} className="flex items-start justify-between gap-2">
-                                  <span>{String.fromCharCode(97 + tIdx)}) {tQ.content_text}</span>
+                                  <span>{String.fromCharCode(97 + tIdx)}) {stripItemPrefix(tQ.content_text)}</span>
                                   <span className="font-mono font-bold shrink-0">[{tQ.marks || 4}]</span>
                                 </div>
                               ))}
@@ -1216,13 +1361,13 @@ export const QuestionPaperPdfModal: React.FC<QuestionPaperPdfModalProps> = ({
                           {theorySec2.length > 5 && (
                             <div className="space-y-2 pt-2">
                               <div className="flex items-center justify-between font-bold text-sm text-slate-950">
-                                <span>Q.5 Solve / Explain the following technical problems.</span>
+                                <span>{qSec2B} Solve / Explain the following technical problems.</span>
                                 <span className="font-mono text-sm font-black pr-2">12</span>
                               </div>
                               <div className="space-y-2 pl-4 text-xs font-medium text-slate-900">
                                 {theorySec2.slice(5).map((tQ, tIdx) => (
                                   <div key={tQ.id || tIdx} className="flex items-start justify-between gap-2">
-                                    <span>{String.fromCharCode(97 + tIdx)}) {tQ.content_text}</span>
+                                    <span>{String.fromCharCode(97 + tIdx)}) {stripItemPrefix(tQ.content_text)}</span>
                                     <span className="font-mono font-bold shrink-0">[{tQ.marks || 6}]</span>
                                   </div>
                                 ))}
@@ -1232,14 +1377,15 @@ export const QuestionPaperPdfModal: React.FC<QuestionPaperPdfModalProps> = ({
                         </>
                       ) : (
                         <div className="space-y-2 pl-4 text-xs font-medium text-slate-900">
-                          <div>a) Analyze edge cases and describe failure recovery strategies.</div>
-                          <div>b) Demonstrate mathematical proofs and algorithmic efficiency.</div>
+                          <div>a) Analyze real-world application scenarios and failure recovery procedures.</div>
+                          <div>b) Formulate test plans and verification strategies for complex modules.</div>
                         </div>
                       )}
                     </div>
                   </>
                 );
               })()}
+
 
               {/* Official Paper Footer */}
               <div className="pt-4 flex flex-wrap items-center justify-between text-[11px] text-slate-600 font-mono border-t-2 border-slate-900">
