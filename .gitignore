@@ -50,10 +50,22 @@ NaviDC-OCR/outputs/
 test_results/
 output/
 tests/synthetic_data/
+tests/reports/
+tests/manual/
 public/uploads/
 .freebuff/
-public/compiled_papers/*.pdf
-!public/compiled_papers/test_sample_paper.pdf
+public/compiled_papers/
 public/extracted_figures/
 public/generated_papers/
+*.traineddata
+*.tmp
+*.sqlite*
+ollama-*.mts
+server/probe_*.ts
+server/test_*.ts
+test_*.py
+test_*.cjs
+tests/role_counts.ts
+tests/test_insert_debug.ts
+
 
