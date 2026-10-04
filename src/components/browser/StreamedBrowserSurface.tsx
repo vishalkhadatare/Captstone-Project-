@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { Loader2, MousePointerClick, TriangleAlert } from 'lucide-react';
+import { Keyboard, Loader2, MousePointerClick, TriangleAlert } from 'lucide-react';
 
 import {
   sendBrowserCommand,
@@ -10,6 +10,7 @@ import {
 } from '../../api';
 import {
   isAppOwnedKey,
+  isTypingKey,
   keyCodeFromDomKey,
   mapPointToFrame,
   modifiersFrom,
@@ -312,6 +313,86 @@ export const StreamedBrowserSurface: React.FC<StreamedBrowserSurfaceProps> = ({
     if (canvas && status?.state === 'ready') canvas.focus();
   }, [visible, status?.state]);
 
+  // ─── Mobile soft keyboard ────────────────────────────────────────────────────
+  // A canvas can never summon a phone's soft keyboard: the OS opens it only for
+  // a real focusable text field, and there is no physical keyboard to capture.
+  // Touch devices therefore get a one-line capture field. The "Type here" pill
+  // focuses it (which opens the OS keyboard), and everything typed or deleted
+  // is forwarded to the remote browser as key events - the same events a
+  // physical keyboard would produce, so the remote page cannot tell.
+  const [isTouchDevice] = useState(
+    () => typeof window !== 'undefined' && !!window.matchMedia?.('(pointer: coarse)').matches,
+  );
+  const [keyboardOpen, setKeyboardOpen] = useState(false);
+  const captureRef = useRef<HTMLInputElement>(null);
+  const keyboardOpenRef = useRef(false);
+  keyboardOpenRef.current = keyboardOpen;
+
+  useEffect(() => {
+    if (keyboardOpen) {
+      captureRef.current?.focus();
+    } else {
+      captureRef.current?.blur();
+    }
+  }, [keyboardOpen]);
+
+  // Control keys go through as named key events. Printable text must NOT take
+  // this path - it arrives through the input event below, and sending both
+  // would type every character twice.
+  const onCaptureKeyDown = (event: React.KeyboardEvent<HTMLInputElement>) => {
+    if (isTypingKey(event.key)) return;
+    const keyCode = keyCodeFromDomKey(event.key);
+    if (!keyCode) return;
+    event.preventDefault();
+    sendBrowserInput({ kind: 'key', action: 'down', keyCode });
+    sendBrowserInput({ kind: 'key', action: 'up', keyCode });
+  };
+
+  // The field never accumulates text: every change is the newest insertion
+  // (autocorrect and swipe-typing already resolved by the OS keyboard),
+  // forwarded as a `char` event and cleared. Chunks beyond the server's
+  // 32-character cap split across events.
+  const onCaptureInput = (event: React.FormEvent<HTMLInputElement>) => {
+    const field = event.currentTarget;
+    const text = field.value;
+    field.value = '';
+    if (!text) return;
+    for (let at = 0; at < text.length; at += 32) {
+      sendBrowserInput({ kind: 'key', action: 'char', keyCode: text.slice(at, at + 32) });
+    }
+  };
+
+  // With the soft keyboard open, a tap on the page would normally move focus to
+  // the canvas and close the keyboard mid-sentence. Cancelling the pointerdown
+  // prevents that focus theft - and also suppresses the compatibility mouse
+  // events the canvas handlers rely on, so taps are forwarded here through
+  // pointer events instead, one-to-one with the closed-keyboard behaviour.
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return undefined;
+    const onPointer = (event: PointerEvent) => {
+      if (!keyboardOpenRef.current) return;
+      event.preventDefault();
+      const point = pointFrom(event.clientX, event.clientY);
+      if (!point) return;
+      sendBrowserInput({
+        kind: 'mouse',
+        action: event.type === 'pointerdown' ? 'down' : 'up',
+        x: point.x,
+        y: point.y,
+        button: mouseButtonFrom(event.button) ?? 'left',
+        clickCount: 1,
+        modifiers: modifiersFrom(event as unknown as React.MouseEvent<HTMLCanvasElement>),
+      });
+    };
+    canvas.addEventListener('pointerdown', onPointer, { passive: false });
+    canvas.addEventListener('pointerup', onPointer, { passive: false });
+    return () => {
+      canvas.removeEventListener('pointerdown', onPointer);
+      canvas.removeEventListener('pointerup', onPointer);
+    };
+  }, [pointFrom]);
+
   const ready = status?.state === 'ready';
 
   return (
@@ -359,13 +440,49 @@ export const StreamedBrowserSurface: React.FC<StreamedBrowserSurfaceProps> = ({
       )}
 
       {/* A canvas cannot show a caret, so the only honest hint is a prompt. */}
-      {ready && !focused && visible && (
+      {ready && !focused && visible && !keyboardOpen && (
         <div className="absolute bottom-3 left-1/2 -translate-x-1/2 pointer-events-none">
           <span className="flex items-center gap-1.5 rounded-full border border-slate-700 bg-slate-900/95 px-3 py-1 text-[11px] text-slate-300">
             <MousePointerClick className="w-3.5 h-3.5 text-emerald-400" />
-            Click the page to type into it. This is a real browser, so sign-in works here.
+            {isTouchDevice
+              ? 'Tap the page to click. Use “Type here” for the keyboard.'
+              : 'Click the page to type into it. This is a real browser, so sign-in works here.'}
           </span>
         </div>
+      )}
+
+      {/* Mobile soft keyboard: the pill opens it, the capture field feeds it. */}
+      {ready && visible && isTouchDevice && (
+        <>
+          <button
+            type="button"
+            onClick={() => setKeyboardOpen(open => !open)}
+            className={`absolute bottom-3 right-3 z-10 flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-[11px] font-semibold shadow-lg transition-colors ${
+              keyboardOpen
+                ? 'border-emerald-400 bg-emerald-600 text-white'
+                : 'border-slate-600 bg-slate-900/95 text-slate-200'
+            }`}
+          >
+            <Keyboard className="w-3.5 h-3.5" />
+            {keyboardOpen ? 'Hide keyboard' : 'Type here'}
+          </button>
+          {/* Deliberately near-invisible but focusable: a display:none field
+              cannot take focus, and the OS opens its keyboard for focus. */}
+          <input
+            ref={captureRef}
+            type="text"
+            inputMode="text"
+            autoComplete="off"
+            autoCorrect="off"
+            autoCapitalize="off"
+            spellCheck={false}
+            aria-label="Remote browser text input"
+            onKeyDown={onCaptureKeyDown}
+            onInput={onCaptureInput}
+            onBlur={() => setKeyboardOpen(false)}
+            className="absolute bottom-0 left-0 h-px w-px border-0 p-0 opacity-0"
+          />
+        </>
       )}
     </div>
   );
