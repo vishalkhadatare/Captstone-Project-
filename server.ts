@@ -212,6 +212,40 @@ process.on('unhandledRejection', (reason) => {
 
 async function startServer() {
   const app = express();
+
+  /**
+   * CORS for cross-origin frontends. The SPA is hosted statically on Netlify
+   * while this Express API runs elsewhere, so browsers call us from a foreign
+   * origin. ALLOWED_ORIGINS (comma-separated) restricts access when set;
+   * unset means the public demo posture: any origin may call the API.
+   */
+  const allowedOrigins = (process.env.ALLOWED_ORIGINS || '*')
+    .split(',')
+    .map((o) => o.trim())
+    .filter(Boolean);
+  app.use((req, res, next) => {
+    const origin = req.headers.origin;
+    if (origin) {
+      if (allowedOrigins.includes('*')) {
+        res.setHeader('Access-Control-Allow-Origin', '*');
+      } else if (allowedOrigins.includes(origin)) {
+        res.setHeader('Access-Control-Allow-Origin', origin);
+        res.setHeader('Vary', 'Origin');
+      }
+      res.setHeader('Access-Control-Allow-Methods', 'GET,POST,PUT,PATCH,DELETE,OPTIONS');
+      res.setHeader(
+        'Access-Control-Allow-Headers',
+        'Content-Type, Authorization, X-Requested-With, X-Device-Fingerprint, ngrok-skip-browser-warning'
+      );
+      res.setHeader('Access-Control-Expose-Headers', 'Content-Type');
+      res.setHeader('Access-Control-Max-Age', '86400');
+    }
+    if (req.method === 'OPTIONS') {
+      res.status(204).end();
+      return;
+    }
+    next();
+  });
   /**
    * Overridable because a deployed instance is not the only instance. The port
    * was fixed at 3000, and 3000 is exactly where the dev server already is - so

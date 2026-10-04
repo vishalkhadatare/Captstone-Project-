@@ -42,6 +42,18 @@ import {
 
 export const DEVICE_APPROVAL_EVENT = 'zeroleak:device-approval-needed';
 
+/**
+ * Base URL for every API call. Empty string means same-origin, which is correct
+ * for the Express server serving the built app and for local development.
+ * Static hosts (Netlify) have no backend, so a production build targets a real
+ * API host instead: VITE_API_URL when provided at build time, otherwise the
+ * ZeroLeak demo tunnel. Set VITE_API_URL in the host's build environment to
+ * repoint the frontend without touching code.
+ */
+export const API_BASE: string =
+  ((import.meta.env.VITE_API_URL as string | undefined) || '').trim() ||
+  (import.meta.env.PROD ? 'https://backed-repeated-aerobics.ngrok-free.dev' : '');
+
 function getStoredToken(): string | null {
   return localStorage.getItem('zeroleak_jwt_token');
 }
@@ -256,6 +268,11 @@ function buildApiHeaders(extra?: HeadersInit): Record<string, string> {
     'x-device-fingerprint': getDeviceFingerprint(),
     ...(extra as Record<string, string>),
   };
+  // Cross-origin API hosts behind ngrok answer browser requests with an
+  // interstitial warning page unless this header is present.
+  if (API_BASE) {
+    headers['ngrok-skip-browser-warning'] = '1';
+  }
   if (token) {
     headers['Authorization'] = `Bearer ${token}`;
   }
@@ -283,7 +300,7 @@ export async function ollamaChatStream(
   /** Called when a provider died mid-stream: drop whatever has been shown so far. */
   onReset?: () => void
 ): Promise<string> {
-  const res = await fetch('/api/ai/ollama-chat-stream', {
+  const res = await fetch(`${API_BASE}/api/ai/ollama-chat-stream`, {
     method: 'POST',
     headers: buildApiHeaders(),
     body: JSON.stringify(payload),
@@ -358,7 +375,7 @@ async function request<T>(endpoint: string, options: RequestInit = {}): Promise<
 
   let res: Response;
   try {
-    res = await fetch(endpoint, {
+    res = await fetch(`${API_BASE}${endpoint}`, {
       ...options,
       headers,
     });
@@ -437,9 +454,10 @@ export const api = {
       formData.append('exam_id', examId);
     }
     const token = getStoredToken();
-    const res = await fetch('/api/university/upload-drafts', {
+    const res = await fetch(`${API_BASE}/api/university/upload-drafts`, {
       method: 'POST',
       headers: {
+        ...(API_BASE ? { 'ngrok-skip-browser-warning': '1' } : {}),
         ...(token ? { Authorization: `Bearer ${token}` } : {}),
       },
       body: formData,
@@ -1508,7 +1526,7 @@ export function subscribeBrowserStatus(onFrame: (frame: BrowserStatusFrame) => v
 
   let source: EventSource | null = null;
   try {
-    source = new EventSource('/api/browser/stream');
+    source = new EventSource(`${API_BASE}/api/browser/stream`);
   } catch {
     return () => undefined;
   }
