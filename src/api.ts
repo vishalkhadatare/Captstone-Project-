@@ -1522,6 +1522,32 @@ export interface BrowserStatusFrame {
  * caller that unmounts cannot leave a retrying connection behind.
  */
 export function subscribeBrowserStatus(onFrame: (frame: BrowserStatusFrame) => void): () => void {
+  // Cross-origin API host behind ngrok's free tier: EventSource cannot send
+  // the ngrok-skip-browser-warning header, so the tunnel answers with its
+  // interstitial page instead of the stream. Poll a JSON snapshot instead.
+  if (API_BASE) {
+    let stopped = false;
+    let busy = false;
+    const tick = async () => {
+      if (stopped || busy) return;
+      busy = true;
+      try {
+        const frame = await request<BrowserStatusFrame>('/api/browser/tools-snapshot');
+        if (!stopped) onFrame(frame);
+      } catch {
+        // The API host may be momentarily unreachable; the next tick retries.
+      } finally {
+        busy = false;
+      }
+    };
+    void tick();
+    const timer = window.setInterval(() => void tick(), 5000);
+    return () => {
+      stopped = true;
+      window.clearInterval(timer);
+    };
+  }
+
   if (typeof EventSource === 'undefined') return () => undefined;
 
   let source: EventSource | null = null;
@@ -1641,6 +1667,45 @@ export const sendBrowserInput = (event: unknown): void => {
  * the caller must not keep them: draw each one and let it go.
  */
 export function subscribeBrowserLive(onEvent: (event: BrowserLiveEvent) => void): () => void {
+  // Same cross-origin constraint as subscribeBrowserStatus: EventSource is
+  // unusable behind ngrok's free tier, so poll status + latest frame and emit
+  // them as they change. Frame cadence drops to roughly one per second — a
+  // slideshow rather than live video, which still beats a permanently loading
+  // panel.
+  if (API_BASE) {
+    let stopped = false;
+    let busy = false;
+    let lastFrameSeq = -1;
+    let lastReportAt: number | null = null;
+    const tick = async () => {
+      if (stopped || busy) return;
+      busy = true;
+      try {
+        const snap = await request<{ type: 'status'; status: StreamedBrowserStatus; frame: StreamedBrowserFrame | null }>('/api/browser/live-snapshot');
+        if (stopped) return;
+        if (snap.frame && snap.frame.seq !== lastFrameSeq) {
+          lastFrameSeq = snap.frame.seq;
+          onEvent({ type: 'frame', frame: snap.frame });
+        }
+        const report = snap.status.lastReportAt ?? snap.status.updatedAt;
+        if (report !== lastReportAt) {
+          lastReportAt = report;
+          onEvent({ type: 'status', status: snap.status });
+        }
+      } catch {
+        // Retry on the next tick.
+      } finally {
+        busy = false;
+      }
+    };
+    void tick();
+    const timer = window.setInterval(() => void tick(), 900);
+    return () => {
+      stopped = true;
+      window.clearInterval(timer);
+    };
+  }
+
   if (typeof EventSource === 'undefined') return () => undefined;
 
   let source: EventSource | null = null;

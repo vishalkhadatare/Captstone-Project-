@@ -5294,6 +5294,35 @@ async function startServer() {
     });
   });
 
+  // Polling snapshots of the two SSE streams above. `EventSource` cannot send
+  // custom headers, so a frontend served from a static host behind ngrok's free
+  // tier (which requires the ngrok-skip-browser-warning header) would receive
+  // the tunnel's interstitial page instead of a stream. These endpoints return
+  // the same payloads over plain JSON so such clients can poll instead.
+  app.get('/api/browser/tools-snapshot', authenticateOptional, async (_req: Request, res: Response) => {
+    try {
+      const config = await buildBrowserConfig();
+      return res.json({
+        type: 'browser-status',
+        at: config.generatedAt,
+        bookmarks: config.bookmarks,
+        tools: config.toolStatus,
+        usableNow: config.usableToolsNow,
+        notes: config.notes,
+      });
+    } catch (err: any) {
+      return res.status(500).json({ error: err?.message || 'probe failed' });
+    }
+  });
+
+  app.get('/api/browser/live-snapshot', authenticateOptional, (_req: Request, res: Response) => {
+    return res.json({
+      type: 'status',
+      status: browserStream.status(),
+      frame: browserStream.latestFrame(),
+    });
+  });
+
   // Steering the streamed browser. Authenticated on purpose: this drives a
   // browser that may be signed in to the user's own accounts, so an unauthenticated
   // caller must not be able to type into it.
