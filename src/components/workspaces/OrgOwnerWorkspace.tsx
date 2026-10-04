@@ -44,6 +44,10 @@ export const OrgOwnerWorkspace: React.FC<OrgOwnerWorkspaceProps> = ({
   const [history, setHistory] = useState<any[]>([]);
   const [managers, setManagers] = useState<User[]>([]);
   const [devices, setDevices] = useState<TrustedDevice[]>([]);
+  // Centre Superintendents may only hold one terminal at a time, so a second one
+  // has to ask permission to take the first one's place. Those asks land here.
+  const [replacementRequests, setReplacementRequests] = useState<any[]>([]);
+  const [processingReplacementId, setProcessingReplacementId] = useState<string | null>(null);
   const [securityEvents, setSecurityEvents] = useState<SecurityEvent[]>([]);
   const [loading, setLoading] = useState(true);
   const [statusMessage, setStatusMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
@@ -86,11 +90,12 @@ export const OrgOwnerWorkspace: React.FC<OrgOwnerWorkspaceProps> = ({
   const loadData = async () => {
     setLoading(true);
     try {
-      const [orgRes, membersRes, devicesRes, secRes] = await Promise.all([
+      const [orgRes, membersRes, devicesRes, secRes, replacementRes] = await Promise.all([
         api.getCurrentOrg().catch(() => ({ organization: null, documents: [], history: [], representatives: [] })),
         api.getAuthorizedUsers().catch(() => api.getOrgMembers().then(r => ({ users: r.members }))).catch(() => ({ users: [] })),
         api.getDevices().catch(() => ({ devices: [] })),
         api.getSecurityEvents().catch(() => ({ events: [] })),
+        api.getReplacementRequests().catch(() => ({ requests: [] })),
       ]);
 
       setOrg(orgRes.organization);
@@ -99,6 +104,7 @@ export const OrgOwnerWorkspace: React.FC<OrgOwnerWorkspaceProps> = ({
       setManagers((membersRes as any).users || (membersRes as any).members || []);
       setDevices(devicesRes.devices || []);
       setSecurityEvents(secRes.events || []);
+      setReplacementRequests(replacementRes.requests || []);
     } catch (err: any) {
       console.error('Data load error:', err);
     } finally {
@@ -234,6 +240,29 @@ export const OrgOwnerWorkspace: React.FC<OrgOwnerWorkspaceProps> = ({
   };
 
   const [processingDeviceId, setProcessingDeviceId] = useState<string | null>(null);
+
+  /**
+   * Approving swaps the account over to the requesting terminal, so the terminal
+   * it displaces is disabled in the same breath. Rejecting leaves everything as
+   * it was — the account keeps the device it has.
+   */
+  const handleReplacementDecision = async (requestId: string, decision: 'approve' | 'reject') => {
+    setStatusMessage(null);
+    setProcessingReplacementId(requestId);
+    try {
+      const res = decision === 'approve'
+        ? await api.approveReplacementRequest(requestId)
+        : await api.rejectReplacementRequest(requestId);
+      setStatusMessage({ type: 'success', text: res.message });
+      await loadData();
+      onRefresh();
+    } catch (err: any) {
+      setStatusMessage({ type: 'error', text: err.message || `Failed to ${decision} the replacement request.` });
+      await loadData();
+    } finally {
+      setProcessingReplacementId(null);
+    }
+  };
 
   const handleRevokeDevice = async (deviceId: string) => {
     setStatusMessage(null);
@@ -1184,6 +1213,71 @@ export const OrgOwnerWorkspace: React.FC<OrgOwnerWorkspaceProps> = ({
                 </button>
               </div>
             </div>
+
+            {/* Pending workstation swaps. A Centre Superintendent may hold only one
+                terminal, so a replacement sits here until an authority rules on it. */}
+            {replacementRequests.filter(r => r.status === 'PENDING').length > 0 && (
+              <div className="p-4 rounded-xl bg-amber-50/80 border border-amber-300 space-y-3">
+                <div className="flex items-center gap-2">
+                  <ShieldAlert className="w-4 h-4 text-amber-700 shrink-0" />
+                  <h4 className="text-sm font-bold text-amber-900">
+                    Pending Workstation Replacement Requests
+                  </h4>
+                  <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-200 text-amber-900 border border-amber-400">
+                    {replacementRequests.filter(r => r.status === 'PENDING').length} awaiting decision
+                  </span>
+                </div>
+                <p className="text-[11px] text-amber-900/90 leading-relaxed">
+                  A new terminal asked to take over this account. Approving disables the terminal listed below;
+                  the replacement must then complete its own cryptographic registration.
+                </p>
+
+                <div className="space-y-2">
+                  {replacementRequests.filter(r => r.status === 'PENDING').map(r => (
+                    <div
+                      key={r.id}
+                      className="p-3.5 rounded-lg bg-white border border-amber-200 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs"
+                    >
+                      <div>
+                        <div className="font-bold text-slate-900">
+                          {r.user_name || r.user_id}
+                          <span className="ml-2 px-2 py-0.5 rounded-full text-[10px] font-bold bg-slate-100 text-slate-700 border border-slate-200">
+                            {r.user_role}
+                          </span>
+                        </div>
+                        <div className="text-[11px] text-slate-500 mt-0.5">
+                          Replaces: <span className="font-mono">{r.existing_device_name || r.existing_device_id}</span>
+                        </div>
+                        <div className="text-[10px] text-slate-400 font-mono mt-0.5">
+                          Requested {r.requested_at ? new Date(r.requested_at).toLocaleString() : 'recently'}
+                        </div>
+                      </div>
+
+                      <div className="flex flex-wrap items-center gap-2 shrink-0 self-end sm:self-center">
+                        <button
+                          type="button"
+                          disabled={processingReplacementId === r.id}
+                          onClick={() => handleReplacementDecision(r.id, 'approve')}
+                          className="inline-flex items-center gap-1.5 px-3.5 py-2 bg-emerald-800 hover:bg-emerald-700 disabled:opacity-50 text-white rounded-lg font-bold text-xs transition-colors cursor-pointer"
+                        >
+                          <CheckCircle2 className="w-3.5 h-3.5 text-emerald-300" />
+                          <span>Approve Swap</span>
+                        </button>
+                        <button
+                          type="button"
+                          disabled={processingReplacementId === r.id}
+                          onClick={() => handleReplacementDecision(r.id, 'reject')}
+                          className="inline-flex items-center gap-1.5 px-3.5 py-2 bg-white hover:bg-rose-50 disabled:opacity-50 text-rose-800 border border-rose-200 rounded-lg font-bold text-xs transition-colors cursor-pointer"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                          <span>Reject</span>
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
 
             <div className="space-y-3">
               {devices.map(d => {

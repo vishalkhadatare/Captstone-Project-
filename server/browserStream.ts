@@ -99,11 +99,19 @@ export type InputEventPayload =
       modifiers: Modifier[];
     };
 
+export interface UploadedFileItem {
+  name: string;
+  type: string;
+  base64: string;
+  lastModified?: number;
+}
+
 export type HostCommand =
   | { id: number; type: 'navigate'; url: string }
   | { id: number; type: 'back' | 'forward' | 'reload' | 'stop' }
   | { id: number; type: 'input'; event: InputEventPayload }
   | { id: number; type: 'resize'; viewport: StreamViewport }
+  | { id: number; type: 'upload-files'; files: UploadedFileItem[] }
   | { id: number; type: 'ping' };
 
 /**
@@ -352,7 +360,7 @@ export type NormalizedCommand =
   | { ok: false; reason: string };
 
 /** The client may steer the browser, but only in the ways a browser is steerable. */
-export const CLIENT_COMMAND_TYPES = ['navigate', 'back', 'forward', 'reload', 'stop', 'resize'] as const;
+export const CLIENT_COMMAND_TYPES = ['navigate', 'back', 'forward', 'reload', 'stop', 'resize', 'upload-files'] as const;
 
 /**
  * Validate a steering command from a client.
@@ -386,6 +394,21 @@ export const normalizeCommand = (raw: unknown, viewport: StreamViewport): Normal
   }
   if (type === 'resize') {
     return { ok: true, reason: '', command: { type: 'resize', viewport: sanitizeViewport(command.viewport ?? viewport) } };
+  }
+  if (type === 'upload-files') {
+    const rawFiles = Array.isArray(command.files) ? command.files : [];
+    const files: UploadedFileItem[] = [];
+    for (const item of rawFiles) {
+      if (item && typeof item === 'object' && typeof (item as any).name === 'string' && typeof (item as any).base64 === 'string') {
+        files.push({
+          name: String((item as any).name).slice(0, 255),
+          type: typeof (item as any).type === 'string' ? String((item as any).type).slice(0, 100) : 'application/octet-stream',
+          base64: String((item as any).base64),
+          lastModified: typeof (item as any).lastModified === 'number' ? (item as any).lastModified : Date.now(),
+        });
+      }
+    }
+    return { ok: true, reason: '', command: { type: 'upload-files', files } };
   }
   return { ok: true, reason: '', command: { type: type as 'back' | 'forward' | 'reload' | 'stop' } };
 };
@@ -507,6 +530,12 @@ export const planHostSpawn = (options: {
         // somewhere else. The host sends a frame the moment one is painted, so
         // this is a ceiling rather than a schedule.
         ZEROLEAK_HOST_FPS: String(clamp(asInt(options.fps ?? 24, 2), 2, 30)),
+        // Adaptive image quality: the host encodes text-heavy pages at a lower
+        // JPEG quality while a viewer is on a slow link (tunnels, VPNs, shared
+        // Wi-Fi), then restores quality when the link recovers. Cuts frame size
+        // roughly in half without touching the frame rate, which is what keeps
+        // a remote panel feeling live instead of a slideshow.
+        ZEROLEAK_HOST_ADAPTIVE_QUALITY: '1',
       },
     },
   };

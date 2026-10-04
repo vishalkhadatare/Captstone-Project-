@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { api } from '../api';
+import { formatExamUnlock } from '../utils/examTime';
 import {
   Examination,
   Question,
@@ -398,7 +399,7 @@ Total Marks: 100.`);
                     <div className="mt-3 pt-2 border-t border-slate-800/80 flex items-center justify-between text-[10px]">
                       <div className="text-amber-400 flex items-center gap-1">
                         <Clock className="w-3 h-3" />
-                        <span>Unlock: {new Date(exam.unlock_time).toLocaleString()}</span>
+                        <span>Unlock: {formatExamUnlock(exam.unlock_time, exam.exam_date)}</span>
                       </div>
                       <span className="font-mono text-slate-500">{exam.id.substring(0, 12)}...</span>
                     </div>

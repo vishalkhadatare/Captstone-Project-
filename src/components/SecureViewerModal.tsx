@@ -71,7 +71,26 @@ export const SecureViewerModal: React.FC<SecureViewerModalProps> = ({
   };
 
   const questions = paper?.questions || [];
-  const examName = paper?.exam_name || paper?.subject || 'National Standardized Examination';
+  // Papers arrive in two shapes: the delivery payload uses `examinationName`,
+  // the generator payload uses `exam_name`, and questions use `content` in one
+  // and `content_text` in the other. Reading both is what keeps a real paper
+  // from rendering as a blank sheet.
+  const examName =
+    paper?.exam_name || paper?.examinationName || paper?.subject || 'National Standardized Examination';
+  const questionText = (question: any): string => question?.content_text || question?.content || '';
+  const questionOptions = (question: any): any[] => {
+    const raw = question?.options_json ?? question?.options;
+    if (Array.isArray(raw)) return raw;
+    if (typeof raw === 'string' && raw.trim()) {
+      try {
+        const parsed = JSON.parse(raw);
+        return Array.isArray(parsed) ? parsed : [];
+      } catch {
+        return [];
+      }
+    }
+    return [];
+  };
 
   return (
     <div className="fixed inset-0 z-50 bg-slate-950/95 backdrop-blur-md flex flex-col text-slate-100 select-none">
@@ -168,37 +187,48 @@ export const SecureViewerModal: React.FC<SecureViewerModalProps> = ({
 
             <div className="grid grid-cols-3 gap-2 mt-4 pt-3 border-t border-slate-200 text-xs font-sans">
               <div>Total Questions: <strong>{questions.length}</strong></div>
-              <div>Duration: <strong>180 Minutes</strong></div>
-              <div>Maximum Marks: <strong>100</strong></div>
+              <div>Duration: <strong>{paper?.durationMinutes || paper?.duration_minutes || 180} Minutes</strong></div>
+              <div>
+                Maximum Marks:{' '}
+                <strong>
+                  {paper?.totalMarks ||
+                    paper?.total_marks ||
+                    questions.reduce((sum: number, q: any) => sum + Number(q.marks || 0), 0) ||
+                    100}
+                </strong>
+              </div>
             </div>
           </div>
 
           {/* Instructions */}
           <div className="mb-8 p-4 bg-slate-50 rounded-lg border border-slate-200 text-xs font-sans text-slate-700 space-y-1 relative z-20">
             <strong className="block text-slate-900 uppercase tracking-wider">Candidate Instructions:</strong>
-            <p>1. All questions are compulsory. Ensure responses are marked accurately.</p>
-            <p>2. Each correct answer carries marks specified alongside each item.</p>
-            <p>3. This examination paper contains dynamic forensic watermarks mapped to Centre {watermark?.centreId || '001'}.</p>
+            {Array.isArray(paper?.instructions) && paper.instructions.length > 0 ? (
+              paper.instructions.map((line: string, index: number) => (
+                <p key={index}>
+                  {index + 1}. {line}
+                </p>
+              ))
+            ) : (
+              <>
+                <p>1. All questions are compulsory. Ensure responses are marked accurately.</p>
+                <p>2. Each correct answer carries marks specified alongside each item.</p>
+              </>
+            )}
+            <p>This examination paper contains dynamic forensic watermarks mapped to Centre {watermark?.centreId || '001'}.</p>
           </div>
 
           {/* Questions List */}
           <div className="space-y-8 relative z-20">
             {questions.map((q: any, idx: number) => {
-              let options: any[] = [];
-              if (q.options_json) {
-                try {
-                  options = typeof q.options_json === 'string' ? JSON.parse(q.options_json) : q.options_json;
-                } catch {
-                  options = [];
-                }
-              }
+              const options = questionOptions(q);
 
               return (
                 <div key={q.id || idx} className="space-y-3 pb-6 border-b border-slate-200 last:border-0">
                   <div className="flex items-start justify-between gap-4">
                     <div className="font-bold text-sm text-slate-900">
-                      <span className="mr-2">Q{idx + 1}.</span>
-                      <span>{q.content_text}</span>
+                      <span className="mr-2">Q{q.questionNumber || idx + 1}.</span>
+                      <span>{questionText(q)}</span>
                     </div>
                     <span className="text-xs font-sans font-bold text-slate-500 shrink-0">
                       [{q.marks || 4} Marks]

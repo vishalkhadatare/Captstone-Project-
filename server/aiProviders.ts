@@ -90,6 +90,7 @@ interface ProviderDef {
 }
 
 const DEFAULT_ORDER: ProviderId[] = [
+  'ollama',
   'nvidia',
   'agentrouter',
   'groq',
@@ -98,25 +99,17 @@ const DEFAULT_ORDER: ProviderId[] = [
   'mistral',
   'openrouter',
   'github',
-  'ollama',
 ];
 
 export const OLLAMA_BASE_URL = (process.env.OLLAMA_BASE_URL || 'http://localhost:11434').replace(/\/+$/, '');
-export const OLLAMA_MODEL = process.env.OLLAMA_MODEL || 'qwen2.5vl:7b';
+export const OLLAMA_MODEL = process.env.OLLAMA_MODEL || 'qwen3.5:4b';
 export const OLLAMA_EMBED_MODEL = process.env.OLLAMA_EMBED_MODEL || 'nomic-embed-text';
 
 /**
  * Smaller, faster model for interactive chat and per-question answering.
- *
- * Generation speed here is bounded by model size — the 7B runs at ~10 generated tokens/sec
- * on this CPU, so every answer costs real seconds. The qwen3.5 4B default is a full
- * generation newer than the qwen2.5 models it replaced and answers markedly more accurately
- * at a size that still fits a CPU. The larger OLLAMA_MODEL is kept for extraction and paper
- * generation, where reading a whole paper correctly matters more than latency.
- *
- * Defaults to OLLAMA_MODEL, so nothing changes until a fast model is configured.
+ * Defaults to qwen3.5:4b or qwen2.5:3b.
  */
-export const OLLAMA_FAST_MODEL = process.env.OLLAMA_FAST_MODEL || OLLAMA_MODEL;
+export const OLLAMA_FAST_MODEL = process.env.OLLAMA_FAST_MODEL || process.env.OLLAMA_MODEL || 'qwen3.5:4b';
 
 /**
  * Context window Ollama loads the model with.
@@ -618,9 +611,9 @@ export async function ollamaStream(
   handlers: OllamaStreamHandlers = {}
 ): Promise<string> {
   const def = PROVIDERS.ollama;
-  let model = getModel(def, options.model);
+  let model = options.model || getModel(def, options.model);
   // Normalize cloud model names to local model when routing to local engine
-  if (model.includes('/') || model.toLowerCase().includes('deepseek')) {
+  if (!model || model.includes('/') || model.toLowerCase().includes('deepseek') || model.toLowerCase().includes('gpt') || model.toLowerCase().includes('claude') || model.toLowerCase().includes('llama')) {
     model = process.env.OLLAMA_FAST_MODEL || process.env.OLLAMA_MODEL || 'qwen3.5:4b';
   }
   const apiKey = process.env.OLLAMA_API_KEY;
@@ -960,24 +953,43 @@ const SMART_STREAM_TIMEOUT_MS = Number(process.env.AI_STREAM_TIMEOUT_MS) || 600_
 const SMART_STREAM_MAX_TOKENS = Number(process.env.AI_STREAM_MAX_TOKENS) || 16_000;
 
 /**
- * High-speed stream: prefers NVIDIA NIM cloud stream if configured.
- * Automatically fails over seamlessly to local engine if NVIDIA NIM times out or is overloaded.
+ * Smart stream: prioritizes local Ollama streaming engine.
+ * Automatically fails over seamlessly to NVIDIA NIM / cloud stream if Ollama is unreachable.
  */
 export async function smartStream(
   messages: ChatMessage[],
   options: ChatOptions = {},
   handlers: OllamaStreamHandlers = {}
 ): Promise<string> {
+  // 1. Try Ollama local first!
+  const ollamaHealth = await checkOllamaReachable();
+  if (ollamaHealth.reachable) {
+    try {
+      console.log(`[ZeroLeak AI] Streaming via Local Ollama engine (${options.model || OLLAMA_FAST_MODEL})...`);
+      const res = await ollamaStream(messages, options, handlers);
+      console.log(`[ZeroLeak AI] Ollama stream completed successfully (${res.length} chars).`);
+      return res;
+    } catch (err: any) {
+      if (handlers.signal?.aborted) throw err;
+      console.warn('[ZeroLeak AI] Local Ollama stream failed, attempting cloud AI fallback:', err?.message || err);
+      try {
+        handlers.onReset?.();
+      } catch (resetErr) {
+        console.warn('[ZeroLeak AI] stream reset handler failed:', (resetErr as Error)?.message || resetErr);
+      }
+    }
+  }
+
+  // 2. Cloud failover if Ollama is down and NVIDIA is configured
   if (isProviderConfigured('nvidia')) {
     let targetModel = (options.model && options.model.includes('/'))
       ? options.model
       : (process.env.NVIDIA_MODEL || PROVIDERS.nvidia.defaultModel);
-    // Auto-map decommissioned DeepSeek endpoints on NVIDIA NIM to fast Meta Vision Instruct
     if (targetModel.toLowerCase().includes('deepseek')) {
       targetModel = 'meta/llama-3.2-11b-vision-instruct';
     }
     try {
-      console.log(`[ZeroLeak AI] Streaming via NVIDIA NIM (${targetModel})...`);
+      console.log(`[ZeroLeak AI] Streaming via NVIDIA NIM fallback (${targetModel})...`);
       const res = await nvidiaStream(
         messages,
         {
@@ -988,14 +1000,11 @@ export async function smartStream(
         },
         handlers
       );
-      console.log(`[ZeroLeak AI] NVIDIA NIM stream completed successfully (${res.length} chars).`);
+      console.log(`[ZeroLeak AI] NVIDIA NIM fallback stream completed successfully (${res.length} chars).`);
       return res;
     } catch (err: any) {
       if (handlers.signal?.aborted) throw err;
-      console.warn('[ZeroLeak AI] NVIDIA NIM stream timed out or unavailable, attempting fast local AI fallback:', err?.message || err);
-      // This attempt already streamed its partial tokens to the caller. Tell it
-      // to drop them before the fallback writes anything, otherwise the two
-      // replies concatenate and the result parses as neither.
+      console.warn('[ZeroLeak AI] NVIDIA NIM stream failed:', err?.message || err);
       try {
         handlers.onReset?.();
       } catch (resetErr) {
@@ -1003,6 +1012,8 @@ export async function smartStream(
       }
     }
   }
+
+  // 3. Fallback to direct ollamaStream
   console.log('[ZeroLeak AI] Streaming via local fast AI engine...');
   return await ollamaStream(messages, options, handlers);
 }

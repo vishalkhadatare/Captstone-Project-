@@ -2,6 +2,7 @@ import 'dotenv/config';
 import express, { Request, Response, NextFunction } from 'express';
 import crypto from 'node:crypto';
 import dns from 'node:dns';
+import os from 'node:os';
 import path from 'path';
 import fs from 'fs';
 import pdfParse from 'pdf-parse/lib/pdf-parse.js';
@@ -9,17 +10,19 @@ import { createServer as createViteServer } from 'vite';
 import jwt from 'jsonwebtoken';
 import bcrypt from 'bcryptjs';
 import { v4 as uuidv4 } from 'uuid';
-import { getDb, executeQuery, executeRun, saveDb, resetDatabase, lookupUserInPostgres, lookupAuthorizedUserInPostgres, getPostgresPool } from './server/db.ts';
+import { getDb, executeQuery, executeRun, executeTransaction, saveDb, resetDatabase, lookupUserInPostgres, lookupAuthorizedUserInPostgres, getPostgresPool } from './server/db.ts';
 import { uploadDocumentToCloudinary, listAllCloudinaryAssets, getCloudinaryHealth, deleteAssetFromCloudinary } from './server/cloudinary.ts';
 import {
   encryptExamPaper,
   decryptExamPaper,
+  canDecryptExamPaper,
   splitSecret,
   calculateThreatAnomalyScore,
   generateCopyId,
   generateTxHash,
   EncryptedPaperPayload,
 } from './server/crypto.ts';
+import { buildResealPayload, planReseal } from './server/paperReseal.ts';
 import {
   analyzeTheoryPatternWithAI,
   checkQuestionSimilarityWithAI,
@@ -35,6 +38,19 @@ import {
 } from './server/ai.ts';
 import { getProviderStatus, ollamaStream, smartStream, OLLAMA_FAST_MODEL, type ChatMessage } from './server/aiProviders.ts';
 import { assessExtractedQuestion } from './server/questionQuality.ts';
+import {
+  DISCOVERY_BEACON_PORT,
+  PrintAuthorizationGuard,
+  PrintStationHub,
+  STATION_CODE_LENGTH,
+  buildStationUrls,
+  evaluatePrintSecurity,
+  listLanAddresses,
+  renderPrintRelayPage,
+  startPrintDiscoveryBeacon,
+  type PrintStationDevice,
+  type PrintStationRecord,
+} from './server/printStation.ts';
 import {
   getFormatexHealth,
   getLatexOnlineHealth,
@@ -186,6 +202,14 @@ declare global {
   }
 }
 
+process.on('uncaughtException', (err) => {
+  console.warn('[ZeroLeak Server] Uncaught exception caught safely:', err?.message || err);
+});
+
+process.on('unhandledRejection', (reason) => {
+  console.warn('[ZeroLeak Server] Unhandled promise rejection caught safely:', (reason as any)?.message || reason);
+});
+
 async function startServer() {
   const app = express();
   /**
@@ -196,6 +220,23 @@ async function startServer() {
    * build beside the dev server instead.
    */
   const PORT = Number.parseInt(process.env.PORT || '', 10) || 3000;
+
+  /**
+   * Wi-Fi secure print relay.
+   *
+   * A station is a live session, held in memory on purpose: it must not survive
+   * a restart, because a restart means nobody is watching the panel that admits
+   * devices to it. The durable trail is `print_copies` and the audit ledger.
+   */
+  const printStations = new PrintStationHub();
+  /**
+   * Single-use authorisation for a local print release. The secret is per-boot
+   * when nothing is configured, so a token minted before a restart is worthless
+   * afterwards - which is what we want for something that mints exam copies.
+   */
+  const printAuthorization = new PrintAuthorizationGuard(
+    process.env.ZEROLEAK_PRINT_GUARD_SECRET || crypto.createHash('sha256').update(`print-guard:${JWT_SECRET}`).digest('base64url')
+  );
 
   app.use(express.json({ limit: '50mb' }));
   app.use(express.urlencoded({ extended: true, limit: '50mb' }));
@@ -1051,16 +1092,19 @@ async function startServer() {
         if (existingCentres.length === 0) {
           executeRun(
             db,
-            `INSERT INTO examination_centres (id, exam_id, centre_code, centre_name, city, address, operator_user_id, max_copies, created_at)
-             VALUES (?, ?, ?, ?, ?, ?, ?, 500, ?)`,
+            `INSERT INTO examination_centres (id, exam_id, org_id, centre_code, centre_name, city, address, operator_user_id, max_copies, status, created_by, created_at, updated_at)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, 500, 'ACTIVE', ?, ?, ?)`,
             [
               assignedCentreId,
               'GLOBAL_CENTRE',
+              assignedOrgId,
               assignedCentreId,
               centre_name || `Examination Centre ${assignedCentreId}`,
               'Operational Region',
               centre_address || 'Authorized Centre Location',
               userId,
+              userId,
+              nowIso,
               nowIso,
             ]
           );
@@ -3036,27 +3080,36 @@ async function startServer() {
   });
 
   app.post('/api/devices/replacement-requests/:id/approve', authenticateToken, requireRole(['ORG_OWNER', 'AUDITOR']), async (req: Request, res: Response) => {
-    const db = await getDb();
-    const replacement = executeQuery(db, 'SELECT * FROM device_replacement_requests WHERE id = ? AND org_id = ?', [req.params.id, req.user!.org_id])[0];
-    if (!replacement) return res.status(404).json({ error: 'Replacement request not found in your organization.' });
-    const oldDevice = executeQuery(db, 'SELECT * FROM trusted_devices WHERE id = ? AND org_id = ?', [replacement.existing_device_id, req.user!.org_id])[0];
-    if (!oldDevice) return res.status(409).json({ error: 'Replacement device record is no longer available.' });
-    const decision = canApproveOrRejectDevice({ actorId: req.user!.id, actorRole: req.user!.role, actorOrgId: req.user!.org_id, targetUserId: replacement.user_id, targetOrgId: replacement.org_id });
-    if (!decision.allowed) return res.status(403).json({ error: decision.reason || 'Unauthorized device access.' });
-    if (replacement.status !== 'PENDING') return res.status(409).json({ error: 'Replacement request has already been reviewed.' });
-    const now = new Date().toISOString();
     try {
-      db.run('BEGIN TRANSACTION');
-      executeRun(db, 'UPDATE trusted_devices SET status = ?, disabled_at = ?, updated_at = ? WHERE id = ? AND org_id = ?', [DEVICE_STATUS.DISABLED, now, now, oldDevice.id, req.user!.org_id]);
-      executeRun(db, 'UPDATE device_replacement_requests SET status = ?, reviewed_at = ?, reviewed_by = ? WHERE id = ? AND org_id = ? AND status = ?', ['APPROVED', now, req.user!.id, replacement.id, req.user!.org_id, 'PENDING']);
-      db.run('COMMIT');
-    } catch (error) {
-      try { db.run('ROLLBACK'); } catch { /* no active transaction */ }
-      throw error;
+      const db = await getDb();
+      const replacement = executeQuery(db, 'SELECT * FROM device_replacement_requests WHERE id = ? AND org_id = ?', [req.params.id, req.user!.org_id])[0];
+      if (!replacement) return res.status(404).json({ error: 'Replacement request not found in your organization.' });
+      const oldDevice = executeQuery(db, 'SELECT * FROM trusted_devices WHERE id = ? AND org_id = ?', [replacement.existing_device_id, req.user!.org_id])[0];
+      if (!oldDevice) return res.status(409).json({ error: 'Replacement device record is no longer available.' });
+      const decision = canApproveOrRejectDevice({ actorId: req.user!.id, actorRole: req.user!.role, actorOrgId: req.user!.org_id, targetUserId: replacement.user_id, targetOrgId: replacement.org_id });
+      if (!decision.allowed) return res.status(403).json({ error: decision.reason || 'Unauthorized device access.' });
+      if (replacement.status !== 'PENDING') return res.status(409).json({ error: 'Replacement request has already been reviewed.' });
+      const now = new Date().toISOString();
+      // Disabling the old device and approving the request must land together:
+      // an approval recorded against a still-active device would leave the
+      // operator holding two usable terminals.
+      executeTransaction(db, [
+        {
+          sql: 'UPDATE trusted_devices SET status = ?, disabled_at = ?, updated_at = ? WHERE id = ? AND org_id = ?',
+          params: [DEVICE_STATUS.DISABLED, now, now, oldDevice.id, req.user!.org_id],
+        },
+        {
+          sql: 'UPDATE device_replacement_requests SET status = ?, reviewed_at = ?, reviewed_by = ? WHERE id = ? AND org_id = ? AND status = ?',
+          params: ['APPROVED', now, req.user!.id, replacement.id, req.user!.org_id, 'PENDING'],
+        },
+      ]);
+      await recordDeviceLifecycleEvent({ eventType: 'DEVICE_REPLACEMENT_APPROVED', actor: req.user!, device: oldDevice, status: DEVICE_STATUS.DISABLED, ip: req.ip });
+      await logAuditEvent({ event_type: 'DEVICE_DISABLED_FOR_REPLACEMENT', user_id: req.user!.id, org_id: req.user!.org_id, device_id: oldDevice.id, details: { replacementRequestId: replacement.id, targetUserId: replacement.user_id } });
+      return res.json({ message: 'Replacement approved. The prior device is disabled; the replacement must be cryptographically registered and separately approved.', status: 'APPROVED' });
+    } catch (e: any) {
+      console.error('Replacement approval error:', e);
+      return res.status(500).json({ error: 'Unable to approve the replacement request.' });
     }
-    await recordDeviceLifecycleEvent({ eventType: 'DEVICE_REPLACEMENT_APPROVED', actor: req.user!, device: oldDevice, status: DEVICE_STATUS.DISABLED, ip: req.ip });
-    await logAuditEvent({ event_type: 'DEVICE_DISABLED_FOR_REPLACEMENT', user_id: req.user!.id, org_id: req.user!.org_id, device_id: oldDevice.id, details: { replacementRequestId: replacement.id, targetUserId: replacement.user_id } });
-    return res.json({ message: 'Replacement approved. The prior device is disabled; the replacement must be cryptographically registered and separately approved.', status: 'APPROVED' });
   });
 
   app.post('/api/devices/replacement-requests/:id/reject', authenticateToken, requireRole(['ORG_OWNER', 'AUDITOR']), async (req: Request, res: Response) => {
@@ -4306,7 +4359,7 @@ async function startServer() {
   });
 
   // Get Ollama Available Models Endpoint
-  app.get('/api/ai/ollama-models', authenticateToken, async (req: Request, res: Response) => {
+  app.get('/api/ai/ollama-models', authenticateOptional, async (req: Request, res: Response) => {
     try {
       const baseUrl = (process.env.OLLAMA_BASE_URL || 'http://localhost:11434').replace(/\/$/, '');
       const apiKey = process.env.OLLAMA_API_KEY || '';
@@ -5171,7 +5224,7 @@ async function startServer() {
       if (closed) return;
       // Backpressure, with no unbounded queue behind it: at a couple of dozen
       // JPEG frames a second this only trips on a genuinely stuck socket.
-      if (res.writableLength > 4_000_000) return;
+      if (res.writableLength > 1_500_000) return;
       try {
         res.write(`data: ${JSON.stringify(payload)}\n\n`);
       } catch {
@@ -5184,8 +5237,18 @@ async function startServer() {
     if (current) write({ type: 'frame', frame: current });
 
     const unsubscribe = browserStream.subscribe((event) => {
-      if (event.type === 'frame') write({ type: 'frame', frame: event.frame });
-      else write({ type: 'status', status: event.status });
+      if (event.type === 'frame') {
+        // Remote viewers (the panel through a tunnel) cannot drain a frame a
+        // second. Queueing every frame turns the lag into seconds: the socket
+        // fills, and the panel draws the past. So a viewer that has fallen
+        // behind skips forward - stale frames are dropped and only a frame
+        // that fits the drained socket is sent. The panel always wants the
+        // newest picture; a skipped one shows nothing anyone is missing.
+        if (res.writableLength > 400_000) return;
+        write({ type: 'frame', frame: event.frame });
+        return;
+      }
+      write({ type: 'status', status: event.status });
     });
     browserStream.addViewer();
 
@@ -7343,13 +7406,16 @@ async function startServer() {
       const params: any[] = [req.user!.org_id];
 
       if (req.user!.role === 'TRANSLATOR') {
+        // Scope to the translator's own assignments. The language filter that
+        // used to sit here matched only the language the controller requested
+        // first, which hid every additional language the translator delivered
+        // back from the translator who wrote it.
         query += ` AND EXISTS (
           SELECT 1 FROM question_assignments qa
           WHERE qa.question_id = qt.question_id
             AND qa.org_id = ?
             AND qa.assigned_sme_user_id = ?
             AND qa.assignment_type = 'LINGUISTIC_TRANSLATION'
-            AND (qa.target_language IS NULL OR qa.target_language = qt.language)
         )`;
         params.push(req.user!.org_id, req.user!.id);
       }
@@ -7383,10 +7449,16 @@ async function startServer() {
       const params: any[] = [req.user!.org_id];
 
       if (req.user!.role === 'TRANSLATOR') {
-        // Return only questions explicitly assigned to this translator
+        // Return only questions explicitly assigned to this translator. Each row
+        // carries the languages already delivered, so the translator can see a
+        // question's multilingual coverage without opening it first.
         const assigned = executeQuery(
           db,
-          `SELECT DISTINCT q.*, qa.target_language as assigned_language, qa.notes as assignment_notes, qa.id as assignment_id
+          `SELECT DISTINCT q.*, qa.target_language as assigned_language, qa.notes as assignment_notes, qa.id as assignment_id,
+                  qa.status as assignment_status, qa.assigned_at as assigned_at,
+                  COALESCE((SELECT GROUP_CONCAT(qt.language, ', ')
+                            FROM question_translations qt
+                            WHERE qt.question_id = q.id), '') as translated_language_list
            FROM questions q
            JOIN question_assignments qa ON q.id = qa.question_id
            WHERE q.org_id = ? AND qa.assigned_sme_user_id = ? AND qa.assignment_type = 'LINGUISTIC_TRANSLATION'
@@ -7396,7 +7468,14 @@ async function startServer() {
 
         const sanitized = assigned.map(q => {
           const { correct_answer, ...rest } = q;
-          return { ...rest, correct_answer: undefined };
+          return {
+            ...rest,
+            correct_answer: undefined,
+            translated_languages: String(q.translated_language_list || '')
+              .split(',')
+              .map((entry: string) => entry.trim())
+              .filter(Boolean),
+          };
         });
 
         return res.json({ questions: sanitized });
@@ -7431,20 +7510,23 @@ async function startServer() {
       const db = await getDb();
       const now = new Date().toISOString();
 
+      // One assignment covers the whole multilingual delivery: the controller
+      // nominates the first language, the translator may return that language
+      // plus any others. The assignment is still what authorizes the write, so
+      // an unassigned question remains off-limits.
       const assignedQuestion = executeQuery(
         db,
-        `SELECT q.id, qa.id as assignment_id
+        `SELECT q.id, qa.id as assignment_id, qa.target_language as assigned_language
          FROM questions q
          JOIN question_assignments qa ON qa.question_id = q.id
          WHERE q.id = ? AND q.org_id = ? AND qa.org_id = ?
            AND qa.assigned_sme_user_id = ?
            AND qa.assignment_type = 'LINGUISTIC_TRANSLATION'
-           AND (qa.target_language IS NULL OR qa.target_language = ?)
          LIMIT 1`,
-        [question_id, req.user!.org_id, req.user!.org_id, req.user!.id, language]
+        [question_id, req.user!.org_id, req.user!.org_id, req.user!.id]
       )[0];
       if (req.user!.role === 'TRANSLATOR' && !assignedQuestion) {
-        return res.status(403).json({ error: 'This question is not assigned to you for the selected language.' });
+        return res.status(403).json({ error: 'This question is not assigned to you for translation.' });
       }
 
       // Check if translation already exists for this question & language
@@ -7497,14 +7579,18 @@ async function startServer() {
         );
       }
 
-      // If marked APPROVED, complete assignment if present
+      // An assignment is finished only when its own requested language is
+      // approved. Delivering an extra language early must not close the task
+      // while the language the controller asked for is still outstanding.
       if (status === 'APPROVED') {
         executeRun(
           db,
           `UPDATE question_assignments
            SET status = 'COMPLETED', completed_at = ?
-           WHERE question_id = ? AND (target_language = ? OR target_language IS NULL) AND assigned_sme_user_id = ?`,
-          [now, question_id, language, req.user!.id]
+           WHERE question_id = ?
+             AND assigned_sme_user_id = ?
+             AND (target_language IS NULL OR target_language = ?)`,
+          [now, question_id, req.user!.id, language]
         );
       }
 
@@ -7512,7 +7598,16 @@ async function startServer() {
         event_type: 'QUESTION_TRANSLATED',
         user_id: req.user!.id,
         org_id: req.user!.org_id,
-        details: { translationId, question_id, language, status: status || 'UNDER_REVIEW' },
+        details: {
+          translationId,
+          question_id,
+          language,
+          status: status || 'UNDER_REVIEW',
+          requestedLanguage: assignedQuestion?.assigned_language || null,
+          beyondAssignment: Boolean(
+            assignedQuestion?.assigned_language && assignedQuestion.assigned_language !== language
+          ),
+        },
       });
 
       return res.json({ message: 'Question translation saved successfully.', translationId });
@@ -7544,9 +7639,8 @@ async function startServer() {
           db,
           `SELECT id FROM question_assignments
            WHERE question_id = ? AND org_id = ? AND assigned_sme_user_id = ?
-             AND assignment_type = 'LINGUISTIC_TRANSLATION'
-             AND (target_language IS NULL OR target_language = ?)`,
-          [translation.question_id, req.user!.org_id, req.user!.id, translation.language]
+             AND assignment_type = 'LINGUISTIC_TRANSLATION'`,
+          [translation.question_id, req.user!.org_id, req.user!.id]
         )[0];
         if (!assignment) {
           return res.status(403).json({ error: 'You may verify only translations assigned to you.' });
@@ -9385,7 +9479,10 @@ async function startServer() {
     try {
       const db = await getDb();
       const orgId = req.user!.org_id;
-      const { blueprint, examId, title } = req.body;
+      const { blueprint, title } = req.body;
+      // The client posts exam_id while some callers use examId; accept both so
+      // generated sets always land under the target examination.
+      const examId: string | null = req.body.examId || req.body.exam_id || null;
       const selectedSourcePaperIds: string[] = req.body.selectedSourcePaperIds || req.body.source_paper_ids || [];
       const numSets = req.body.numSets || (Array.isArray(req.body.versions) ? req.body.versions.length : 1);
 
@@ -9740,12 +9837,21 @@ async function startServer() {
     try {
       const db = await getDb();
       const orgId = req.user!.org_id;
+      // The generator screen filters by examination; honour it instead of
+      // silently returning every paper the organisation has ever generated.
+      const examId = ((req.query.examId as string) || (req.query.exam_id as string) || '').trim();
 
-      const papers = executeQuery(
-        db,
-        `SELECT * FROM generated_papers WHERE org_id = ? ORDER BY generated_at DESC`,
-        [orgId]
-      );
+      const papers = examId
+        ? executeQuery(
+            db,
+            `SELECT * FROM generated_papers WHERE org_id = ? AND exam_id = ? ORDER BY generated_at DESC`,
+            [orgId, examId]
+          )
+        : executeQuery(
+            db,
+            `SELECT * FROM generated_papers WHERE org_id = ? ORDER BY generated_at DESC`,
+            [orgId]
+          );
 
       const parsed = papers.map(p => ({
         ...p,
@@ -10075,6 +10181,128 @@ async function startServer() {
     }
   });
 
+  // Centre Operator: Arm a print release (Section 37-38 security gate)
+  //
+  // Printing is not authorised by opening the printer. This endpoint is the
+  // operator's deliberate, two-factor release step: something they know (their
+  // account password, verified server-side against the stored hash) and
+  // something on the screen in front of them (a one-time code that expires in
+  // three minutes). It also evaluates the print security checklist before it
+  // arms, so a locked exam, dead paper version or exhausted quota is refused
+  // with a reason the operator can act on rather than a bare 403.
+  app.post('/api/delivery/print-security/arm', authenticateToken, requireApprovedDevice, requireRole(['CENTRE_OPERATOR']), async (req: Request, res: Response) => {
+    try {
+      const { exam_id, paper_version_id, copies_count, password } = req.body || {};
+      const count = Number(copies_count);
+
+      if (!Number.isInteger(count) || count < 1 || count > 50) {
+        return res.status(400).json({ error: 'Maximum batch print limit per transaction is 50 copies.' });
+      }
+
+      const db = await getDb();
+      const userRow = executeQuery(db, 'SELECT * FROM users WHERE id = ?', [req.user!.id])[0];
+      if (!userRow?.password_hash) {
+        return res.status(401).json({ error: 'Operator record not found for re-authentication.' });
+      }
+
+      const passwordOk =
+        typeof password === 'string' && password.length > 0 && (await bcrypt.compare(password, userRow.password_hash));
+      if (!passwordOk) {
+        await logSecurityEvent({
+          event_type: 'PRINT_REAUTH_FAILED',
+          severity: 'HIGH',
+          user_id: req.user!.id,
+          org_id: req.user!.org_id,
+          ip_address: req.ip,
+          details: { examId: exam_id, copies: count },
+        });
+        return res.status(401).json({
+          error: 'Re-authentication failed. Releasing examination copies requires your account password.',
+          securityChecks: [
+            { id: 'REAUTH', label: 'Operator re-authentication', status: 'FAIL', detail: 'Password did not match.' },
+          ],
+        });
+      }
+
+      const context = await buildPrintSecurityContext({
+        examId: exam_id,
+        actor: req.user as unknown as PrintActor,
+        requestedCopies: count,
+        allowedRoles: ['CENTRE_OPERATOR'],
+        deviceFingerprint: req.clientDeviceFingerprint,
+      });
+      if (!context.exam) return res.status(404).json({ error: 'Examination not found for this organisation.' });
+      if (!context.version) {
+        return res.status(404).json({ error: 'No generated paper version exists for this examination yet.' });
+      }
+
+      // The print tab only knows the examination, not the current version id, so an
+      // unresolvable id falls back to the current version instead of failing.
+      const requestedVersionId = String(paper_version_id || '');
+      const resolvedVersion =
+        (requestedVersionId
+          ? executeQuery(db, 'SELECT * FROM paper_versions WHERE id = ? AND exam_id = ?', [requestedVersionId, exam_id])[0]
+          : null) || context.version;
+
+      const checks = [
+        {
+          id: 'REAUTH',
+          label: 'Operator re-authentication',
+          status: 'PASS' as const,
+          detail: `Password confirmed for ${req.user!.email} on this workstation.`,
+        },
+        ...context.evaluation.checks,
+      ];
+
+      if (!context.evaluation.allowed) {
+        await logSecurityEvent({
+          event_type: 'PRINT_AUTHORISATION_REFUSED',
+          severity: 'HIGH',
+          user_id: req.user!.id,
+          org_id: req.user!.org_id,
+          ip_address: req.ip,
+          details: { examId: context.exam.id, copies: count, checks: context.evaluation.checks },
+        });
+        return res.status(403).json({ error: firstFailedCheck(context.evaluation.checks), securityChecks: checks });
+      }
+
+      const armed = printAuthorization.arm({
+        userId: req.user!.id,
+        deviceFingerprint: req.clientDeviceFingerprint || 'UNKNOWN-DEVICE',
+        examId: context.exam.id,
+        paperVersionId: resolvedVersion.id,
+        copies: count,
+      });
+
+      await logAuditEvent({
+        event_type: 'PRINT_AUTHORISATION_ARMED',
+        user_id: req.user!.id,
+        org_id: req.user!.org_id,
+        exam_id: context.exam.id,
+        details: { copies: count, paperVersionId: resolvedVersion.id, expiresAt: armed.expiresAt, checks },
+      });
+
+      return res.json({
+        message: `Release armed for ${count} copy(ies) of ${context.exam.name}. The code is valid for three minutes and can be used once.`,
+        securityToken: armed.token,
+        code: armed.code,
+        expiresAt: armed.expiresAt,
+        securityChecks: checks,
+        examId: context.exam.id,
+        examName: context.exam.name,
+        paperVersionId: resolvedVersion.id,
+        quota: {
+          authorizedCopies: context.authorizedCopies,
+          alreadyPrinted: context.totalPrinted,
+          requested: count,
+          remaining: Math.max(0, context.authorizedCopies - context.totalPrinted - count),
+        },
+      });
+    } catch (e: any) {
+      return res.status(500).json({ error: e.message });
+    }
+  });
+
   // Centre Operator: Authorized Watermarked Print (Section 37-38)
   app.post('/api/delivery/print-authorized-copy', authenticateToken, requireApprovedDevice, requireRole(['CENTRE_OPERATOR']), async (req: Request, res: Response) => {
     try {
@@ -10084,6 +10312,36 @@ async function startServer() {
 
       if (!Number.isInteger(count) || count < 1 || count > 50) {
         return res.status(400).json({ error: 'Maximum batch print limit per transaction is 50 copies.' });
+      }
+
+      // The security gate. Without a fresh, single-use authorisation armed
+      // seconds ago by this operator on this workstation - and the one-time code
+      // shown on the panel - nothing is minted, so a replayed request body can
+      // no longer manufacture copies.
+      const authorisation = printAuthorization.consume({
+        token: String(req.body?.security_token || ''),
+        code: String(req.body?.security_code || ''),
+        userId: req.user!.id,
+        deviceFingerprint: req.clientDeviceFingerprint || 'UNKNOWN-DEVICE',
+        examId: String(exam_id || ''),
+        paperVersionId: String(paper_version_id || ''),
+        copies: count,
+      });
+      if (!authorisation.ok) {
+        await logSecurityEvent({
+          event_type: 'PRINT_AUTHORISATION_REFUSED',
+          severity: 'HIGH',
+          user_id: req.user!.id,
+          org_id: req.user!.org_id,
+          ip_address: req.ip,
+          details: { examId: exam_id, copies: count, reason: authorisation.reason },
+        });
+        return res.status(403).json({
+          error: authorisation.reason,
+          securityChecks: [
+            { id: 'AUTHORISATION', label: 'Print authorisation', status: 'FAIL', detail: authorisation.reason },
+          ],
+        });
       }
 
       const exam = executeQuery(db, 'SELECT * FROM examinations WHERE id = ? AND org_id = ?', [exam_id, req.user!.org_id])[0];
@@ -10115,23 +10373,15 @@ async function startServer() {
         });
       }
 
-      const generatedCopies: Array<{ copyId: string; txHash: string; printedAt: string }> = [];
-      const now = new Date().toISOString();
-
-      for (let i = 0; i < count; i++) {
-        const copyCounter = totalPrinted + i + 1;
-        const copyId = generateCopyId(copyCounter);
-        const txHash = generateTxHash(copyId + exam_id + (req.user!.id || ''));
-
-        executeRun(
-          db,
-          `INSERT INTO print_copies (id, copy_id, exam_id, paper_version_id, centre_id, operator_user_id, device_id, printed_at, status, tx_hash)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'PRINTED', ?)`,
-          [uuidv4(), copyId, exam_id, paper_version_id, req.user!.centre_id || 'CENTRE-01', req.user!.id, req.user!.device_id, now, txHash]
-        );
-
-        generatedCopies.push({ copyId, txHash, printedAt: now });
-      }
+      const generatedCopies = await insertPrintCopies({
+        examId: exam_id,
+        paperVersionId: paper_version_id,
+        centreId: req.user!.centre_id || 'CENTRE-01',
+        operatorUserId: req.user!.id,
+        deviceId: req.user!.device_id || req.clientDeviceFingerprint || 'workstation',
+        count,
+        startIndex: totalPrinted,
+      });
 
       await logAuditEvent({
         event_type: 'PAPER_PRINTED_AUTHORIZED',
@@ -10169,6 +10419,707 @@ async function startServer() {
       return res.status(500).json({ error: e.message });
     }
   });
+
+  // =========================================================================
+  // 7B. WI-FI SECURE PRINT RELAY
+  //
+  // Controlled printing used to be trapped on the operator's own workstation:
+  // the paper was unlocked in the browser and only that machine could put it on
+  // paper. A centre with several printing desks then had to move the unlocked
+  // paper around, which is the exact leak this product exists to stop.
+  //
+  // A "relay" is a short-lived station published on the centre's Wi-Fi. Any
+  // device on that network - a spare laptop, a phone, a tablet, no account, no
+  // install - opens it in a browser, types the pairing code the operator reads
+  // out, waits for the operator to admit it, and prints. The server decrypts the
+  // paper for that one admitted device, and every sheet lands in the same
+  // serialized `print_copies` ledger as an operator's own batch print.
+  //
+  // The controls, all enforced here rather than in the browser:
+  //   open            only an authorised role on an approved workstation, only
+  //                   after the time-lock releases, only for a valid paper
+  //                   version, and only while copy quota remains;
+  //   pairing         a six-digit code minted with `crypto.randomInt`, compared
+  //                   in constant time, locking the whole relay after five wrong
+  //                   guesses;
+  //   admission       a device that knows the code still starts in
+  //                   PENDING_APPROVAL and prints nothing until the operator
+  //                   admits it on the panel;
+  //   per copy        quota and paper-version status are re-checked on every
+  //                   single sheet, not just when the relay was opened, with a
+  //                   per-device and per-relay ceiling on top;
+  //   closing         the relay expires on its own, and revoking it drops every
+  //                   attached device at once.
+  // =========================================================================
+
+  interface PrintActor {
+    id: string;
+    role: string;
+    org_id: string;
+    centre_id?: string | null;
+    full_name?: string | null;
+  }
+
+  const printRelayAddresses = (): string[] => listLanAddresses(os.networkInterfaces());
+
+  const printRelayUrls = (stationId: string): string[] => buildStationUrls(printRelayAddresses(), PORT, stationId);
+
+  /** The panel's view of one station: its code (operator-only) plus the URLs to hand out. */
+  const printRelayEnvelope = (station: any) => ({
+    station,
+    urls: printRelayUrls(station.id),
+    beaconPort: DISCOVERY_BEACON_PORT,
+    pairingCodeLength: STATION_CODE_LENGTH,
+  });
+
+  /**
+   * A crude per-IP throttle for the unauthenticated relay endpoints. The pairing
+   * code is the real lock; this only stops a device from hammering the route.
+   */
+  const relayAccessHits = new Map<string, number[]>();
+  function relayThrottled(key: string, limit: number, windowMs: number): boolean {
+    const now = Date.now();
+    const hits = (relayAccessHits.get(key) || []).filter(at => now - at < windowMs);
+    if (hits.length >= limit) {
+      relayAccessHits.set(key, hits);
+      return true;
+    }
+    hits.push(now);
+    relayAccessHits.set(key, hits);
+    if (relayAccessHits.size > 1_000) relayAccessHits.clear();
+    return false;
+  }
+
+  /**
+   * Everything the print security gate needs to decide, gathered in one place so
+   * the panel, the local batch print and every relay copy all read the same
+   * facts instead of three slightly different re-implementations.
+   */
+  async function buildPrintSecurityContext(params: {
+    examId: string;
+    actor: PrintActor;
+    requestedCopies: number;
+    allowedRoles: string[];
+    deviceFingerprint?: string;
+  }) {
+    const db = await getDb();
+    const exam = executeQuery(db, 'SELECT * FROM examinations WHERE id = ? AND org_id = ?', [params.examId, params.actor.org_id])[0];
+    if (!exam) return { exam: null as any, version: null as any, evaluation: null as any };
+
+    const version =
+      executeQuery(db, 'SELECT * FROM paper_versions WHERE exam_id = ? AND is_current = 1', [exam.id])[0] ||
+      executeQuery(db, 'SELECT * FROM paper_versions WHERE exam_id = ? LIMIT 1', [exam.id])[0] ||
+      null;
+
+    const centre =
+      executeQuery(
+        db,
+        'SELECT * FROM examination_centres WHERE exam_id = ? AND (id = ? OR centre_code = ? OR operator_user_id = ?)',
+        [exam.id, params.actor.centre_id || '', params.actor.centre_id || '', params.actor.id]
+      )[0] || executeQuery(db, 'SELECT * FROM examination_centres WHERE exam_id = ? LIMIT 1', [exam.id])[0];
+
+    const managerAuthorized = Number(exam.max_copies || 500);
+    const centreAuthorized = centre ? Number(centre.max_copies || 100) : 100;
+    const authorizedCopies = Math.min(managerAuthorized, centreAuthorized);
+    const totalPrinted = Number(executeQuery(db, 'SELECT COUNT(*) as cnt FROM print_copies WHERE exam_id = ?', [exam.id])[0]?.cnt || 0);
+
+    const unlockDateTime = new Date(`${exam.exam_date}T${exam.unlock_time}:00`);
+    const examUnlocked = isNaN(unlockDateTime.getTime()) ? true : Date.now() >= unlockDateTime.getTime();
+
+    const liveStation = printStations
+      .list(params.actor.org_id)
+      .find(station => station.examId === exam.id && station.status !== 'REVOKED' && station.status !== 'EXPIRED');
+
+    const evaluation = evaluatePrintSecurity({
+      role: params.actor.role,
+      allowedRoles: params.allowedRoles,
+      // `requireApprovedDevice` already rejected an unbound workstation upstream.
+      deviceApproved: true,
+      deviceFingerprint: params.deviceFingerprint,
+      paperVersionStatus: version ? version.status : null,
+      examUnlocked,
+      unlockLabel: `${exam.exam_date} ${exam.unlock_time}`,
+      alreadyPrinted: totalPrinted,
+      authorizedCopies,
+      requestedCopies: params.requestedCopies,
+      station: liveStation
+        ? {
+            status: liveStation.status,
+            devices: liveStation.devices.filter(device => device.status === 'APPROVED').length,
+            prints: liveStation.prints,
+          }
+        : null,
+    });
+
+    return { exam, version, centre: centre || null, managerAuthorized, centreAuthorized, authorizedCopies, totalPrinted, examUnlocked, unlockDateTime, evaluation };
+  }
+
+  /**
+   * Writes one serialized copy per sheet into the immutable ledger, shared by the
+   * operator's batch print and by every Wi-Fi relay device so both paths produce
+   * identically shaped records (sequential COPY-xxxxxx ids, one tx hash each).
+   */
+  async function insertPrintCopies(params: {
+    examId: string;
+    paperVersionId: string;
+    centreId: string;
+    operatorUserId: string;
+    deviceId: string;
+    count: number;
+    startIndex: number;
+  }): Promise<Array<{ copyId: string; txHash: string; printedAt: string }>> {
+    const db = await getDb();
+    const now = new Date().toISOString();
+    const copies: Array<{ copyId: string; txHash: string; printedAt: string }> = [];
+    for (let i = 0; i < params.count; i++) {
+      const copyId = generateCopyId(params.startIndex + i + 1);
+      const txHash = generateTxHash(copyId + params.examId + params.operatorUserId);
+      executeRun(
+        db,
+        `INSERT INTO print_copies (id, copy_id, exam_id, paper_version_id, centre_id, operator_user_id, device_id, printed_at, status, tx_hash)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'PRINTED', ?)`,
+        [uuidv4(), copyId, params.examId, params.paperVersionId, params.centreId, params.operatorUserId, params.deviceId, now, txHash]
+      );
+      copies.push({ copyId, txHash, printedAt: now });
+    }
+    return copies;
+  }
+
+  const firstFailedCheck = (checks: Array<{ status: string; detail: string }>): string =>
+    checks.find(check => check.status === 'FAIL')?.detail || 'Print refused by the security gate.';
+
+  // ---- Operator panel: opening, watching and closing relays -----------------
+
+  app.post('/api/delivery/print-relay', authenticateToken, requireApprovedDevice, requireRole(['CENTRE_OPERATOR', 'EXAM_MANAGER']), async (req: Request, res: Response) => {
+    try {
+      const { exam_id, label, require_device_approval, ttl_minutes, max_prints } = req.body || {};
+      const context = await buildPrintSecurityContext({
+        examId: exam_id,
+        actor: req.user as unknown as PrintActor,
+        requestedCopies: 0,
+        allowedRoles: ['CENTRE_OPERATOR', 'EXAM_MANAGER'],
+        deviceFingerprint: req.clientDeviceFingerprint,
+      });
+
+      if (!context.exam) return res.status(404).json({ error: 'Examination not found for this organisation.' });
+      if (!context.version) {
+        return res.status(404).json({ error: 'This examination has no generated paper yet, so there is nothing a relay could release.' });
+      }
+      if (!context.evaluation.allowed) {
+        await logSecurityEvent({
+          event_type: 'PRINT_RELAY_REFUSED',
+          severity: 'HIGH',
+          user_id: req.user!.id,
+          org_id: req.user!.org_id,
+          ip_address: req.ip,
+          details: { examId: context.exam.id, checks: context.evaluation.checks },
+        });
+        return res.status(403).json({
+          error: firstFailedCheck(context.evaluation.checks),
+          securityChecks: context.evaluation.checks,
+        });
+      }
+
+      // One live relay per examination: two pairing codes in circulation for the
+      // same paper is exactly the confusion an attacker would want.
+      for (const existing of printStations.list(req.user!.org_id)) {
+        if (existing.examId === context.exam.id && (existing.status === 'ACTIVE' || existing.status === 'PAUSED' || existing.status === 'LOCKED')) {
+          printStations.revoke(existing.id, 'superseded by a new relay');
+        }
+      }
+
+      const ttlMinutes = Math.min(120, Math.max(5, Number(ttl_minutes) || 30));
+      const station = printStations.create({
+        label: typeof label === 'string' && label.trim() ? label : `${context.exam.name} — print relay`,
+        orgId: req.user!.org_id,
+        examId: context.exam.id,
+        examName: context.exam.name,
+        paperVersionId: context.version.id,
+        centreId: req.user!.centre_id || 'CENTRE-01',
+        createdBy: req.user!.id,
+        createdByName: req.user!.full_name,
+        ttlMs: ttlMinutes * 60_000,
+        maxPrints: Number(max_prints) || undefined,
+        requireDeviceApproval: require_device_approval !== false,
+      });
+
+      await logAuditEvent({
+        event_type: 'PRINT_RELAY_OPENED',
+        user_id: req.user!.id,
+        org_id: req.user!.org_id,
+        exam_id: context.exam.id,
+        details: {
+          stationId: station.id,
+          ttlMinutes,
+          requireDeviceApproval: station.requireDeviceApproval,
+          lanUrls: printRelayUrls(station.id),
+          securityChecks: context.evaluation.checks,
+        },
+      });
+
+      return res.json({
+        message: `Wi-Fi print relay open for ${context.exam.name}. Devices on this network can now print to their own printer.`,
+        ...printRelayEnvelope(printStations.toPanelView(station)),
+        lanAddresses: printRelayAddresses(),
+        securityChecks: context.evaluation.checks,
+        quorum: { authorizedCopies: context.authorizedCopies, alreadyPrinted: context.totalPrinted },
+      });
+    } catch (e: any) {
+      return res.status(500).json({ error: e.message });
+    }
+  });
+
+  app.get('/api/delivery/print-relay', authenticateToken, async (req: Request, res: Response) => {
+    try {
+      const stations = printStations
+        .list(req.user!.org_id)
+        .filter(station => station.status !== 'REVOKED' && station.status !== 'EXPIRED')
+        .map(station => ({ ...printStations.toPanelView(station), urls: printRelayUrls(station.id) }));
+      return res.json({
+        stations,
+        lanAddresses: printRelayAddresses(),
+        beaconPort: DISCOVERY_BEACON_PORT,
+        pairingCodeLength: STATION_CODE_LENGTH,
+      });
+    } catch (e: any) {
+      return res.status(500).json({ error: e.message });
+    }
+  });
+
+  app.get('/api/delivery/print-relay/:id', authenticateToken, async (req: Request, res: Response) => {
+    try {
+      const station = printStations.get(req.params.id);
+      if (!station || station.orgId !== req.user!.org_id) return res.status(404).json({ error: 'Print relay not found.' });
+      return res.json({
+        ...printRelayEnvelope(printStations.toPanelView(station)),
+        lanAddresses: printRelayAddresses(),
+      });
+    } catch (e: any) {
+      return res.status(500).json({ error: e.message });
+    }
+  });
+
+  app.post('/api/delivery/print-relay/:id/revoke', authenticateToken, requireRole(['CENTRE_OPERATOR', 'EXAM_MANAGER']), async (req: Request, res: Response) => {
+    try {
+      const station = printStations.get(req.params.id);
+      if (!station || station.orgId !== req.user!.org_id) return res.status(404).json({ error: 'Print relay not found.' });
+      const revoked = printStations.revoke(station.id, req.user!.full_name || 'operator');
+      await logAuditEvent({
+        event_type: 'PRINT_RELAY_CLOSED',
+        user_id: req.user!.id,
+        org_id: req.user!.org_id,
+        exam_id: station.examId,
+        details: { stationId: station.id, prints: revoked?.prints || 0, devices: revoked?.devices.length || 0 },
+      });
+      return res.json({ message: 'Print relay closed; every attached device was dropped.', ...printRelayEnvelope(printStations.toPanelView(revoked!)) });
+    } catch (e: any) {
+      return res.status(500).json({ error: e.message });
+    }
+  });
+
+  app.post('/api/delivery/print-relay/:id/pause', authenticateToken, requireRole(['CENTRE_OPERATOR', 'EXAM_MANAGER']), async (req: Request, res: Response) => {
+    try {
+      const station = printStations.get(req.params.id);
+      if (!station || station.orgId !== req.user!.org_id) return res.status(404).json({ error: 'Print relay not found.' });
+      const updated = printStations.setPaused(station.id, req.body?.paused !== false);
+      return res.json({ message: `Print relay ${updated?.status === 'PAUSED' ? 'paused' : 'resumed'}.`, ...printRelayEnvelope(printStations.toPanelView(updated!)) });
+    } catch (e: any) {
+      return res.status(500).json({ error: e.message });
+    }
+  });
+
+  app.post('/api/delivery/print-relay/:id/unlock', authenticateToken, requireRole(['CENTRE_OPERATOR', 'EXAM_MANAGER']), async (req: Request, res: Response) => {
+    try {
+      const station = printStations.get(req.params.id);
+      if (!station || station.orgId !== req.user!.org_id) return res.status(404).json({ error: 'Print relay not found.' });
+      const unlocked = printStations.unlock(station.id);
+      await logAuditEvent({
+        event_type: 'PRINT_RELAY_UNLOCKED',
+        user_id: req.user!.id,
+        org_id: req.user!.org_id,
+        exam_id: station.examId,
+        details: { stationId: station.id, previousFailedAttempts: station.failedAttempts },
+      });
+      return res.json({ message: 'Relay unlocked. The code is unchanged; hand out a new one only if you suspect it leaked.', ...printRelayEnvelope(printStations.toPanelView(unlocked!)) });
+    } catch (e: any) {
+      return res.status(500).json({ error: e.message });
+    }
+  });
+
+  app.post('/api/delivery/print-relay/:id/approve', authenticateToken, requireRole(['CENTRE_OPERATOR', 'EXAM_MANAGER']), async (req: Request, res: Response) => {
+    try {
+      const station = printStations.get(req.params.id);
+      if (!station || station.orgId !== req.user!.org_id) return res.status(404).json({ error: 'Print relay not found.' });
+      const fingerprint = String(req.body?.fingerprint || '');
+      const updated = printStations.approveDevice(station.id, fingerprint);
+      if (!updated) return res.status(404).json({ error: 'That device is not attached to this relay.' });
+      await logAuditEvent({
+        event_type: 'PRINT_RELAY_DEVICE_APPROVED',
+        user_id: req.user!.id,
+        org_id: req.user!.org_id,
+        exam_id: station.examId,
+        details: { stationId: station.id, fingerprint, ip: updated.devices.find(d => d.fingerprint === fingerprint)?.ip },
+      });
+      return res.json({ message: 'Device admitted to the print relay.', ...printRelayEnvelope(printStations.toPanelView(updated)) });
+    } catch (e: any) {
+      return res.status(500).json({ error: e.message });
+    }
+  });
+
+  app.post('/api/delivery/print-relay/:id/deny', authenticateToken, requireRole(['CENTRE_OPERATOR', 'EXAM_MANAGER']), async (req: Request, res: Response) => {
+    try {
+      const station = printStations.get(req.params.id);
+      if (!station || station.orgId !== req.user!.org_id) return res.status(404).json({ error: 'Print relay not found.' });
+      const fingerprint = String(req.body?.fingerprint || '');
+      const updated = printStations.denyDevice(station.id, fingerprint);
+      if (!updated) return res.status(404).json({ error: 'That device is not attached to this relay.' });
+      await logAuditEvent({
+        event_type: 'PRINT_RELAY_DEVICE_REFUSED',
+        user_id: req.user!.id,
+        org_id: req.user!.org_id,
+        exam_id: station.examId,
+        details: { stationId: station.id, fingerprint },
+      });
+      return res.json({ message: 'Device refused. It must present a fresh relay and be admitted again.', ...printRelayEnvelope(printStations.toPanelView(updated)) });
+    } catch (e: any) {
+      return res.status(500).json({ error: e.message });
+    }
+  });
+
+  // ---- The device side: no account, no install, just the pairing code -------
+
+  const relayIdentity = (req: Request, body: any) => ({
+    fingerprint:
+      typeof body?.fingerprint === 'string' && body.fingerprint.trim()
+        ? body.fingerprint.trim().slice(0, 80)
+        : `ip:${req.ip || 'unknown'}`,
+    label: typeof body?.label === 'string' && body.label.trim() ? body.label.trim().slice(0, 60) : 'Printing device',
+    ip: req.ip || 'unknown',
+    userAgent: String(req.headers['user-agent'] || 'unknown').slice(0, 200),
+  });
+
+  /** Decrypts the paper for one admitted device and stamps it to that device. */
+  async function loadRelayPaper(station: PrintStationRecord, device: PrintStationDevice) {
+    const db = await getDb();
+    const version = executeQuery(db, 'SELECT * FROM paper_versions WHERE id = ?', [station.paperVersionId])[0];
+    if (!version) return { error: 'This paper version no longer exists.' } as const;
+    if (version.status === 'INVALIDATED' || version.status === 'COMPROMISED') {
+      return { error: `Paper version is ${version.status}; printing is prohibited.` } as const;
+    }
+    const encrypted = executeQuery(db, 'SELECT * FROM encrypted_papers WHERE paper_version_id = ?', [version.id])[0];
+    if (!encrypted) return { error: 'Encrypted payload not found for this paper version.' } as const;
+
+    let paper: any;
+    try {
+      paper = JSON.parse(
+        decryptExamPaper({
+          cipherText: encrypted.aes_cipher_text,
+          iv: encrypted.iv_hex,
+          authTag: encrypted.auth_tag_hex,
+          encryptedKeyRSA: encrypted.encrypted_aes_key_rsa,
+          keyFingerprint: encrypted.key_fingerprint,
+          checksumSHA256: encrypted.checksum_sha256,
+          timestamp: encrypted.encrypted_at,
+        })
+      );
+    } catch (error: any) {
+      // Reported as a refusal rather than a 500 so the printing desk is told
+      // what is wrong: the server cannot unwrap this version's key (the paper
+      // was encrypted by a different server key), so nothing is released.
+      return { error: `The stored paper cannot be decrypted by this server (${error?.message || 'key mismatch'}); printing is blocked.` } as const;
+    }
+
+    const org = executeQuery(db, 'SELECT name FROM organizations WHERE id = ?', [station.orgId])[0];
+    const watermark = {
+      organizationName: org?.name || station.orgId,
+      centreId: station.centreId,
+      operatorId: station.createdBy,
+      operatorName: station.createdByName,
+      deviceFingerprint: device.fingerprint,
+      ipAddress: device.ip,
+      timestamp: new Date().toISOString(),
+      sessionTxRef: generateTxHash(`${station.id}:${device.fingerprint}:${Date.now()}`),
+      relayId: station.id,
+      relayLabel: station.label,
+    };
+    return { paper, watermark } as const;
+  }
+
+  /** The page itself is static: the station id is public, the code is the lock. */
+  app.get('/print/:id', (req: Request, res: Response) => {
+    res.setHeader('Content-Type', 'text/html; charset=utf-8');
+    res.setHeader('Cache-Control', 'no-store');
+    res.setHeader('X-Robots-Tag', 'noindex, nofollow');
+    res.setHeader('X-Content-Type-Options', 'nosniff');
+    res.send(renderPrintRelayPage({ stationId: req.params.id }));
+  });
+
+  app.post('/api/print-relay/:id/access', async (req: Request, res: Response) => {
+    try {
+      const identity = relayIdentity(req, req.body);
+      if (relayThrottled(`access:${req.ip}`, 20, 60_000)) {
+        return res.status(429).json({ ok: false, state: 'NEEDS_CODE', message: 'Too many attempts from this device. Wait a minute and try again.' });
+      }
+
+      const result = printStations.redeem(req.params.id, req.body?.code, identity);
+      const station = printStations.get(req.params.id);
+
+      if (!result.ok) {
+        if (station && (result.reason === 'BAD_CODE' || result.reason === 'DEVICE_LIMIT')) {
+          await logSecurityEvent({
+            event_type: result.reason === 'BAD_CODE' ? 'PRINT_RELAY_CODE_REJECTED' : 'PRINT_RELAY_DEVICE_LIMIT',
+            severity: result.reason === 'BAD_CODE' ? 'MEDIUM' : 'LOW',
+            org_id: station.orgId,
+            ip_address: identity.ip,
+            details: { stationId: station.id, reason: result.reason, attemptsLeft: result.attemptsLeft, userAgent: identity.userAgent },
+          });
+        }
+        const blocked =
+          result.reason === 'LOCKED' || result.reason === 'REVOKED' || result.reason === 'EXPIRED' || result.reason === 'PAUSED' || !!station && station.status === 'LOCKED';
+        return res.status(403).json({
+          ok: false,
+          state: blocked ? 'BLOCKED' : 'NEEDS_CODE',
+          title: blocked ? 'Print relay unavailable' : 'Pairing code not accepted',
+          message: result.message,
+          attemptsLeft: result.attemptsLeft,
+        });
+      }
+
+      if (result.created) {
+        await logAuditEvent({
+          event_type: 'PRINT_RELAY_DEVICE_REQUESTED',
+          org_id: result.station.orgId,
+          exam_id: result.station.examId,
+          ip_address: identity.ip,
+          details: {
+            stationId: result.station.id,
+            fingerprint: result.device.fingerprint,
+            label: result.device.label,
+            userAgent: identity.userAgent,
+            autoApproved: !result.station.requireDeviceApproval,
+          },
+        });
+      }
+
+      const view = printStations.toRelayView(result.station, result.device);
+      if (result.state === 'PENDING_APPROVAL') {
+        return res.json({
+          ok: true,
+          state: 'PENDING_APPROVAL',
+          station: view,
+          device: { status: result.device.status, label: result.device.label, prints: result.device.prints },
+          message: 'Pairing code accepted. Waiting for the operator to admit this device.',
+        });
+      }
+
+      const loaded = await loadRelayPaper(result.station, result.device);
+      if ('error' in loaded) {
+        return res.status(409).json({ ok: false, state: 'BLOCKED', title: 'Paper unavailable', message: loaded.error });
+      }
+      await logAuditEvent({
+        event_type: 'PRINT_RELAY_DEVICE_ACCESSED',
+        org_id: result.station.orgId,
+        exam_id: result.station.examId,
+        ip_address: identity.ip,
+        details: { stationId: result.station.id, fingerprint: result.device.fingerprint, watermark: loaded.watermark },
+      });
+      return res.json({
+        ok: true,
+        state: 'APPROVED',
+        station: view,
+        device: { status: result.device.status, label: result.device.label, prints: result.device.prints },
+        paper: loaded.paper,
+        watermark: loaded.watermark,
+        message: 'This device is admitted to the relay. Every copy printed here is serialized.',
+      });
+    } catch (e: any) {
+      return res.status(500).json({ ok: false, state: 'NEEDS_CODE', message: e.message });
+    }
+  });
+
+  app.get('/api/print-relay/:id/status', async (req: Request, res: Response) => {
+    try {
+      const station = printStations.get(req.params.id);
+      const fingerprint = String(req.query.fingerprint || '');
+      if (!station) {
+        return res.status(404).json({ state: 'BLOCKED', title: 'No such relay', message: 'No print relay is open at this address. Ask the operator for the current link.' });
+      }
+      if (station.status === 'REVOKED' || station.status === 'EXPIRED' || station.status === 'LOCKED' || station.status === 'PAUSED') {
+        return res.json({
+          state: 'BLOCKED',
+          station: printStations.toRelayView(station, { fingerprint, label: '', ip: '', userAgent: '', status: 'PENDING_APPROVAL', requestedAt: 0, approvedAt: null, lastSeenAt: 0, prints: 0 }),
+          title: 'Print relay unavailable',
+          message:
+            station.status === 'LOCKED'
+              ? 'This relay is locked after too many wrong pairing codes. The operator must unlock it.'
+              : station.status === 'PAUSED'
+                ? 'The operator paused this relay.'
+                : 'This print relay is no longer open. Ask the operator for a new link.',
+        });
+      }
+
+      const device = station.devices.find(entry => entry.fingerprint === fingerprint);
+      if (!device) {
+        return res.json({ state: 'NEEDS_CODE', station: printStations.toRelayView(station, { fingerprint, label: '', ip: '', userAgent: '', status: 'PENDING_APPROVAL', requestedAt: 0, approvedAt: null, lastSeenAt: 0, prints: 0 }) });
+      }
+
+      printStations.touch(station.id, fingerprint);
+      const view = printStations.toRelayView(station, device);
+
+      if (device.status === 'DENIED' || device.status === 'REVOKED') {
+        return res.json({ state: 'BLOCKED', station: view, title: 'Device refused', message: 'The operator refused this device. Ask them to admit it again.' });
+      }
+      if (device.status !== 'APPROVED') {
+        return res.json({
+          state: 'PENDING_APPROVAL',
+          station: view,
+          device: { status: device.status, label: device.label, prints: device.prints },
+          message: 'Waiting for operator approval.',
+        });
+      }
+
+      const loaded = await loadRelayPaper(station, device);
+      if ('error' in loaded) return res.json({ state: 'BLOCKED', station: view, title: 'Paper unavailable', message: loaded.error });
+      return res.json({
+        state: 'APPROVED',
+        station: view,
+        device: { status: device.status, label: device.label, prints: device.prints },
+        paper: loaded.paper,
+        watermark: loaded.watermark,
+      });
+    } catch (e: any) {
+      return res.status(500).json({ state: 'NEEDS_CODE', message: e.message });
+    }
+  });
+
+  /**
+   * One printed sheet from one relay device.
+   *
+   * Quota and paper status are re-read here rather than trusted from when the
+   * relay was opened: a centre can print its whole allowance from another desk
+   * while this page sits open, and the ledger must still refuse copy 101.
+   */
+  app.post('/api/print-relay/:id/print', async (req: Request, res: Response) => {
+    try {
+      const identity = relayIdentity(req, req.body);
+      if (relayThrottled(`print:${req.ip}`, 30, 60_000)) {
+        return res.status(429).json({ ok: false, message: 'Too many print requests from this device. Wait a minute and try again.' });
+      }
+
+      const station = printStations.get(req.params.id);
+      if (!station) return res.status(404).json({ ok: false, message: 'Print relay not found.' });
+
+      const db = await getDb();
+      const operator = executeQuery(db, 'SELECT * FROM users WHERE id = ?', [station.createdBy])[0];
+      if (!operator) return res.status(409).json({ ok: false, message: 'The operator who opened this relay no longer exists.' });
+
+      const context = await buildPrintSecurityContext({
+        examId: station.examId,
+        actor: {
+          id: operator.id,
+          role: operator.role,
+          org_id: operator.org_id || station.orgId,
+          centre_id: operator.centre_id,
+          full_name: operator.full_name,
+        },
+        requestedCopies: 1,
+        allowedRoles: ['CENTRE_OPERATOR', 'EXAM_MANAGER'],
+        deviceFingerprint: identity.fingerprint,
+      });
+
+      if (!context.exam || !context.version) {
+        return res.status(409).json({ ok: false, message: 'This examination or paper version is no longer available.' });
+      }
+      if (!context.evaluation.allowed) {
+        await logSecurityEvent({
+          event_type: 'PRINT_RELAY_COPY_REFUSED',
+          severity: 'HIGH',
+          user_id: operator.id,
+          org_id: station.orgId,
+          ip_address: identity.ip,
+          details: { stationId: station.id, fingerprint: identity.fingerprint, checks: context.evaluation.checks },
+        });
+        return res.status(403).json({ ok: false, message: firstFailedCheck(context.evaluation.checks), securityChecks: context.evaluation.checks });
+      }
+
+      // The station's own state is reported first, so a device on a closed relay
+      // is told the relay is gone rather than that it was never admitted.
+      if (station.status !== 'ACTIVE') {
+        return res.status(409).json({ ok: false, message: `Print relay is ${station.status.toLowerCase()}.` });
+      }
+
+      const device = printStations.getDevice(station.id, identity.fingerprint);
+      if (!device || device.status !== 'APPROVED') {
+        return res.status(409).json({ ok: false, message: 'The operator has not admitted this device yet.' });
+      }
+
+      // Decrypt BEFORE booking anything. The other order writes a serialized
+      // copy and burns quota for a sheet that never reached a printer, and a
+      // failed decryption would then silently shrink the centre's allowance.
+      const loaded = await loadRelayPaper(station, device);
+      if ('error' in loaded) {
+        await logSecurityEvent({
+          event_type: 'PRINT_RELAY_COPY_BLOCKED',
+          severity: 'MEDIUM',
+          user_id: operator.id,
+          org_id: station.orgId,
+          ip_address: identity.ip,
+          details: { stationId: station.id, fingerprint: device.fingerprint, reason: loaded.error },
+        });
+        return res.status(409).json({ ok: false, message: loaded.error });
+      }
+
+      const release = printStations.releasePrint(station.id, identity.fingerprint, 1);
+      if (!release.ok) return res.status(409).json({ ok: false, message: release.message });
+
+      const copies = await insertPrintCopies({
+        examId: station.examId,
+        paperVersionId: station.paperVersionId,
+        centreId: station.centreId,
+        operatorUserId: operator.id,
+        deviceId: `RELAY:${release.device.fingerprint}`,
+        count: 1,
+        startIndex: context.totalPrinted,
+      });
+
+      await logAuditEvent({
+        event_type: 'PRINT_RELAY_COPY_RELEASED',
+        user_id: operator.id,
+        org_id: station.orgId,
+        exam_id: station.examId,
+        ip_address: identity.ip,
+        details: { stationId: station.id, fingerprint: release.device.fingerprint, copies, watermark: loaded.watermark },
+      });
+
+      return res.json({
+        ok: true,
+        message: `Copy ${copies[0]?.copyId || ''} recorded in the print ledger. Send it to the printer now.`,
+        copies,
+        device: { status: release.device.status, label: release.device.label, prints: release.device.prints },
+        watermark: loaded.watermark,
+      });
+    } catch (e: any) {
+      return res.status(500).json({ ok: false, message: e.message });
+    }
+  });
+
+  /**
+   * Advertises open relays on the LAN so other devices see them without being
+   * told a URL, and answers unicast probes when broadcast is filtered.
+   */
+  function startPrintRelayDiscovery() {
+    return startPrintDiscoveryBeacon({
+      port: PORT,
+      describe: () =>
+        printStations.activeStations().map(station => ({
+          stationId: station.id,
+          label: station.label,
+          devices: station.devices.filter(device => device.status === 'APPROVED').length,
+          expiresAt: station.expiresAt,
+        })),
+      onError: error => console.warn('[ZeroLeak Print Relay] discovery:', error.message),
+    });
+  }
 
   // ==========================================
   // 8. AUDIT, THREAT DETECTION & SECURITY
@@ -11713,6 +12664,152 @@ async function startServer() {
     }
   });
 
+  /**
+   * Re-seals papers this server can no longer decrypt.
+   *
+   * Before the server keypair was persisted, every restart orphaned the papers
+   * the previous process had encrypted: the Secure Viewer and the print relay
+   * could only answer `oaep decoding error`. The paper itself is not lost - the
+   * database still knows its exact question composition - so this rebuilds the
+   * payload from `paper_questions` and seals it under the current key, leaving
+   * the version, its number and its audit trail untouched.
+   *
+   * Development-only, and it never touches a paper that still opens: without
+   * `force` it skips everything already readable.
+   */
+  app.post('/api/system/reseal-papers', authenticateToken, requireApprovedDevice, requireRole(['ORG_OWNER', 'EXAM_MANAGER']), async (req: Request, res: Response) => {
+    if (process.env.NODE_ENV === 'production') {
+      return res.status(403).json({ error: 'Paper re-sealing is not available in production.' });
+    }
+
+    try {
+      const db = await getDb();
+      const force = req.body?.force === true;
+      const rows = executeQuery(
+        db,
+        `SELECT ep.*, pv.exam_id, pv.version_code, pv.status AS version_status
+           FROM encrypted_papers ep
+           JOIN paper_versions pv ON pv.id = ep.paper_version_id
+           JOIN examinations e ON e.id = pv.exam_id
+          WHERE e.org_id = ?`,
+        [req.user!.org_id]
+      );
+
+      const resealed: any[] = [];
+      const skipped: any[] = [];
+
+      for (const row of rows) {
+        const readable = canDecryptExamPaper({ encryptedKeyRSA: row.encrypted_aes_key_rsa });
+        if (readable && !force) {
+          skipped.push({ paperVersionId: row.paper_version_id, versionCode: row.version_code, reason: 'Already readable by this server.' });
+          continue;
+        }
+
+        const composition = executeQuery(
+          db,
+          'SELECT question_id, order_index, marks, section_name FROM paper_questions WHERE paper_version_id = ? ORDER BY order_index',
+          [row.paper_version_id]
+        );
+        const questionIds = composition.map((entry: any) => entry.question_id);
+        const questionRows = questionIds.length
+          ? executeQuery(db, `SELECT * FROM questions WHERE id IN (${questionIds.map(() => '?').join(',')})`, questionIds)
+          : [];
+        const questions = new Map<string, any>(questionRows.map((question: any) => [question.id, question]));
+
+        const plan = planReseal({ composition, questions });
+        if (!plan.ok) {
+          skipped.push({ paperVersionId: row.paper_version_id, versionCode: row.version_code, reason: plan.reason });
+          continue;
+        }
+
+        const exam = executeQuery(db, 'SELECT * FROM examinations WHERE id = ?', [row.exam_id])[0];
+        if (!exam) {
+          skipped.push({ paperVersionId: row.paper_version_id, versionCode: row.version_code, reason: 'Examination no longer exists.' });
+          continue;
+        }
+
+        const { payload, totalMarks } = buildResealPayload({
+          exam,
+          versionCode: row.version_code,
+          composition,
+          questions,
+        });
+
+        const { payload: sealed, rawAesKey } = encryptExamPaper(JSON.stringify(payload));
+        const now = new Date().toISOString();
+
+        executeRun(
+          db,
+          `UPDATE encrypted_papers
+              SET aes_cipher_text = ?, iv_hex = ?, auth_tag_hex = ?, encrypted_aes_key_rsa = ?,
+                  key_fingerprint = ?, checksum_sha256 = ?, encrypted_at = ?
+            WHERE paper_version_id = ?`,
+          [
+            sealed.cipherText,
+            sealed.iv,
+            sealed.authTag,
+            sealed.encryptedKeyRSA,
+            sealed.keyFingerprint,
+            sealed.checksumSHA256,
+            now,
+            row.paper_version_id,
+          ]
+        );
+
+        // The Shamir quorum metadata has to match the new AES key, or the
+        // delivery panel would advertise shares that unlock nothing.
+        executeRun(db, 'DELETE FROM key_shares WHERE paper_version_id = ?', [row.paper_version_id]);
+        splitSecret(rawAesKey, 5, 3).forEach(share => {
+          executeRun(
+            db,
+            `INSERT INTO key_shares (id, paper_version_id, share_index, threshold, total_shares, share_hash, created_at)
+             VALUES (?, ?, ?, 3, 5, ?, ?)`,
+            [uuidv4(), row.paper_version_id, share.index, share.hash, now]
+          );
+        });
+
+        await logAuditEvent({
+          event_type: 'PAPER_RESEALED',
+          user_id: req.user!.id,
+          org_id: req.user!.org_id,
+          exam_id: row.exam_id,
+          details: {
+            paperVersionId: row.paper_version_id,
+            versionCode: row.version_code,
+            questions: payload.questions.length,
+            totalMarks,
+            forced: force && readable,
+          },
+        });
+
+        resealed.push({
+          paperVersionId: row.paper_version_id,
+          versionCode: row.version_code,
+          examId: row.exam_id,
+          examName: exam.name,
+          questions: payload.questions.length,
+          totalMarks,
+          wasReadable: readable,
+        });
+      }
+
+      if (resealed.length > 0) saveDb();
+
+      return res.json({
+        message: resealed.length
+          ? `Re-sealed ${resealed.length} paper version(s) under the current server key. ${skipped.length} left untouched.`
+          : `No paper needed re-sealing. ${skipped.length} untouched.`,
+        resealedCount: resealed.length,
+        skippedCount: skipped.length,
+        resealed,
+        skipped: skipped.slice(0, 20),
+      });
+    } catch (error: any) {
+      console.error('[ZeroLeak Reseal] Failed:', error);
+      return res.status(500).json({ error: `Paper re-sealing failed: ${error?.message || error}` });
+    }
+  });
+
   app.post('/api/system/repair-database', async (_req: Request, res: Response) => {
     if (process.env.NODE_ENV === 'production') {
       return res.status(403).json({ error: 'Database repair is not available in production.' });
@@ -11781,6 +12878,16 @@ async function startServer() {
 
   app.listen(PORT, '0.0.0.0', () => {
     console.log(`[ZeroLeak Security Engine] Server running on http://0.0.0.0:${PORT}`);
+    // Advertise any open Wi-Fi print relay on the local network. Best-effort: a
+    // network that forbids broadcast must not stop the server from listening.
+    try {
+      const discovery = startPrintRelayDiscovery();
+      if (discovery.started) {
+        console.log(`[ZeroLeak Print Relay] LAN discovery beacon active on UDP ${DISCOVERY_BEACON_PORT}`);
+      }
+    } catch (error: any) {
+      console.warn('[ZeroLeak Print Relay] LAN discovery unavailable:', error?.message || error);
+    }
   });
 }
 

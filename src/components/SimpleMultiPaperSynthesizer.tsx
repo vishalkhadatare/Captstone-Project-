@@ -1169,7 +1169,7 @@ export const SimpleMultiPaperSynthesizer: React.FC<SimpleMultiPaperSynthesizerPr
       const paperContext = buildPaperSnippets();
 
       const chatSystemPrompt = [
-        'You are DeepSeek AI (deepseek-ai/deepseek-v4.1-flash), the official academic exam synthesis and analysis assistant for ZeroLeak.',
+        'You are ZeroLeak AI, the official academic exam synthesis and analysis assistant powered by Ollama.',
         `Current Exam Configuration:`,
         `- Subject: "${subject}"`,
         `- University / Institution: "${universityName}"`,
@@ -1185,7 +1185,7 @@ export const SimpleMultiPaperSynthesizer: React.FC<SimpleMultiPaperSynthesizerPr
         '1. You can answer questions about the uploaded papers, discuss question trends, suggest improvements, or generate specific MCQs/questions.',
         '2. For any diagrams, output clean TikZ code (\\begin{tikzpicture} ... \\end{tikzpicture}). For any tables, output clean LaTeX tables (\\begin{tabularx}{\\linewidth}{|X|X|}...\\end{tabularx}).',
         '3. If the user asks you to create/synthesize a full exam paper, output it in clean JSON wrapped in ```json ... ``` with fields "universityName", "subject", "paperCode", "totalMarks", "duration", "instructions", and "sections" (with questions array). The system will automatically compile and download it as an official PDF.',
-        '4. Provide professional, well-formatted, and accurate responses. You are running directly on DeepSeek v4.1 Flash.',
+        '4. Provide professional, well-formatted, and accurate responses.',
       ].join('\n');
 
       // Add temporary empty assistant message
@@ -1201,7 +1201,6 @@ export const SimpleMultiPaperSynthesizer: React.FC<SimpleMultiPaperSynthesizerPr
             { role: 'system', content: chatSystemPrompt },
             ...newMessages.map((m) => ({ role: m.role, content: m.content })),
           ],
-          model: 'deepseek-ai/deepseek-v4.1-flash',
           plainText: true,
         },
         (chunk) => {
@@ -1227,7 +1226,7 @@ export const SimpleMultiPaperSynthesizer: React.FC<SimpleMultiPaperSynthesizerPr
           {
             id: `err-${Date.now()}`,
             role: 'assistant',
-            content: `⚠️ **DeepSeek AI Error:** ${err?.message || 'Could not complete streaming call.'}`,
+            content: `⚠️ **AI Assistant Error:** ${err?.message || 'Could not complete streaming call.'}`,
             timestamp: new Date(),
           },
         ]);

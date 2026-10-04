@@ -235,11 +235,30 @@ export const StreamedBrowserSurface: React.FC<StreamedBrowserSurfaceProps> = ({
     });
   }, []);
 
+  /**
+   * Mouse moves are coalesced before they become network requests.
+   *
+   * The browser fires a `mousemove` per pointer sample - sixty or more a second -
+   * and each one was a whole HTTP POST through the tunnel before. On a remote
+   * link that volume is what turns the panel into a slideshow: every packet pays
+   * a round trip, the queue grows, and the click lands seconds behind the hand.
+   * Moves are therefore capped at ~30/s and identical positions are never sent;
+   * clicks, releases and drags are exempt because their exact timing matters.
+   */
+  const lastMoveRef = useRef({ x: -1, y: -1, at: 0 });
   const sendMouse = useCallback(
     (action: 'move' | 'down' | 'up', event: React.MouseEvent<HTMLCanvasElement>) => {
       const point = pointFrom(event.clientX, event.clientY);
       if (!point) return;
       const button = mouseButtonFrom(event.button) ?? 'left';
+      if (action === 'move') {
+        const now = performance.now();
+        const last = lastMoveRef.current;
+        const dragging = event.buttons !== 0;
+        if (!dragging && now - last.at < 33) return;
+        if (point.x === last.x && point.y === last.y) return;
+        lastMoveRef.current = { x: point.x, y: point.y, at: now };
+      }
       sendBrowserInput({
         kind: 'mouse',
         action,

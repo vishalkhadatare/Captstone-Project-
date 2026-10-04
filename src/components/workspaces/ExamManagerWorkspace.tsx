@@ -46,7 +46,7 @@ import {
   ShieldAlert,
   User as UserIcon,
 } from 'lucide-react';
-import { User, Examination, Question, Organization, ExamType, ExtractedQuestion, QuestionAssignment, ExaminationCentre, AddCentreResponse, EmergencyRegenerateResponse } from '../../types';
+import { User, Examination, Question, Organization, ExamType, ExtractedQuestion, QuestionAssignment, QuestionTranslation, ExaminationCentre, AddCentreResponse, EmergencyRegenerateResponse, SecurityEvent } from '../../types';
 import { api } from '../../api';
 import { NavSubTab } from '../Sidebar';
 import { ExamManagerQuestionExtractor } from './ExamManagerQuestionExtractor';
@@ -232,6 +232,11 @@ export const ExamManagerWorkspace: React.FC<ExamManagerWorkspaceProps> = ({
   const [questions, setQuestions] = useState<Question[]>([]);
   const [translators, setTranslators] = useState<User[]>([]);
   const [assignments, setAssignments] = useState<QuestionAssignment[]>([]);
+  // Translations the Linguistic Translator has returned to this controller.
+  const [translations, setTranslations] = useState<QuestionTranslation[]>([]);
+  const [translationLanguageFilter, setTranslationLanguageFilter] = useState<string>('ALL');
+  const [translationSearch, setTranslationSearch] = useState<string>('');
+  const [verifyingTranslationId, setVerifyingTranslationId] = useState<string | null>(null);
   const [selectedExamId, setSelectedExamId] = useState<string>('');
   const [loading, setLoading] = useState(true);
   const [statusMessage, setStatusMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
@@ -243,6 +248,7 @@ export const ExamManagerWorkspace: React.FC<ExamManagerWorkspaceProps> = ({
   const [pdfViewVersionId, setPdfViewVersionId] = useState<string | undefined>(undefined);
   const [allCentresList, setAllCentresList] = useState<ExaminationCentre[]>([]);
   const [centresFilterExamId, setCentresFilterExamId] = useState<string>('ALL');
+  const [securityEvents, setSecurityEvents] = useState<SecurityEvent[]>([]);
 
   const handleSimulateExam = (ex: Examination) => {
     if (ex.simulation_status === 'COMPLETED') {
@@ -253,6 +259,37 @@ export const ExamManagerWorkspace: React.FC<ExamManagerWorkspaceProps> = ({
       return;
     }
     setSimulationExam(ex);
+  };
+
+  /**
+   * Exam Controller sign-off on a translation the Linguistic Translator returned.
+   * Approving here is what closes the multilingual loop: the translator's copy is
+   * accepted for the examination, or sent back for correction.
+   */
+  const handleReviewTranslation = async (translationId: string, decision: 'APPROVED' | 'REJECTED') => {
+    setVerifyingTranslationId(translationId);
+    try {
+      await api.verifyTranslation(translationId, {
+        status: decision,
+        notes:
+          decision === 'APPROVED'
+            ? 'Multilingual delivery accepted by the Controller of Examinations'
+            : 'Returned to the Linguistic Translator for correction',
+      });
+      const refreshed = await api.getTranslations();
+      setTranslations(refreshed.translations || []);
+      setStatusMessage({
+        type: 'success',
+        text:
+          decision === 'APPROVED'
+            ? 'Translation approved for examination use.'
+            : 'Translation returned to the Linguistic Translator.',
+      });
+    } catch (err: any) {
+      setStatusMessage({ type: 'error', text: err.message || 'Unable to update the translation status.' });
+    } finally {
+      setVerifyingTranslationId(null);
+    }
   };
 
   const handleSimulationCompleted = (statusText?: string) => {
@@ -288,7 +325,7 @@ export const ExamManagerWorkspace: React.FC<ExamManagerWorkspaceProps> = ({
   const [deletingExamId, setDeletingExamId] = useState<string | null>(null);
 
   // Workflow Sub-Navigation
-  const [questionWorkflowTab, setQuestionWorkflowTab] = useState<'extraction' | 'manual' | 'matrix'>('extraction');
+  const [questionWorkflowTab, setQuestionWorkflowTab] = useState<'extraction' | 'manual' | 'matrix' | 'translations'>('extraction');
   const [matrixFilter, setMatrixFilter] = useState<'ALL' | 'SME_REVIEW' | 'TRANSLATION' | 'COMPLETED'>('ALL');
   const [matrixSearch, setMatrixSearch] = useState('');
 
@@ -397,13 +434,15 @@ export const ExamManagerWorkspace: React.FC<ExamManagerWorkspaceProps> = ({
   const loadData = async () => {
     setLoading(true);
     try {
-      const [orgRes, examRes, qRes, membersRes, assignRes, centresRes] = await Promise.all([
+      const [orgRes, examRes, qRes, membersRes, assignRes, centresRes, transRes, secRes] = await Promise.all([
         api.getCurrentOrg().catch(() => ({ organization: null, documents: [], history: [], representatives: [] })),
         api.getExaminations().catch(() => ({ examinations: [] })),
         api.getQuestions().catch(() => ({ questions: [] })),
         api.getOrgMembers().catch(() => ({ members: [] })),
         api.getAssignments().catch(() => ({ assignments: [] })),
         api.getAllCentres().catch(() => ({ centres: [] })),
+        api.getTranslations().catch(() => ({ translations: [] })),
+        api.getSecurityEvents().catch(() => ({ events: [] })),
       ]);
 
       setOrg(orgRes.organization);
@@ -427,7 +466,9 @@ export const ExamManagerWorkspace: React.FC<ExamManagerWorkspaceProps> = ({
       const members = membersRes.members || [];
       setTranslators(members.filter(m => m.role === 'TRANSLATOR'));
       setAssignments(assignRes.assignments || []);
+      setTranslations(transRes.translations || []);
       setAllCentresList(centresRes.centres || []);
+      setSecurityEvents(secRes.events || []);
     } catch (err: any) {
       console.error('Exam Manager load error:', err);
     } finally {
@@ -2279,6 +2320,25 @@ export const ExamManagerWorkspace: React.FC<ExamManagerWorkspaceProps> = ({
 
               <button
                 type="button"
+                onClick={() => setQuestionWorkflowTab('translations')}
+                className={`px-4 py-2.5 rounded-xl font-bold text-xs flex items-center gap-2.5 transition-all cursor-pointer ${
+                  questionWorkflowTab === 'translations'
+                    ? 'bg-gradient-to-r from-purple-950 via-purple-900 to-indigo-900 text-white shadow-sm ring-2 ring-purple-800/20'
+                    : 'bg-slate-100/80 text-slate-700 hover:bg-slate-200/70 hover:text-slate-900'
+                }`}
+                title="Multilingual papers returned by the Linguistic Translator"
+              >
+                <div className={`p-1 rounded-lg ${questionWorkflowTab === 'translations' ? 'bg-purple-800 text-purple-200' : 'bg-slate-200 text-slate-600'}`}>
+                  <Languages className="w-3.5 h-3.5" />
+                </div>
+                <span>Translations Returned</span>
+                <span className={`px-2 py-0.5 rounded-full text-[10px] font-mono font-bold ${questionWorkflowTab === 'translations' ? 'bg-white/20 text-white' : 'bg-slate-200 text-slate-800'}`}>
+                  {translations.length}
+                </span>
+              </button>
+
+              <button
+                type="button"
                 onClick={() => setQuestionWorkflowTab('matrix')}
                 className={`px-4 py-2.5 rounded-xl font-bold text-xs flex items-center gap-2.5 transition-all cursor-pointer ${
                   questionWorkflowTab === 'matrix'
@@ -2906,6 +2966,261 @@ export const ExamManagerWorkspace: React.FC<ExamManagerWorkspaceProps> = ({
               </div>
             </div>
           )}
+
+          {/* TAB 4: MULTILINGUAL DELIVERIES RETURNED BY THE TRANSLATOR */}
+          {questionWorkflowTab === 'translations' && (() => {
+            const languagesPresent = Array.from(new Set(translations.map(t => t.language))).sort();
+            const approvedTranslations = translations.filter(t => t.status === 'APPROVED');
+            const coveredQuestions = new Set(translations.map(t => t.question_id));
+            const query = translationSearch.trim().toLowerCase();
+            const visible = translations.filter(t => {
+              if (translationLanguageFilter !== 'ALL' && t.language !== translationLanguageFilter) return false;
+              if (!query) return true;
+              return (
+                t.question_id?.toLowerCase().includes(query) ||
+                t.language?.toLowerCase().includes(query) ||
+                t.subject?.toLowerCase().includes(query) ||
+                t.topic?.toLowerCase().includes(query) ||
+                t.translated_content?.toLowerCase().includes(query) ||
+                t.translator_name?.toLowerCase().includes(query)
+              );
+            });
+
+            const byQuestion = new Map<string, QuestionTranslation[]>();
+            for (const t of visible) {
+              const bucket = byQuestion.get(t.question_id) || [];
+              bucket.push(t);
+              byQuestion.set(t.question_id, bucket);
+            }
+
+            return (
+              <div className="space-y-6">
+                <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+                  <div className="p-4 rounded-2xl bg-white border border-slate-200/80 shadow-xs">
+                    <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400 block">Translations Received</span>
+                    <span className="text-xl font-black text-slate-900 font-mono">{translations.length}</span>
+                  </div>
+                  <div className="p-4 rounded-2xl bg-white border border-slate-200/80 shadow-xs">
+                    <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400 block">Approved For Use</span>
+                    <span className="text-xl font-black text-emerald-800 font-mono">{approvedTranslations.length}</span>
+                  </div>
+                  <div className="p-4 rounded-2xl bg-white border border-slate-200/80 shadow-xs">
+                    <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400 block">Questions Covered</span>
+                    <span className="text-xl font-black text-purple-900 font-mono">{coveredQuestions.size}</span>
+                  </div>
+                  <div className="p-4 rounded-2xl bg-white border border-slate-200/80 shadow-xs">
+                    <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400 block">Languages Delivered</span>
+                    <span className="text-xl font-black text-indigo-900 font-mono">{languagesPresent.length}</span>
+                  </div>
+                </div>
+
+                <div className="p-6 rounded-2xl bg-white border border-slate-200/80 shadow-xs space-y-5">
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-100 pb-4">
+                    <div>
+                      <h3 className="text-base font-bold text-slate-900 flex items-center gap-2">
+                        <Languages className="w-4 h-4 text-purple-700" />
+                        <span>Multilingual Examination Deliveries</span>
+                      </h3>
+                      <p className="text-xs text-slate-500 mt-0.5">
+                        Every language the Linguistic Translator returned for the uploaded question papers. Approving a delivery accepts it for examination use.
+                      </p>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <div className="relative">
+                        <Search className="w-3.5 h-3.5 absolute left-2.5 top-2.5 text-slate-400" />
+                        <input
+                          type="text"
+                          value={translationSearch}
+                          onChange={e => setTranslationSearch(e.target.value)}
+                          placeholder="Search question, language, translator..."
+                          className="pl-8 pr-3 py-1.5 text-xs rounded-lg border border-slate-200 bg-slate-50 text-slate-900 focus:bg-white focus:outline-hidden focus:ring-1 focus:ring-purple-700"
+                        />
+                      </div>
+                      <button
+                        type="button"
+                        onClick={loadData}
+                        className="px-3 py-1.5 rounded-lg border border-slate-200 hover:bg-slate-50 text-slate-700 text-xs font-semibold flex items-center gap-1.5 cursor-pointer"
+                      >
+                        <RotateCcw className="w-3.5 h-3.5" />
+                        <span>Refresh</span>
+                      </button>
+                    </div>
+                  </div>
+
+                  <div className="flex flex-wrap items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setTranslationLanguageFilter('ALL')}
+                      className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                        translationLanguageFilter === 'ALL'
+                          ? 'bg-slate-900 text-white shadow-xs'
+                          : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
+                      }`}
+                    >
+                      All Languages ({translations.length})
+                    </button>
+                    {languagesPresent.map(language => {
+                      const rows = translations.filter(t => t.language === language);
+                      const allApproved = rows.every(t => t.status === 'APPROVED');
+                      return (
+                        <button
+                          key={language}
+                          type="button"
+                          onClick={() => setTranslationLanguageFilter(language)}
+                          className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer flex items-center gap-1.5 ${
+                            translationLanguageFilter === language
+                              ? 'bg-purple-700 text-white shadow-xs'
+                              : allApproved
+                              ? 'bg-emerald-50 text-emerald-800 border border-emerald-200 hover:bg-emerald-100'
+                              : 'bg-purple-50 text-purple-800 border border-purple-200 hover:bg-purple-100'
+                          }`}
+                        >
+                          <span>{language}</span>
+                          <span className="font-mono text-[10px] opacity-80">{rows.length}</span>
+                        </button>
+                      );
+                    })}
+                  </div>
+
+                  {byQuestion.size === 0 ? (
+                    <div className="py-12 text-center bg-slate-50/70 border border-dashed border-slate-200 rounded-2xl space-y-3">
+                      <div className="w-12 h-12 rounded-2xl bg-white shadow-xs border border-slate-200 text-slate-400 mx-auto flex items-center justify-center">
+                        <Languages className="w-6 h-6" />
+                      </div>
+                      <h4 className="text-sm font-bold text-slate-800">No Translations Returned Yet</h4>
+                      <p className="text-xs text-slate-500 max-w-md mx-auto">
+                        Upload a question paper in the PDF Question Studio and assign it to a Linguistic Translator. Every language they deliver back appears here for your approval.
+                      </p>
+                    </div>
+                  ) : (
+                    <div className="space-y-4">
+                      {Array.from(byQuestion.entries()).map(([questionId, rows]) => {
+                        const q = questions.find(item => item.id === questionId);
+                        const english = rows[0]?.original_content || q?.content_text || '';
+                        return (
+                          <div key={questionId} className="rounded-xl border border-slate-200 overflow-hidden">
+                            <div className="p-4 bg-slate-50/80 border-b border-slate-200 flex flex-wrap items-start justify-between gap-3">
+                              <div className="min-w-0">
+                                <span className="text-[10px] font-mono text-slate-500 block">{questionId} · {rows[0]?.subject || q?.subject || 'Academic Examination'}</span>
+                                <p className="text-xs font-semibold text-slate-900 mt-1 line-clamp-2">{english}</p>
+                              </div>
+                              <div className="flex flex-wrap items-center gap-1.5 shrink-0">
+                                {rows.map(r => (
+                                  <span
+                                    key={r.language}
+                                    className={`px-2 py-0.5 rounded-full text-[10px] font-bold border ${
+                                      r.status === 'APPROVED'
+                                        ? 'bg-emerald-100 text-emerald-800 border-emerald-200'
+                                        : r.status === 'REJECTED'
+                                        ? 'bg-rose-100 text-rose-800 border-rose-200'
+                                        : 'bg-amber-100 text-amber-800 border-amber-200'
+                                    }`}
+                                  >
+                                    {r.language}
+                                  </span>
+                                ))}
+                              </div>
+                            </div>
+
+                            <div className="divide-y divide-slate-100">
+                              {rows.map(r => (
+                                <div key={r.id} className="p-4 space-y-3">
+                                  <div className="flex flex-wrap items-center justify-between gap-2">
+                                    <div className="flex items-center gap-2">
+                                      <span className="px-2.5 py-1 rounded-lg bg-purple-100 text-purple-900 border border-purple-200 font-bold text-[10px]">
+                                        {r.language}
+                                      </span>
+                                      <span className="text-[11px] text-slate-500">
+                                        {r.translator_name || 'Linguistic Translator'} · {new Date(r.updated_at).toLocaleString()}
+                                      </span>
+                                    </div>
+                                    <div className="flex items-center gap-2">
+                                      <span
+                                        className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[10px] font-bold border ${
+                                          r.status === 'APPROVED'
+                                            ? 'bg-emerald-50 text-emerald-800 border-emerald-200'
+                                            : r.status === 'REJECTED'
+                                            ? 'bg-rose-50 text-rose-800 border-rose-200'
+                                            : 'bg-amber-50 text-amber-800 border-amber-200'
+                                        }`}
+                                      >
+                                        {r.status === 'APPROVED' ? <Check className="w-3 h-3" /> : <Clock className="w-3 h-3" />}
+                                        {r.status}
+                                      </span>
+                                      {r.status !== 'APPROVED' && (
+                                        <button
+                                          type="button"
+                                          onClick={() => handleReviewTranslation(r.id, 'APPROVED')}
+                                          disabled={verifyingTranslationId === r.id}
+                                          className="px-3 py-1.5 rounded-lg bg-emerald-800 hover:bg-emerald-700 disabled:opacity-60 text-white text-[11px] font-bold flex items-center gap-1.5 cursor-pointer"
+                                        >
+                                          <CheckCircle2 className="w-3 h-3" />
+                                          <span>Approve</span>
+                                        </button>
+                                      )}
+                                      {r.status !== 'REJECTED' && (
+                                        <button
+                                          type="button"
+                                          onClick={() => handleReviewTranslation(r.id, 'REJECTED')}
+                                          disabled={verifyingTranslationId === r.id}
+                                          className="px-3 py-1.5 rounded-lg bg-white border border-rose-200 hover:bg-rose-50 disabled:opacity-60 text-rose-800 text-[11px] font-bold flex items-center gap-1.5 cursor-pointer"
+                                        >
+                                          <X className="w-3 h-3" />
+                                          <span>Send Back</span>
+                                        </button>
+                                      )}
+                                    </div>
+                                  </div>
+
+                                  <div className="grid grid-cols-1 lg:grid-cols-2 gap-3 text-xs">
+                                    <div className="p-3 rounded-lg bg-slate-50 border border-slate-200">
+                                      <span className="text-[10px] font-bold uppercase tracking-wider text-slate-500 block mb-1">Original (English)</span>
+                                      <p className="text-slate-800 leading-relaxed">{english}</p>
+                                    </div>
+                                    <div className="p-3 rounded-lg bg-purple-50/60 border border-purple-200">
+                                      <span className="text-[10px] font-bold uppercase tracking-wider text-purple-800 block mb-1">
+                                        {r.language} Delivery
+                                      </span>
+                                      <p className="text-slate-900 leading-relaxed">{r.translated_content}</p>
+                                      {r.translated_options_json && (() => {
+                                        try {
+                                          const opts = JSON.parse(r.translated_options_json);
+                                          if (!Array.isArray(opts) || opts.length === 0) return null;
+                                          return (
+                                            <ul className="mt-2 space-y-1">
+                                              {opts.map((opt: string, index: number) => (
+                                                <li key={index} className="text-[11px] text-slate-800 flex gap-1.5">
+                                                  <span className="font-bold text-purple-700">{String.fromCharCode(65 + index)}.</span>
+                                                  <span>{opt}</span>
+                                                </li>
+                                              ))}
+                                            </ul>
+                                          );
+                                        } catch {
+                                          return null;
+                                        }
+                                      })()}
+                                    </div>
+                                  </div>
+
+                                  {r.translator_notes && (
+                                    <p className="text-[11px] text-slate-500 flex items-start gap-1.5">
+                                      <FileText className="w-3 h-3 mt-0.5 shrink-0" />
+                                      <span>{r.translator_notes}</span>
+                                    </p>
+                                  )}
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
+              </div>
+            );
+          })()}
         </div>
         );
       })()}
@@ -3326,6 +3641,56 @@ export const ExamManagerWorkspace: React.FC<ExamManagerWorkspaceProps> = ({
               </div>
             );
           })()}
+        </div>
+      )}
+
+      {/* SECURITY EVENTS */}
+      {activeSubTab === 'security_events' && (
+        <div className="p-6 rounded-2xl bg-white border border-slate-200 shadow-xs space-y-4">
+          <div className="border-b border-slate-100 pb-3">
+            <span className="text-[10px] font-bold uppercase tracking-wider text-rose-700 bg-rose-50 px-2.5 py-0.5 rounded-full border border-rose-200">
+              Vigilance Telemetry
+            </span>
+            <h3 className="text-lg font-bold text-slate-900 mt-1">
+              Security Incident Telemetry & Threat Scores
+            </h3>
+            <p className="text-xs text-slate-500">Continuous anomaly detection and access violation alerts for this institution.</p>
+          </div>
+
+          <div className="space-y-3">
+            {securityEvents.length === 0 ? (
+              <p className="text-xs text-slate-400 p-6 text-center">No threats detected. All systems operating normally.</p>
+            ) : (
+              securityEvents.map(e => (
+                <div key={e.id} className="p-4 rounded-xl bg-white hover:bg-slate-50/60 border border-slate-200 shadow-xs text-xs flex flex-col sm:flex-row sm:items-center justify-between gap-3 transition-all">
+                  <div className="space-y-1">
+                    <div className="flex items-center gap-2">
+                      <span className="font-bold text-slate-900 text-sm">{e.event_type}</span>
+                      <span
+                        className={`px-2.5 py-0.5 rounded-full text-[10px] font-bold border ${
+                          e.severity === 'CRITICAL'
+                            ? 'bg-rose-50 text-rose-800 border-rose-300'
+                            : e.severity === 'HIGH'
+                            ? 'bg-amber-50 text-amber-800 border-amber-300'
+                            : 'bg-slate-50 text-slate-800 border-slate-300'
+                        }`}
+                      >
+                        {e.severity}
+                      </span>
+                      {Boolean(e.resolved) && (
+                        <span className="px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-emerald-50 text-emerald-800 border border-emerald-200">
+                          RESOLVED
+                        </span>
+                      )}
+                    </div>
+                    <div className="text-[11px] text-slate-500 font-mono">
+                      Risk Score: {e.risk_score} • IP: {e.ip_address || '—'} • {new Date(e.timestamp).toLocaleString()}
+                    </div>
+                  </div>
+                </div>
+              ))
+            )}
+          </div>
         </div>
       )}
 

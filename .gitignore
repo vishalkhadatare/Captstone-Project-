@@ -16,6 +16,9 @@ __pycache__/
 *.py[cod]
 .vite/
 0leakexam-main/
+# Nested embedded clone of this project — has its own .git, breaks git clone
+# (gitlink without .gitmodules) on Netlify. Never commit it.
+0leakexam/
 
 # Local database & temp files
 *.db
@@ -34,6 +37,11 @@ public/papers/*
 
 # Scratch and temporary work
 scratch/
+
+# Server RSA keypair that seals examination papers. A private key is never a
+# source file: commit it and every stored paper is readable by anyone.
+.zeroleak-server-key.pem
+*.server-key.pem
 
 # Claude Code local settings — contains a live API token, never commit
 .claude/settings.local.json

@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { api, getDeviceFingerprint } from '../api';
 import { Examination, PrintCopy, User, DynamicWatermarkData } from '../types';
+import { formatExamUnlock } from '../utils/examTime';
 import { SecureViewerModal } from './SecureViewerModal';
 import {
   Printer,
@@ -178,7 +179,7 @@ export const SecureDeliveryModule: React.FC<SecureDeliveryProps> = ({ currentUse
                     <div className="flex items-center justify-between text-slate-400">
                       <span>Server Time Lock Release:</span>
                       <span className="font-mono text-white font-medium">
-                        {new Date(exam.unlock_time).toLocaleString()}
+                        {formatExamUnlock(exam.unlock_time, exam.exam_date)}
                       </span>
                     </div>
                     <div className="flex items-center justify-between text-slate-400">

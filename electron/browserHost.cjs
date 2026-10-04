@@ -128,6 +128,94 @@ const log = (message) => console.log(`[browser-host] ${message}`);
  */
 const JPEG_QUALITY = 80;
 
+/**
+ * Adaptive quality for slow links (tunnels, VPNs, shared Wi-Fi).
+ *
+ * Set via `ZEROLEAK_HOST_ADAPTIVE_QUALITY=1` by the spawn plan. The host tracks
+ * how long each frame report takes: when round trips stretch past 400ms, frames
+ * are encoded at a lower JPEG quality - roughly half the bytes, which is the
+ * difference between a panel that tracks the hand and one that trails it. When
+ * the link recovers, quality is restored. The frame rate is never touched; only
+ * the bytes per frame change, so typing stays live even while the picture is
+ * softer.
+ */
+const ADAPTIVE_QUALITY = process.env.ZEROLEAK_HOST_ADAPTIVE_QUALITY === '1';
+const QUALITY_STEP_DOWN_MS = 400;
+const QUALITY_STEP_UP_MS = 150;
+const JPEG_QUALITY_FLOOR = 45;
+let jpegQuality = JPEG_QUALITY;
+let lastReportDurationMs = 0;
+
+/**
+ * A tiny page-side tap that says when a page asks for a file.
+ *
+ * Why this is here: a file picker used to be undiagnosable from outside. Both
+ * paths this app needs - `<input type="file">` and the File System Access
+ * pickers - were measured to open a real Windows dialog from THIS window (an
+ * `Open` dialog, class #32770, visible, while the window itself is hidden), so
+ * "Import does nothing" can only mean the page never asked. Nothing in the
+ * browser process reports that request, and Electron offers no file-chooser hook
+ * (the DevTools protocol has one, but attaching a debugger to this offscreen
+ * window kills its renderer), so the page itself has to say it.
+ *
+ * It only logs and calls straight through: a page that froze its own API on
+ * purpose is left exactly as it was, and nothing here can fail a page.
+ */
+const PAGE_TRACE_SCRIPT = `(() => {
+  if (window.__zeroleakPageTrace) return;
+  window.__zeroleakPageTrace = true;
+  const tell = (what) => { try { console.log('[browser-host] ' + what); } catch (_) {} };
+  for (const name of ['showOpenFilePicker', 'showDirectoryPicker', 'showSaveFilePicker']) {
+    const original = window[name];
+    if (typeof original !== 'function') continue;
+    try {
+      Object.defineProperty(window, name, {
+        configurable: true,
+        writable: true,
+        value: function (...args) { tell('the page asked for a file: ' + name); return original.apply(this, args); },
+      });
+    } catch (_) { /* a frozen API stays frozen */ }
+  }
+  try {
+    const nativeClick = HTMLInputElement.prototype.click;
+    HTMLInputElement.prototype.click = function (...args) {
+      if (String(this.type).toLowerCase() === 'file') {
+        tell('the page clicked a file input' + (this.webkitdirectory ? ' (directory)' : ''));
+      }
+      return nativeClick.apply(this, args);
+    };
+  } catch (_) { /* as above */ }
+})();`;
+
+/**
+ * A page's own complaints, which is where a silent failure leaves its trace.
+ *
+ * Only warnings and errors, plus this host's own trace lines: a streamed page
+ * logs plenty of ordinary noise, and a log nobody reads is the same as no log.
+ * The signature differs across Electron versions - newer ones pass one event
+ * object, older ones pass (event, level, message, line, source) - so both shapes
+ * are read rather than assumed.
+ */
+const reportPageConsole = (contents) => {
+  contents.on('console-message', (...args) => {
+    const first = args[0];
+    const detail =
+      first && typeof first === 'object' && 'message' in first
+        ? first
+        : { level: args[1], message: args[2], lineNumber: args[3], sourceId: args[4] };
+    const text = String(detail.message == null ? '' : detail.message);
+    if (!text) return;
+    const level = String(detail.level == null ? '' : detail.level);
+    const notable =
+      text.includes('[browser-host]') ||
+      /error|warning|warn/i.test(level) ||
+      level === '2' ||
+      level === '3';
+    if (!notable) return;
+    log(`page ${level || 'log'}: ${text.split('\n')[0].slice(0, 300)}`);
+  });
+};
+
 // ---------------------------------------------------------------------------
 // State that the app is told about
 // ---------------------------------------------------------------------------
@@ -259,7 +347,16 @@ let lastFrameReported = null;
 const report = async (frame) => {
   if (frame) lastFrameReported = frame;
   const body = { hostId: HOST_ID, ...state, frame: frame || null };
+  const startedAt = Date.now();
   const result = await post('/api/browser/host/report', body);
+  lastReportDurationMs = Date.now() - startedAt;
+  if (ADAPTIVE_QUALITY && frame) {
+    if (lastReportDurationMs > QUALITY_STEP_DOWN_MS) {
+      jpegQuality = Math.max(JPEG_QUALITY_FLOOR, jpegQuality - 10);
+    } else if (lastReportDurationMs < QUALITY_STEP_UP_MS && jpegQuality < JPEG_QUALITY) {
+      jpegQuality = Math.min(JPEG_QUALITY, jpegQuality + 5);
+    }
+  }
   if (result.ok) {
     reportFailures = 0;
     if (frame) framesSent += 1;
@@ -403,6 +500,13 @@ const attachView = (win, contents, { primary = false } = {}) => {
   claimFocus(win, contents);
   contents.on('did-finish-load', () => claimFocus(win, contents));
 
+  // What the page says, and when it asks for a file. Both are invisible from
+  // here otherwise, and both are what a "nothing happens" report is made of.
+  reportPageConsole(contents);
+  contents.on('did-finish-load', () => {
+    contents.executeJavaScript(PAGE_TRACE_SCRIPT).catch(() => undefined);
+  });
+
   contents.on('paint', (_event, _dirty, image) => {
     // Newest wins: an older frame that is still queued is worthless, and
     // queueing them would make the panel show the past.
@@ -410,7 +514,7 @@ const attachView = (win, contents, { primary = false } = {}) => {
     try {
       const size = image.getSize();
       pendingFrame = {
-        base64: image.toJPEG(JPEG_QUALITY).toString('base64'),
+        base64: image.toJPEG(ADAPTIVE_QUALITY ? jpegQuality : JPEG_QUALITY).toString('base64'),
         width: size.width,
         height: size.height,
       };
@@ -490,7 +594,15 @@ const attachView = (win, contents, { primary = false } = {}) => {
       attachView(child, child.webContents, { primary: false });
       setActiveView([...views].find((v) => v.win === child) || null);
       const { width, height } = child.getBounds();
-      log(`a popup opened at ${width}x${height}; the stream follows it`);
+      // The URL is logged because "a popup opened" and "the sign-in page opened"
+      // are different facts, and only the second one means the flow is running: an
+      // SDK that opens a blank placeholder first looks identical otherwise. The
+      // close is logged for the same reason - Prism reports "we couldn't open the
+      // sign-in window" when its own handle is already gone, and without this line
+      // there is no way to tell that apart from the window never being created.
+      log(`a popup opened at ${width}x${height} (${child.webContents.getURL() || 'about:blank'}); the stream follows it`);
+      child.webContents.once('did-navigate', (_event, url) => log(`the popup navigated to ${url}`));
+      child.once('closed', () => log('the popup was closed; back to the window that opened it'));
     });
   }
 

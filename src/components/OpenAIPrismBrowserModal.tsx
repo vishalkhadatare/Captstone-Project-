@@ -22,6 +22,7 @@ import {
   authLog,
   planAuthNavigation,
   redactUrlForLog,
+  streamedSignInActions,
 } from '../utils/prismAuth';
 import {
   ChromeLikeBrowser,
@@ -142,6 +143,8 @@ export const OpenAIPrismBrowserModal: React.FC<OpenAIPrismBrowserModalProps> = (
   /** Frames from `/api/browser/stream`, which replace the bookmarks wholesale. */
   const [liveBookmarks, setLiveBookmarks] = useState<BrowserBookmark[] | null>(null);
   const [configNote, setConfigNote] = useState<string | null>(null);
+  /** The streamed panel's own sign-in offer, dismissible for this session. */
+  const [showStreamedSignIn, setShowStreamedSignIn] = useState<boolean>(true);
 
   const authWindowRef = useRef<Window | null>(null);
   const authPollRef = useRef<number | null>(null);
@@ -563,6 +566,32 @@ export const OpenAIPrismBrowserModal: React.FC<OpenAIPrismBrowserModalProps> = (
   const downloadNotice = streamedBrowser.status?.notice ?? null;
 
   /**
+   * Sign-in, when the streamed browser is the thing on screen.
+   *
+   * Prism's page is the only place its own sign-in button lives, and when that
+   * button does not open a window there is nothing left to click - the panel's
+   * other sign-in controls are hidden while a real browser streams (they
+   * describe the iframe path). So the panel drives the sign-in itself: the SAME
+   * real browser is sent to the route measured to hand straight over to Google,
+   * which writes the session Prism reads, and then back to Prism.
+   */
+  const streamedSignIn = streamedSignInActions(streamedBrowser.status?.url ?? '');
+
+  const signInInsideStreamedBrowser = useCallback(() => {
+    const target = streamedSignIn.signInUrl;
+    if (!target) return;
+    authLog('Sign-in requested inside the streamed browser', target);
+    streamedBrowser.command({ type: 'navigate', url: target });
+  }, [streamedBrowser, streamedSignIn.signInUrl]);
+
+  const backToPrismInStreamedBrowser = useCallback(() => {
+    const target = streamedSignIn.backUrl;
+    if (!target) return;
+    authLog('Returning the streamed browser to Prism to pick up the session');
+    streamedBrowser.command({ type: 'navigate', url: target });
+  }, [streamedBrowser, streamedSignIn.backUrl]);
+
+  /**
    * The panel starts its own real browser.
    *
    * A bounded number of attempts, because a host that dies immediately (the
@@ -888,6 +917,56 @@ export const OpenAIPrismBrowserModal: React.FC<OpenAIPrismBrowserModalProps> = (
              * that floats over the page, it names the file's real path on disk,
              * and the server clears it after a few seconds.
              */}
+            {/*
+             * Sign-in inside the streamed browser.
+             *
+             * Floats over the page rather than sitting above it: the panel keeps
+             * every pixel for the editor, and this is the one control that has no
+             * other home while a real browser streams. It is dismissible, so it
+             * never becomes furniture.
+             */}
+            {streamingHere && showStreamedSignIn && (
+              <div className="absolute bottom-3 left-3 z-20 max-w-md rounded-lg border border-indigo-800/70 bg-slate-900/95 px-3 py-2 text-[11px] text-slate-200 shadow-lg space-y-1.5">
+                <div className="flex items-start gap-2">
+                  <KeyRound className="w-3.5 h-3.5 text-indigo-300 shrink-0 mt-0.5" />
+                  <p className="leading-snug">
+                    If Prism&apos;s own sign-in button opens nothing, sign in here instead — it happens in this same
+                    real browser, so Prism picks the session up.
+                  </p>
+                  <button
+                    type="button"
+                    onClick={() => setShowStreamedSignIn(false)}
+                    title="Dismiss"
+                    className="px-0.5 opacity-70 hover:opacity-100 transition-all cursor-pointer shrink-0"
+                  >
+                    ✕
+                  </button>
+                </div>
+                <div className="flex items-center gap-2 flex-wrap">
+                  {streamedSignIn.offerSignIn && (
+                    <button
+                      type="button"
+                      onClick={signInInsideStreamedBrowser}
+                      className="px-2.5 py-1 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white font-bold flex items-center gap-1.5 shadow-sm transition-all cursor-pointer"
+                    >
+                      <Globe className="w-3 h-3" />
+                      <span>Sign in with Google</span>
+                    </button>
+                  )}
+                  {streamedSignIn.offerBackToPrism && (
+                    <button
+                      type="button"
+                      onClick={backToPrismInStreamedBrowser}
+                      className="px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-100 font-bold border border-slate-700 flex items-center gap-1.5 transition-all cursor-pointer"
+                    >
+                      <RotateCcw className="w-3 h-3" />
+                      <span>Back to Prism</span>
+                    </button>
+                  )}
+                </div>
+              </div>
+            )}
+
             {downloadNotice && (
               <div className="pointer-events-none absolute bottom-3 right-3 z-20 max-w-lg rounded-lg border border-emerald-800/70 bg-emerald-950/95 px-3 py-2 text-[11px] text-emerald-100 shadow-lg">
                 {downloadNotice}

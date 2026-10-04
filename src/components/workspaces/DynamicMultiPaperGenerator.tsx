@@ -353,6 +353,13 @@ export const DynamicMultiPaperGenerator: React.FC<DynamicMultiPaperGeneratorProp
     return () => clearTimeout(timer);
   }, [currentBlueprint, selectedPaperIds]);
 
+  // Keep the exam binding in sync when the parent loads examinations after mount.
+  useEffect(() => {
+    if (!selectedExamId && examinations.length > 0) {
+      setSelectedExamId(examinations[0].id);
+    }
+  }, [examinations, selectedExamId]);
+
   // Handle Paper Generation
   const handleGenerate = async () => {
     setGenerating(true);
@@ -648,6 +655,20 @@ export const DynamicMultiPaperGenerator: React.FC<DynamicMultiPaperGeneratorProp
                 </div>
 
                 <div className="flex items-center gap-2">
+                  {examinations.length > 0 && (
+                    <select
+                      value={selectedExamId}
+                      onChange={(e) => setSelectedExamId(e.target.value)}
+                      className="text-xs font-semibold text-slate-700 bg-white border border-slate-200 rounded-md px-2 py-1.5 max-w-[220px] truncate focus:outline-none focus:border-emerald-500"
+                      title="Examination these sets will be filed under"
+                    >
+                      {examinations.map((ex) => (
+                        <option key={ex.id} value={ex.id}>
+                          {ex.name}
+                        </option>
+                      ))}
+                    </select>
+                  )}
                   <button
                     onClick={() => {
                       const validIds = sourcePapers
@@ -948,7 +969,7 @@ export const DynamicMultiPaperGenerator: React.FC<DynamicMultiPaperGeneratorProp
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
                   {subjectQuotas.map((sq, idx) => (
                     <div
-                      key={sq.subject}
+                      key={`${sq.subject}-${idx}`}
                       className="flex items-center justify-between p-2.5 rounded-lg border border-slate-200 bg-white"
                     >
                       <span className="text-xs font-semibold text-slate-800">{sq.subject}</span>

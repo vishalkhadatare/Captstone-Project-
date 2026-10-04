@@ -1513,6 +1513,43 @@ export function executeRun(db: Database, sql: string, params: any[] = []): void 
   writeThroughToPostgres(sql, params);
 }
 
+/**
+ * Run several statements as one atomic unit.
+ *
+ * `executeRun` persists after every statement, and `saveDb()` exports the
+ * database - which closes and reopens the sql.js handle and therefore ends any
+ * transaction around it. A route that hand-rolled `BEGIN TRANSACTION` and then
+ * called `executeRun` got the opposite of atomicity: each write committed on its
+ * own, and the trailing `COMMIT` threw "cannot commit - no transaction is
+ * active". That throw escaped the route (Express 4 does not catch async handler
+ * rejections), so approving a device replacement updated the ledger and then
+ * never answered the browser - the Owner's screen spun forever.
+ *
+ * Here the statements stay inside one real transaction, the database is
+ * persisted once at the end, and the same statements are mirrored to PostgreSQL.
+ */
+export function executeTransaction(db: Database, statements: Array<{ sql: string; params?: any[] }>): void {
+  if (statements.length === 0) return;
+  db.run('BEGIN TRANSACTION');
+  try {
+    for (const statement of statements) {
+      db.run(statement.sql, statement.params ?? []);
+    }
+    db.run('COMMIT');
+  } catch (error) {
+    try {
+      db.run('ROLLBACK');
+    } catch {
+      /* the transaction is already gone; the original error is what matters */
+    }
+    throw error;
+  }
+  saveDb();
+  for (const statement of statements) {
+    writeThroughToPostgres(statement.sql, statement.params ?? []);
+  }
+}
+
 export async function queryPostgres(sql: string, params: any[] = []): Promise<any[]> {
   const pool = getPostgresPool();
   if (!pool) return [];

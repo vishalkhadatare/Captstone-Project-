@@ -15,6 +15,7 @@ import {
   isPrismHost,
   planAuthNavigation,
   redactUrlForLog,
+  streamedSignInActions,
 } from './prismAuth.ts';
 
 // ---------------------------------------------------------------------------
@@ -604,4 +605,39 @@ test('planAuthNavigation blanking: non-navigable input yields no url at all', ()
 test('planAuthNavigation preserves the normalised URL for navigable input', () => {
   const plan = planAuthNavigation('https://prism.openai.com/auth?x=1');
   assert.equal(plan.url, 'https://prism.openai.com/auth?x=1');
+});
+
+// ---------------------------------------------------------------------------
+// streamedSignInActions - the fallback the streamed panel offers
+// ---------------------------------------------------------------------------
+
+const STREAMED_ROWS: Array<[string, boolean, boolean, string]> = [
+  ['https://prism.openai.com/', true, false, 'on Prism: sign in is the only offer'],
+  ['https://prism.openai.com/project/abc', true, false, 'a Prism sub-page behaves the same'],
+  ['https://chatgpt.com/auth/login', false, true, 'mid provider flow: only the way back'],
+  ['https://accounts.google.com/o/oauth2/v2/auth?client_id=a&response_type=code', false, true, 'on Google: do not restart the flow'],
+  ['https://example.com/', true, true, 'elsewhere on the web: both offers'],
+  ['', true, false, 'nothing reported yet: sign in, no way back'],
+  ['not a url', true, false, 'unparsable: same as unknown'],
+];
+
+for (const [url, offerSignIn, offerBackToPrism, why] of STREAMED_ROWS) {
+  test(`streamedSignInActions(${JSON.stringify(url)}): ${why}`, () => {
+    const actions = streamedSignInActions(url);
+    assert.equal(actions.offerSignIn, offerSignIn);
+    assert.equal(actions.offerBackToPrism, offerBackToPrism);
+    // An action that is offered must carry a usable URL, and one that is not
+    // must not carry a URL at all - the panel navigates to whatever is here.
+    assert.equal(actions.signInUrl ? actions.signInUrl === OPENAI_GOOGLE_SIGN_IN_URL : true, true);
+    assert.equal(actions.backUrl ? actions.backUrl === PRISM_SIGN_IN_URL : true, true);
+    assert.equal(actions.offerSignIn === (actions.signInUrl !== ''), true);
+    assert.equal(actions.offerBackToPrism === (actions.backUrl !== ''), true);
+  });
+}
+
+test('streamedSignInActions never invents a URL for an unknown page', () => {
+  const actions = streamedSignInActions('https://evil.test/');
+  assert.equal(actions.signInUrl, OPENAI_GOOGLE_SIGN_IN_URL);
+  assert.equal(actions.backUrl, PRISM_SIGN_IN_URL);
+  assert.equal(actions.signInUrl.includes('evil.test'), false);
 });

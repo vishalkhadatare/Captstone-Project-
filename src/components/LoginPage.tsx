@@ -24,9 +24,11 @@ import {
   ArrowRight,
   Shield,
   Check,
+  RefreshCw,
 } from 'lucide-react';
 import { ZeroLeakLogo } from './ZeroLeakLogo';
-import { api, setStoredAuth, getDeviceFingerprint, getOrCreateBrowserDeviceIdentity, signDeviceChallenge, detectDeviceProfile } from '../api';
+import { api, setStoredAuth, getDeviceFingerprint, getOrCreateBrowserDeviceIdentity, rotateBrowserDeviceIdentity, signDeviceChallenge, detectDeviceProfile } from '../api';
+import type { BrowserDeviceIdentity } from '../api';
 import { User, UserRole } from '../types';
 
 interface LoginPageProps {
@@ -114,6 +116,11 @@ export const LoginPage: React.FC<LoginPageProps> = ({
   const [loading, setLoading] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [showForgotModal, setShowForgotModal] = useState(false);
+  // Set when the server refuses this workstation's device rather than the
+  // password. Both cases are recoverable, but only through a different route
+  // than "try again", so the form swaps in a recovery panel instead.
+  const [deviceBlock, setDeviceBlock] = useState<null | 'REVOKED' | 'REPLACEMENT_REQUIRED'>(null);
+  const [replacementStatus, setReplacementStatus] = useState<string | null>(null);
   const [copiedRole, setCopiedRole] = useState<string | null>(null);
   const [copiedFp, setCopiedFp] = useState(false);
 
@@ -127,44 +134,40 @@ export const LoginPage: React.FC<LoginPageProps> = ({
     setTimeout(() => setCopiedFp(false), 2000);
   };
 
-  const handleLogin = async (e?: React.FormEvent, customIdent?: string, customPass?: string) => {
-    if (e) e.preventDefault();
-    setErrorMessage(null);
-    setLoading(true);
+  /**
+   * One complete sign-in attempt with a given workstation key.
+   *
+   * The server will not trade a password for a token: it decides whether this
+   * key is known, unknown or barred, and this reports that decision back as a
+   * value instead of an exception so callers can react to it. Genuine failures
+   * (wrong password, network trouble) still throw.
+   */
+  const runLoginAttempt = async (identity: BrowserDeviceIdentity, loginId: string, loginPass: string) => {
+    const res = await api.login({
+      identifier: loginId,
+      password: loginPass,
+      device_name: 'Authorized Institution Terminal',
+      device_uuid: identity.deviceUuid,
+    });
 
-    const loginId = (customIdent !== undefined ? customIdent : identifier).trim();
-    const loginPass = customPass !== undefined ? customPass : password;
+    if (res.token) {
+      return { outcome: 'SIGNED_IN' as const, token: res.token, user: res.user };
+    }
 
-    try {
-      const identity = await getOrCreateBrowserDeviceIdentity();
-      const res = await api.login({
-        identifier: loginId,
-        password: loginPass,
-        device_name: 'Authorized Institution Terminal',
-        device_uuid: identity.deviceUuid,
+    if (res.requiresDeviceBinding && res.nextStep === 'DEVICE_CHALLENGE' && res.challenge && res.challengeId) {
+      const signature = await signDeviceChallenge(res.challenge, identity.privateKey);
+      const verified = await api.verifyDeviceChallenge({
+        challengeId: res.challengeId,
+        signature,
+        deviceUuid: identity.deviceUuid,
       });
+      return { outcome: 'SIGNED_IN' as const, token: verified.token, user: verified.user };
+    }
 
-      if (res.token) {
-        setStoredAuth(res.token, res.user);
-        onLoginSuccess(res.user, res.token);
-        return;
-      }
-
-      if (res.requiresDeviceBinding && res.nextStep === 'DEVICE_CHALLENGE' && res.challenge && res.challengeId) {
-        const signature = await signDeviceChallenge(res.challenge, identity.privateKey);
-        const verified = await api.verifyDeviceChallenge({
-          challengeId: res.challengeId,
-          signature,
-          deviceUuid: identity.deviceUuid,
-        });
-        setStoredAuth(verified.token, verified.user);
-        onLoginSuccess(verified.user, verified.token);
-        return;
-      }
-
-      if (res.requiresDeviceBinding && res.nextStep === 'DEVICE_REGISTRATION' && res.challenge && res.challengeId) {
-        const signature = await signDeviceChallenge(res.challenge, identity.privateKey);
-        const profile = detectDeviceProfile();
+    if (res.requiresDeviceBinding && res.nextStep === 'DEVICE_REGISTRATION' && res.challenge && res.challengeId) {
+      const signature = await signDeviceChallenge(res.challenge, identity.privateKey);
+      const profile = detectDeviceProfile();
+      try {
         const deviceResponse = await api.registerDeviceChallenge({
           challengeId: res.challengeId,
           signature,
@@ -178,22 +181,106 @@ export const LoginPage: React.FC<LoginPageProps> = ({
           attestation_status: 'UNAVAILABLE',
         });
 
-        if (deviceResponse.requiresApproval || deviceResponse.status === 'PENDING') {
-          setErrorMessage('NEW DEVICE REGISTRATION\n\nThis device is pending authorization for this account. Please contact the Examination Authority to approve access.');
-          return;
-        }
         if (deviceResponse.token && deviceResponse.user) {
-          setStoredAuth(deviceResponse.token, deviceResponse.user);
-          onLoginSuccess(deviceResponse.user, deviceResponse.token);
-          return;
+          return { outcome: 'SIGNED_IN' as const, token: deviceResponse.token, user: deviceResponse.user };
         }
-        setErrorMessage('Device registration completed. Await device approval, then sign in again to complete challenge verification.');
+        if (deviceResponse.requiresApproval || deviceResponse.status === 'PENDING') {
+          return { outcome: 'MESSAGE' as const, message: 'NEW DEVICE REGISTRATION\n\nThis device is pending authorization for this account. Please contact the Examination Authority to approve access.' };
+        }
+        return { outcome: 'MESSAGE' as const, message: deviceResponse.message || 'Device registration completed. Await device approval, then sign in again to complete challenge verification.' };
+      } catch (registerErr: any) {
+        const registerCode = registerErr?.code || registerErr?.details?.error;
+        if (registerCode === 'DEVICE_REPLACEMENT_REQUIRED') return { outcome: 'REPLACEMENT_REQUIRED' as const };
+        throw registerErr;
+      }
+    }
+
+    return { outcome: 'MESSAGE' as const, message: res.message || 'Device authorization is required for this account.' };
+  };
+
+  const handleLogin = async (e?: React.FormEvent, customIdent?: string, customPass?: string) => {
+    if (e) e.preventDefault();
+    setErrorMessage(null);
+    setDeviceBlock(null);
+    setReplacementStatus(null);
+    setLoading(true);
+
+    const loginId = (customIdent !== undefined ? customIdent : identifier).trim();
+    const loginPass = customPass !== undefined ? customPass : password;
+
+    try {
+      const identity = await getOrCreateBrowserDeviceIdentity();
+      const result = await runLoginAttempt(identity, loginId, loginPass);
+
+      if (result.outcome === 'SIGNED_IN') {
+        setStoredAuth(result.token, result.user);
+        onLoginSuccess(result.user, result.token);
+        return;
+      }
+      if (result.outcome === 'REPLACEMENT_REQUIRED') {
+        setDeviceBlock('REPLACEMENT_REQUIRED');
+        setErrorMessage(null);
+        return;
+      }
+      setErrorMessage(result.message);
+    } catch (err: any) {
+      const code = err?.code || err?.details?.error;
+      if (code === 'DEVICE_ACCESS_REVOKED') setDeviceBlock('REVOKED');
+      else if (code === 'DEVICE_REPLACEMENT_REQUIRED') setDeviceBlock('REPLACEMENT_REQUIRED');
+      setErrorMessage(err.message || 'Authentication failed. Please check your credentials.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  /**
+   * Recovery for the two dead ends where the password is right but the
+   * workstation key is not: this device was revoked, or the account already
+   * holds an active device. Mints a brand new key (never resurrecting the
+   * revoked one) and, if the account is still device-bound, files the
+   * replacement request an authority can approve.
+   */
+  const handleRecoverDevice = async () => {
+    setErrorMessage(null);
+    setReplacementStatus(null);
+    setLoading(true);
+    const loginId = identifier.trim();
+
+    try {
+      const identity = await rotateBrowserDeviceIdentity();
+      const result = await runLoginAttempt(identity, loginId, password);
+
+      if (result.outcome === 'SIGNED_IN') {
+        setDeviceBlock(null);
+        setStoredAuth(result.token, result.user);
+        onLoginSuccess(result.user, result.token);
+        return;
+      }
+      if (result.outcome === 'MESSAGE') {
+        setDeviceBlock(null);
+        setReplacementStatus(result.message);
         return;
       }
 
-      setErrorMessage(res.message || 'Device authorization is required for this account.');
+      // Registration was refused because another device is still active. The
+      // challenge that refusal consumed is spent, so take a fresh one before
+      // filing the request.
+      const fresh = await api.login({
+        identifier: loginId,
+        password,
+        device_name: 'Authorized Institution Terminal',
+        device_uuid: identity.deviceUuid,
+      });
+      if (!fresh.challengeId) {
+        throw new Error(fresh.message || 'The server did not issue a device registration challenge.');
+      }
+      const request = await api.requestDeviceReplacement({ challengeId: fresh.challengeId });
+      setDeviceBlock(null);
+      setReplacementStatus(request.message || 'Device replacement requested. An Examination Authority must approve it before this workstation can sign in.');
     } catch (err: any) {
-      setErrorMessage(err.message || 'Authentication failed. Please check your credentials.');
+      const code = err?.code || err?.details?.error;
+      if (code === 'DEVICE_REPLACEMENT_REQUIRED') setDeviceBlock('REPLACEMENT_REQUIRED');
+      setErrorMessage(err.message || 'Unable to request device replacement.');
     } finally {
       setLoading(false);
     }
@@ -298,6 +385,41 @@ export const LoginPage: React.FC<LoginPageProps> = ({
                 <div className="p-3.5 bg-rose-50/90 border border-rose-200 text-rose-800 text-xs rounded-2xl flex items-start gap-2.5 shadow-2xs animate-in fade-in">
                   <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5 text-rose-600" />
                   <span className="leading-relaxed font-medium">{errorMessage}</span>
+                </div>
+              )}
+
+              {deviceBlock && (
+                <div className="p-3.5 bg-amber-50/90 border border-amber-300 text-amber-900 text-xs rounded-2xl space-y-2.5 shadow-2xs animate-in fade-in">
+                  <div className="flex items-start gap-2.5">
+                    <ShieldAlert className="w-4 h-4 shrink-0 mt-0.5 text-amber-600" />
+                    <span className="leading-relaxed font-medium">
+                      {deviceBlock === 'REVOKED'
+                        ? "This workstation has been removed from the account's trusted devices. The password is fine — the workstation key is not."
+                        : 'This account already holds an active device, and only one is permitted at a time.'}
+                    </span>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={handleRecoverDevice}
+                    disabled={loading}
+                    className="w-full px-3 py-2 rounded-xl bg-amber-700 hover:bg-amber-600 disabled:opacity-50 text-white font-bold text-xs inline-flex items-center justify-center gap-2 transition-all cursor-pointer"
+                  >
+                    <RefreshCw className={`w-3.5 h-3.5 ${loading ? 'animate-spin' : ''}`} />
+                    <span>{deviceBlock === 'REVOKED' ? 'Bind This Workstation Again' : 'Request Device Replacement'}</span>
+                  </button>
+                  <p className="text-[10px] text-amber-800/85 leading-relaxed">
+                    {'A brand new workstation key is generated — the revoked one stays revoked. If the account still '}
+                    {'holds another active device, the Examination Authority must approve the swap in '}
+                    <span className="font-semibold">Trusted Workstations</span>
+                    {' before this one can sign in.'}
+                  </p>
+                </div>
+              )}
+
+              {replacementStatus && (
+                <div className="p-3.5 bg-emerald-50/90 border border-emerald-200 text-emerald-900 text-xs rounded-2xl flex items-start gap-2.5 shadow-2xs animate-in fade-in">
+                  <CheckCircle2 className="w-4 h-4 shrink-0 mt-0.5 text-emerald-600" />
+                  <span className="leading-relaxed font-medium">{replacementStatus}</span>
                 </div>
               )}
 

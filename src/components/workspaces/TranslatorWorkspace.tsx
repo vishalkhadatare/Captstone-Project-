@@ -658,6 +658,13 @@ export const TranslatorWorkspace: React.FC<TranslatorWorkspaceProps> = ({
                   filteredQuestions.map(q => {
                     const isSelected = selectedQuestion?.id === q.id;
                     const hasTrans = translations.some(t => t.question_id === q.id && t.language === targetLanguage && t.status === 'APPROVED');
+                    // Languages already delivered for this question. One assigned
+                    // paper is translated into every requested language, so the
+                    // queue has to show coverage per question, not just the one
+                    // language currently selected.
+                    const deliveredLanguages: string[] =
+                      (q as any).translated_languages ||
+                      Array.from(new Set(translations.filter(t => t.question_id === q.id).map(t => t.language)));
                     return (
                       <div
                         key={q.id}
@@ -675,6 +682,23 @@ export const TranslatorWorkspace: React.FC<TranslatorWorkspaceProps> = ({
                           </span>
                         </div>
                         <p className="text-[11px] text-slate-600 line-clamp-2 leading-relaxed">{q.content_text}</p>
+                        {deliveredLanguages.length > 0 && (
+                          <div className="flex flex-wrap items-center gap-1 mt-2">
+                            {deliveredLanguages.map(language => (
+                              <span
+                                key={language}
+                                className={`px-1.5 py-0.5 rounded text-[9px] font-bold border ${
+                                  language === targetLanguage
+                                    ? 'bg-purple-100 text-purple-900 border-purple-200'
+                                    : 'bg-emerald-50 text-emerald-800 border-emerald-200'
+                                }`}
+                              >
+                                {language}
+                              </span>
+                            ))}
+                          </div>
+                        )}
+
                         <div className="flex items-center justify-between mt-2 pt-1 border-t border-slate-200/60 text-[10px]">
                           <span className="text-slate-500 font-medium">{q.subject}</span>
                           {hasTrans ? (
@@ -705,6 +729,18 @@ export const TranslatorWorkspace: React.FC<TranslatorWorkspaceProps> = ({
                     </div>
 
                     <div className="flex flex-wrap items-center gap-2">
+                      {(selectedQuestion as any).assigned_language && (
+                        <span
+                          className={`px-2.5 py-1 rounded-lg text-[10px] font-bold border ${
+                            (selectedQuestion as any).assigned_language === targetLanguage
+                              ? 'bg-emerald-50 text-emerald-800 border-emerald-200'
+                              : 'bg-amber-50 text-amber-800 border-amber-200'
+                          }`}
+                          title="Language the Exam Controller asked for first. Other languages you deliver come back to the controller too."
+                        >
+                          Requested: {(selectedQuestion as any).assigned_language}
+                        </span>
+                      )}
                       <div className="flex items-center gap-1.5 bg-slate-50 border border-slate-200 px-2.5 py-1 rounded-lg">
                         <label className="text-xs font-bold text-slate-700 flex items-center gap-1">
                           <Languages className="w-3.5 h-3.5 text-purple-700" />

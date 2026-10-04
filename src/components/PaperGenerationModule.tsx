@@ -33,6 +33,7 @@ import {
 import { SimpleMultiPaperSynthesizer } from './SimpleMultiPaperSynthesizer';
 import { AiPdfPaperGenerator } from './AiPdfPaperGenerator';
 import { UniversityFormatGenerator } from './workspaces/UniversityFormatGenerator';
+import { formatExamUnlock } from '../utils/examTime';
 import { QuestionPaperPdfModal } from './workspaces/QuestionPaperPdfModal';
 import { OpenAIPrismBrowserModal } from './OpenAIPrismBrowserModal';
 
@@ -507,7 +508,7 @@ export const PaperGenerationModule: React.FC<PaperGenProps> = ({ currentUser, on
                 <div className="bg-slate-50 dark:bg-slate-950 p-3 rounded-xl border border-slate-200 dark:border-slate-800">
                   <div className="text-slate-400 text-[10px] uppercase font-semibold">Time-Lock Target</div>
                   <div className="font-mono text-amber-400 mt-0.5 text-[11px] truncate">
-                    {new Date(selectedExam.unlock_time).toLocaleTimeString()}
+                    {formatExamUnlock(selectedExam.unlock_time, selectedExam.exam_date)}
                   </div>
                   <div className="text-slate-500 text-[9px]">{selectedExam.exam_date}</div>
                 </div>

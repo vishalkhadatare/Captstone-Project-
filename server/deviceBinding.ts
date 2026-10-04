@@ -163,11 +163,25 @@ export function getCentreOperatorMaxActiveDevices(db: Database): number {
   return parsed;
 }
 
+/**
+ * Devices that can actually authenticate for this account.
+ *
+ * A row counts only if it carries a `public_key`. That is not pedantry:
+ * `requireApprovedDevice` refuses any device without one, so a keyless row can
+ * never be used to sign in - yet it used to occupy the Centre Operator's entire
+ * one-device allowance. The seeded demo terminals are keyless, which left a
+ * real browser permanently stuck on `DEVICE_REPLACEMENT_REQUIRED` and made the
+ * centre operator's whole workspace unreachable. Registration always stores a
+ * public key, so this narrows the count to real devices without loosening the
+ * one-device policy.
+ */
 export function countActiveDevicesForUser(db: Database, userId: string): number {
   const rows = executeQuery(
     db,
     `SELECT COUNT(*) as cnt FROM trusted_devices
-     WHERE user_id = ? AND status IN ('PENDING', 'PENDING_APPROVAL', 'APPROVED', 'TRUSTED')`,
+     WHERE user_id = ?
+       AND status IN ('PENDING', 'PENDING_APPROVAL', 'APPROVED', 'TRUSTED')
+       AND public_key IS NOT NULL AND public_key != ''`,
     [userId],
   );
   return Number(rows[0]?.cnt || 0);

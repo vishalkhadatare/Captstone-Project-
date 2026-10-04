@@ -350,6 +350,82 @@ export interface PrintCopy {
   tx_hash: string;
 }
 
+// ==========================================
+// WI-FI SECURE PRINT RELAY TYPES
+// ==========================================
+
+export type PrintRelayStatus = 'ACTIVE' | 'PAUSED' | 'LOCKED' | 'REVOKED' | 'EXPIRED';
+export type PrintRelayDeviceStatus = 'PENDING_APPROVAL' | 'APPROVED' | 'DENIED' | 'REVOKED';
+
+/** One device attached to a relay, as the operator's panel sees it. */
+export interface PrintRelayDevice {
+  fingerprint: string;
+  label: string;
+  ip: string;
+  userAgent: string;
+  status: PrintRelayDeviceStatus;
+  requestedAt: number;
+  approvedAt: number | null;
+  lastSeenAt: number;
+  prints: number;
+}
+
+/** A live print relay open on the centre's Wi-Fi. `code` is operator-only. */
+export interface PrintRelayStation {
+  id: string;
+  code: string;
+  label: string;
+  examId: string;
+  examName: string;
+  paperVersionId: string;
+  centreId: string;
+  createdAt: number;
+  expiresAt: number;
+  remaining: string;
+  status: PrintRelayStatus;
+  failedAttempts: number;
+  attemptsLeft: number;
+  requireDeviceApproval: boolean;
+  prints: number;
+  maxPrints: number;
+  lastEvent: string;
+  lastEventAt: number;
+  devices: PrintRelayDevice[];
+  urls?: string[];
+}
+
+/** One control in the print security checklist, rendered as pass/fail/warn. */
+export interface PrintSecurityCheck {
+  id: string;
+  label: string;
+  status: 'PASS' | 'FAIL' | 'WARN';
+  detail: string;
+}
+
+/** What the server hands back when a print release is armed. */
+export interface PrintSecurityArmResult {
+  message: string;
+  securityToken: string;
+  code: string;
+  expiresAt: number;
+  securityChecks: PrintSecurityCheck[];
+  examId: string;
+  examName: string;
+  paperVersionId: string;
+  quota: { authorizedCopies: number; alreadyPrinted: number; requested: number; remaining: number };
+}
+
+/** Payload the relay endpoints always answer with, panel side. */
+export interface PrintRelayEnvelope {
+  message?: string;
+  station: PrintRelayStation;
+  urls: string[];
+  lanAddresses?: string[];
+  beaconPort: number;
+  pairingCodeLength: number;
+  securityChecks?: PrintSecurityCheck[];
+}
+
 export interface AuditEvent {
   id: string;
   event_type: string;
@@ -490,6 +566,9 @@ export interface DynamicWatermarkData {
   ipAddress: string;
   timestamp: string;
   sessionTxRef: string;
+  /** Set when the sheet came off a Wi-Fi print relay rather than a workstation. */
+  relayId?: string;
+  relayLabel?: string;
 }
 
 // ==========================================

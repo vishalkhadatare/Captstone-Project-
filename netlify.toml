@@ -1,0 +1,13 @@
+# Netlify static hosting for the ZeroLeak SPA (Vite build output in dist/).
+# The Express server (dist/server.cjs) is not run by Netlify; the API must be
+# hosted separately (or via the desktop/prod server) — the frontend calls it
+# through its configured base URL.
+[build]
+  command = "npm run build"
+  publish = "dist"
+
+# SPA fallback so deep links and refreshes resolve to index.html.
+[[redirects]]
+  from = "/*"
+  to = "/index.html"
+  status = 200

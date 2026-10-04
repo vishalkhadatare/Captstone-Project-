@@ -11,6 +11,9 @@ import {
   PaperExtractionResponse,
   PaperVersion,
   PrintCopy,
+  PrintRelayEnvelope,
+  PrintRelayStation,
+  PrintSecurityArmResult,
   AuditEvent,
   SecurityEvent,
   NotificationItem,
@@ -152,6 +155,35 @@ export async function getOrCreateBrowserDeviceIdentity(): Promise<BrowserDeviceI
     ['sign'],
   );
   const identity = { deviceUuid: createDeviceUuid(), publicKeyPem, privateKey };
+  await saveDeviceIdentity(identity);
+  return identity;
+}
+
+/**
+ * Discards the stored workstation key and mints a brand new one.
+ *
+ * Needed when the server has revoked this workstation's device: the stored
+ * private key is dead weight, and signing a fresh challenge with it can only
+ * fail again. A new key is genuinely a new device, which is the only state the
+ * server lets you resume registration from. The revoked key is never reused, so
+ * revocation still means revocation.
+ */
+export async function rotateBrowserDeviceIdentity(): Promise<BrowserDeviceIdentity> {
+  const generated = await crypto.subtle.generateKey(
+    { name: 'ECDSA', namedCurve: 'P-256' },
+    true,
+    ['sign', 'verify'],
+  ) as CryptoKeyPair;
+  const publicKeyPem = toPem(await crypto.subtle.exportKey('spki', generated.publicKey));
+  const privateJwk = await crypto.subtle.exportKey('jwk', generated.privateKey);
+  const privateKey = await crypto.subtle.importKey(
+    'jwk',
+    privateJwk,
+    { name: 'ECDSA', namedCurve: 'P-256' },
+    false,
+    ['sign'],
+  );
+  const identity: BrowserDeviceIdentity = { deviceUuid: createDeviceUuid(), publicKeyPem, privateKey };
   await saveDeviceIdentity(identity);
   return identity;
 }
@@ -355,7 +387,14 @@ async function request<T>(endpoint: string, options: RequestInit = {}): Promise<
   }
 
   if (!res.ok) {
-    const error = new Error(data.error || data.message || `Request failed with status ${res.status}`) as Error & { details?: any };
+    // Prefer the human sentence the server sent over the machine code. Both are
+    // kept: `code` and `details` carry the code for callers that branch on it,
+    // while `message` is what a person actually reads on screen. Without this,
+    // a revoked device greeted the operator with the bare string
+    // "DEVICE_ACCESS_REVOKED" and no explanation.
+    const humanMessage = typeof data.message === 'string' && data.message.trim() ? data.message : null;
+    const error = new Error(humanMessage || data.error || `Request failed with status ${res.status}`) as Error & { details?: any; code?: string };
+    error.code = data.error;
     error.details = data;
 
     if (data?.error === 'PENDING_DEVICE_APPROVAL' || data?.details?.error === 'PENDING_DEVICE_APPROVAL') {
@@ -521,6 +560,8 @@ export const api = {
   disableDevice: (id: string) => request<{ message: string; status: string }>(`/api/devices/${id}/disable`, { method: 'POST' }),
   revokeDevice: (id: string) => request<{ message: string }>(`/api/devices/${id}/revoke`, { method: 'POST' }),
   reauthorizeDevice: (id: string) => request<{ message: string; status: string }>(`/api/devices/${id}/reauthorize`, { method: 'POST' }),
+  /** This workstation asks to be re-admitted after its own device was revoked. */
+  requestDeviceReplacement: (payload: { challengeId: string }) => request<{ message: string; replacementRequestId: string; status: string }>('/api/auth/device/replacement-request', { method: 'POST', body: JSON.stringify(payload) }),
   getReplacementRequests: () => request<{ requests: any[] }>('/api/devices/replacement-requests'),
   approveReplacementRequest: (id: string) => request<{ message: string; status: string }>(`/api/devices/replacement-requests/${id}/approve`, { method: 'POST' }),
   rejectReplacementRequest: (id: string) => request<{ message: string; status: string }>(`/api/devices/replacement-requests/${id}/reject`, { method: 'POST' }),
@@ -1022,8 +1063,61 @@ export const api = {
   // Secure Delivery & Printing
   getReleasedExams: () => request<{ examinations: Examination[] }>('/api/delivery/released-exams'),
   openSecureViewer: (exam_id: string) => request<{ message: string; paperContent: any; watermark: DynamicWatermarkData; paperVersionId: string }>('/api/delivery/open-viewer', { method: 'POST', body: JSON.stringify({ exam_id }) }),
-  printAuthorizedCopy: (exam_id: string, paper_version_id: string, copies_count: number) => request<{ message: string; copies: Array<{ copyId: string; txHash: string; printedAt: string }> }>('/api/delivery/print-authorized-copy', { method: 'POST', body: JSON.stringify({ exam_id, paper_version_id, copies_count }) }),
+
+  /**
+   * Step one of the print security gate: re-authenticate and arm a release.
+   * The server returns a single-use token plus the one-time code the operator
+   * must read back, so opening the printer never authorises printing by itself.
+   */
+  armPrintRelease: (payload: { exam_id: string; paper_version_id?: string; copies_count: number; password: string }) =>
+    request<PrintSecurityArmResult>('/api/delivery/print-security/arm', { method: 'POST', body: JSON.stringify(payload) }),
+
+  /** Step two: spend that arming to mint the serialized copies. */
+  printAuthorizedCopy: (
+    exam_id: string,
+    paper_version_id: string,
+    copies_count: number,
+    security_token: string,
+    security_code: string
+  ) =>
+    request<{ message: string; copies: Array<{ copyId: string; txHash: string; printedAt: string }> }>('/api/delivery/print-authorized-copy', {
+      method: 'POST',
+      body: JSON.stringify({ exam_id, paper_version_id, copies_count, security_token, security_code }),
+    }),
   getPrintHistory: () => request<{ printHistory: PrintCopy[] }>('/api/delivery/print-history'),
+
+  // Wi-Fi Secure Print Relay: print from any device on the centre's network
+  getPrintRelays: () =>
+    request<{ stations: PrintRelayStation[]; lanAddresses: string[]; beaconPort: number; pairingCodeLength: number }>(
+      '/api/delivery/print-relay'
+    ),
+  getPrintRelay: (id: string) => request<PrintRelayEnvelope>(`/api/delivery/print-relay/${encodeURIComponent(id)}`),
+  openPrintRelay: (payload: {
+    exam_id: string;
+    label?: string;
+    require_device_approval?: boolean;
+    ttl_minutes?: number;
+    max_prints?: number;
+  }) => request<PrintRelayEnvelope>('/api/delivery/print-relay', { method: 'POST', body: JSON.stringify(payload) }),
+  closePrintRelay: (id: string) =>
+    request<PrintRelayEnvelope>(`/api/delivery/print-relay/${encodeURIComponent(id)}/revoke`, { method: 'POST' }),
+  pausePrintRelay: (id: string, paused: boolean) =>
+    request<PrintRelayEnvelope>(`/api/delivery/print-relay/${encodeURIComponent(id)}/pause`, {
+      method: 'POST',
+      body: JSON.stringify({ paused }),
+    }),
+  unlockPrintRelay: (id: string) =>
+    request<PrintRelayEnvelope>(`/api/delivery/print-relay/${encodeURIComponent(id)}/unlock`, { method: 'POST' }),
+  admitPrintRelayDevice: (id: string, fingerprint: string) =>
+    request<PrintRelayEnvelope>(`/api/delivery/print-relay/${encodeURIComponent(id)}/approve`, {
+      method: 'POST',
+      body: JSON.stringify({ fingerprint }),
+    }),
+  refusePrintRelayDevice: (id: string, fingerprint: string) =>
+    request<PrintRelayEnvelope>(`/api/delivery/print-relay/${encodeURIComponent(id)}/deny`, {
+      method: 'POST',
+      body: JSON.stringify({ fingerprint }),
+    }),
 
   // Audit & Security
   getAuditEvents: () => request<{ events: AuditEvent[] }>('/api/audit/events'),

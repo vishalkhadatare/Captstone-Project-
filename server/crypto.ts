@@ -1,23 +1,134 @@
 import crypto from 'crypto';
+import fs from 'node:fs';
+import path from 'node:path';
 
-// Server-side RSA Keypair Vault (Generated at startup or persistent)
+/**
+ * Server-side RSA keypair vault.
+ *
+ * This used to be generated fresh on every start and never written down, which
+ * quietly broke every paper the previous process had encrypted: `open-viewer`
+ * and the print relay both died with `rsa routines::oaep decoding error`, and
+the exam paper was unrecoverable because only the dead process held the key.
+ * A key that cannot outlive its process is a session token, not a key.
+ *
+ * Resolution order:
+ *   1. `ZEROLEAK_RSA_PRIVATE_KEY` + `ZEROLEAK_RSA_PUBLIC_KEY` (PEM; literal
+ *      newlines or `\n` escapes) - keeps the key out of the filesystem.
+ *   2. `ZEROLEAK_SERVER_KEY_PATH`, default `.zeroleak-server-key.pem` in the
+ *      working directory (mode 0600, git-ignored).
+ *   3. Otherwise: generate once and persist, so the next start finds it.
+ */
+export const SERVER_KEY_PATH =
+  process.env.ZEROLEAK_SERVER_KEY_PATH || path.join(process.cwd(), '.zeroleak-server-key.pem');
+
 let serverKeyPair: crypto.KeyPairSyncResult<string, string> | null = null;
 
-export function getOrCreateServerKeyPair(): crypto.KeyPairSyncResult<string, string> {
-  if (!serverKeyPair) {
-    serverKeyPair = crypto.generateKeyPairSync('rsa', {
-      modulusLength: 2048,
-      publicKeyEncoding: {
-        type: 'spki',
-        format: 'pem',
-      },
-      privateKeyEncoding: {
-        type: 'pkcs8',
-        format: 'pem',
-      },
-    });
+function unescapePem(value: string): string {
+  return value.includes('\\n') ? value.replace(/\\n/g, '\n') : value;
+}
+
+function splitPemPair(text: string): { privateKey: string; publicKey: string } | null {
+  const priv = text.match(/-----BEGIN [A-Z ]*PRIVATE KEY-----[\s\S]*?-----END [A-Z ]*PRIVATE KEY-----/);
+  const pub = text.match(/-----BEGIN PUBLIC KEY-----[\s\S]*?-----END PUBLIC KEY-----/);
+  if (!priv || !pub) return null;
+  return { privateKey: `${priv[0]}\n`, publicKey: `${pub[0]}\n` };
+}
+
+/** Reads a persisted keypair from the environment or from disk, if there is one. */
+export function readPersistedKeyPair(filePath: string = SERVER_KEY_PATH): { privateKey: string; publicKey: string } | null {
+  const envPrivate = process.env.ZEROLEAK_RSA_PRIVATE_KEY;
+  const envPublic = process.env.ZEROLEAK_RSA_PUBLIC_KEY;
+  if (envPrivate && envPublic) {
+    return { privateKey: unescapePem(envPrivate), publicKey: unescapePem(envPublic) };
   }
+  try {
+    const onDisk = fs.readFileSync(filePath, 'utf8');
+    const pair = splitPemPair(onDisk);
+    if (pair) return pair;
+    console.warn(`[ZeroLeak Crypto] ${filePath} holds no usable RSA keypair; generating a new one.`);
+  } catch {
+    /* first run: nothing persisted yet */
+  }
+  return null;
+}
+
+function generateServerKeyPair(): crypto.KeyPairSyncResult<string, string> {
+  return crypto.generateKeyPairSync('rsa', {
+    modulusLength: 2048,
+    publicKeyEncoding: {
+      type: 'spki',
+      format: 'pem',
+    },
+    privateKeyEncoding: {
+      type: 'pkcs8',
+      format: 'pem',
+    },
+  });
+}
+
+/**
+ * Writes the keypair once and only once.
+ *
+ * `wx` means a second process starting at the same moment loses the race and
+ * reads the file the first one wrote, instead of the last writer silently
+ * replacing a key that papers were already encrypted against.
+ */
+function persistServerKeyPair(pair: crypto.KeyPairSyncResult<string, string>, filePath: string): void {
+  if (process.env.ZEROLEAK_RSA_PRIVATE_KEY) return; // env-managed: nothing to write
+  try {
+    fs.writeFileSync(filePath, `${pair.privateKey}${pair.publicKey}`, { mode: 0o600, flag: 'wx' });
+    console.log(`[ZeroLeak Crypto] Persisted the server RSA keypair to ${filePath}`);
+  } catch (error: any) {
+    if (error?.code === 'EEXIST') return;
+    console.warn(
+      `[ZeroLeak Crypto] Could not persist the server keypair (${error?.message || error}); papers encrypted in this run will not be readable after a restart.`
+    );
+  }
+}
+
+export function getOrCreateServerKeyPair(): crypto.KeyPairSyncResult<string, string> {
+  if (serverKeyPair) return serverKeyPair;
+
+  const persisted = readPersistedKeyPair();
+  if (persisted) {
+    serverKeyPair = persisted;
+    return serverKeyPair;
+  }
+
+  const generated = generateServerKeyPair();
+  persistServerKeyPair(generated, SERVER_KEY_PATH);
+  // Another process may have created the file while this one was generating.
+  serverKeyPair = readPersistedKeyPair() || generated;
   return serverKeyPair;
+}
+
+/** Unwraps the per-paper AES key with the server private key. Throws on a mismatch. */
+function unwrapAesKey(encryptedKeyRSA: string): Buffer {
+  return crypto.privateDecrypt(
+    {
+      key: getOrCreateServerKeyPair().privateKey,
+      padding: crypto.constants.RSA_PKCS1_OAEP_PADDING,
+      oaepHash: 'sha256',
+    },
+    Buffer.from(encryptedKeyRSA, 'base64')
+  );
+}
+
+/**
+ * Whether this server can still open a stored paper.
+ *
+ * False means the paper was sealed by a different server key - typically a
+ * process that exited before the keypair was ever persisted - and has to be
+ * re-sealed from its stored question composition before it can be viewed or
+ * printed.
+ */
+export function canDecryptExamPaper(encryptedPayload: Pick<EncryptedPaperPayload, 'encryptedKeyRSA'>): boolean {
+  try {
+    unwrapAesKey(encryptedPayload.encryptedKeyRSA);
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 export interface EncryptedPaperPayload {
@@ -80,17 +191,7 @@ export function encryptExamPaper(plaintextData: string): {
 export function decryptExamPaper(
   encryptedPayload: EncryptedPaperPayload
 ): string {
-  const keyPair = getOrCreateServerKeyPair();
-  const encryptedKeyBuffer = Buffer.from(encryptedPayload.encryptedKeyRSA, 'base64');
-
-  const decryptedAesKey = crypto.privateDecrypt(
-    {
-      key: keyPair.privateKey,
-      padding: crypto.constants.RSA_PKCS1_OAEP_PADDING,
-      oaepHash: 'sha256',
-    },
-    encryptedKeyBuffer
-  );
+  const decryptedAesKey = unwrapAesKey(encryptedPayload.encryptedKeyRSA);
 
   const iv = Buffer.from(encryptedPayload.iv, 'hex');
   const authTag = Buffer.from(encryptedPayload.authTag, 'hex');

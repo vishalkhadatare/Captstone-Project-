@@ -280,6 +280,60 @@ export function planAuthNavigation(rawUrl: string): AuthNavigationPlan {
 }
 
 // ---------------------------------------------------------------------------
+// Recovery inside the streamed real browser
+// ---------------------------------------------------------------------------
+
+/**
+ * Which sign-in actions the streamed panel should offer, for the page the real
+ * browser is on.
+ *
+ * Why this exists: in browser mode the panel draws a real Chromium that is
+ * controlled from the server (`electron/browserHost.cjs`), and Prism's own
+ * "Continue with OpenAI" button is the only sign-in control on the page. When
+ * that button's window does not open, the user has nothing left to click -
+ * and while a stream is live the panel hides its own controls (they describe
+ * the iframe path), so there is no fallback at all.
+ *
+ * The actions offered are the ones the desktop shell already uses:
+ *
+ *   sign in → `OPENAI_GOOGLE_SIGN_IN_URL`, the route measured to hand straight
+ *             over to Google with OpenAI's own client id. It runs in the SAME
+ *             real browser, so it writes the session Prism reads - no popup, no
+ *             iframe and no separate cookie jar.
+ *   back    → Prism itself, so the freshly established session is picked up.
+ *
+ * Deliberately no URL is synthesised: an authorize request forged here would be
+ * exactly the auth bypass this module exists to avoid.
+ */
+export interface StreamedSignInActions {
+  /** Offer "sign in with Google" — true unless a provider flow is already running. */
+  offerSignIn: boolean;
+  /** Offer "back to Prism" — true whenever the browser has left Prism. */
+  offerBackToPrism: boolean;
+  /** Where each action navigates to. Empty when the action is not offered. */
+  signInUrl: string;
+  backUrl: string;
+}
+
+export function streamedSignInActions(rawUrl: string): StreamedSignInActions {
+  const url = parseHttpUrl(rawUrl);
+  if (!url) {
+    // Nothing known about the page yet (a host still warming up): the honest
+    // offer is sign-in, with no "back" to a page we cannot see.
+    return { offerSignIn: true, offerBackToPrism: false, signInUrl: OPENAI_GOOGLE_SIGN_IN_URL, backUrl: '' };
+  }
+
+  const inProviderFlow = isOAuthNavigation(url);
+  const onPrism = isPrismHost(url);
+  return {
+    offerSignIn: !inProviderFlow,
+    offerBackToPrism: !onPrism,
+    signInUrl: inProviderFlow ? '' : OPENAI_GOOGLE_SIGN_IN_URL,
+    backUrl: onPrism ? '' : PRISM_SIGN_IN_URL,
+  };
+}
+
+// ---------------------------------------------------------------------------
 // Logging (development only, credentials never logged)
 // ---------------------------------------------------------------------------
 
