@@ -828,3 +828,20 @@ html.dark .cyber-mesh-bg div[class*="bg-emerald-950"] span {
   }
 }
 
+/* Netlify injects its "Powered by Netlify" attribution pill into every page
+   served on free deployments (an iframe appended to <body> after load). Hide
+   it on all pages; cover the current and historical element shapes. */
+#netlify-badge-iframe,
+#netlify-badge,
+iframe[title="Powered by Netlify"],
+iframe[src*="netlify-badge"],
+iframe[src*="powered-by-netlify"],
+a[data-netlify-badge] {
+  display: none !important;
+  visibility: hidden !important;
+  opacity: 0 !important;
+  width: 0 !important;
+  height: 0 !important;
+  pointer-events: none !important;
+}
+
