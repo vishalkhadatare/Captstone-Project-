@@ -129,34 +129,32 @@ function detectFacesUsingCanvas(video: HTMLVideoElement): FaceDetectionResult {
         const g = data[idx + 1];
         const b = data[idx + 2];
 
-        // Normalized RGB skin tone detector
+        // Robust multi-spectrum skin model (ISO/IEC YCbCr + Normalized RGB)
+        const Y = 0.299 * r + 0.587 * g + 0.114 * b;
+        const Cb = 128 - 0.168736 * r - 0.331264 * g + 0.5 * b;
+        const Cr = 128 + 0.5 * r - 0.418688 * g - 0.081312 * b;
+
+        const isYCbCrSkin = Y > 25 && Cb >= 75 && Cb <= 140 && Cr >= 125 && Cr <= 185;
+
         const sum = r + g + b;
-        if (sum > 70) {
-          const nr = r / sum;
-          const ng = g / sum;
+        const nr = sum > 0 ? r / sum : 0;
+        const ng = sum > 0 ? g / sum : 0;
+        const isRgbSkin = sum > 50 && nr > 0.32 && nr < 0.62 && ng > 0.22 && ng < 0.42 && r >= g && (r - b) >= 0;
 
-          // Standard chromaticity ellipse for human skin tone under indoor/natural lighting
-          const isSkin =
-            nr > 0.35 &&
-            nr < 0.58 &&
-            ng > 0.25 &&
-            ng < 0.38 &&
-            r > g &&
-            g > b &&
-            Math.abs(r - g) > 12;
+        const isSkin = isYCbCrSkin || isRgbSkin;
 
-          if (isSkin) {
-            skinGrid[gy * gridW + gx] = 1;
-            totalSkinPixels++;
-            sumX += gx;
-            sumY += gy;
-          }
+        if (isSkin) {
+          skinGrid[gy * gridW + gx] = 1;
+          totalSkinPixels++;
+          sumX += gx;
+          sumY += gy;
         }
       }
     }
 
-    const minSkinThreshold = (gridW * gridH) * 0.04; // At least 4% of frame is face/skin
-    const maxSkinThreshold = (gridW * gridH) * 0.70; // More than 70% is likely camera covered/glare
+    // Adaptive threshold: at least 1.5% of frame (allows normal distance and diverse conditions)
+    const minSkinThreshold = Math.max(12, (gridW * gridH) * 0.015);
+    const maxSkinThreshold = (gridW * gridH) * 0.85;
 
     if (totalSkinPixels < minSkinThreshold) {
       return {
