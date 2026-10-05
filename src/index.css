@@ -50,8 +50,8 @@ html {
 body {
   margin: 0;
   min-width: 320px;
-  background: #06110F;
-  color: #F4F8F7;
+  background: #F5F8F7;
+  color: #172A35;
   font-feature-settings: "cv02", "cv03", "cv04", "cv11";
 }
 

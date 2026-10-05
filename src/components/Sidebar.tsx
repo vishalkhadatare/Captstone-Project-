@@ -216,23 +216,23 @@ export const Sidebar: React.FC<SidebarProps> = ({
   const sections = getNavSections();
 
   return (
-    <aside className="w-full lg:w-[260px] bg-[#081715] border-r border-white/[0.08] flex flex-col justify-between shrink-0 shadow-[4px_0_24px_rgba(0,0,0,0.5)] z-20">
+    <aside className="w-full lg:w-[250px] bg-white border-r border-[#E5ECE9] flex flex-col justify-between shrink-0 shadow-[2px_0_12px_rgba(0,0,0,0.02)] z-20">
       <div className="p-4 space-y-5 overflow-y-auto">
         {/* Header: ZEROLEAK with System Secure indicator */}
-        <div className="p-3.5 rounded-xl bg-[#0D211E] border border-white/[0.08] relative overflow-hidden">
+        <div className="p-3.5 rounded-xl bg-[#F8FAFA] border border-[#E5ECE9] relative overflow-hidden">
           <div className="flex items-center justify-between">
-            <span className="text-[11px] font-mono font-bold tracking-wider text-[#F4F8F7]">
+            <span className="text-[11px] font-mono font-black tracking-wider text-[#172A35]">
               ZEROLEAK
             </span>
-            <span className="inline-flex items-center gap-1 text-[9px] font-mono font-semibold text-[#00D68F] bg-[#00D68F]/10 px-2 py-0.5 rounded-full border border-[#00D68F]/20">
-              <span className="w-1.5 h-1.5 rounded-full bg-[#00D68F] animate-pulse" />
+            <span className="inline-flex items-center gap-1.5 text-[9px] font-mono font-bold text-[#008A63] bg-[#E5F8F1] px-2 py-0.5 rounded-full border border-[#B8EBD6]">
+              <span className="w-1.5 h-1.5 rounded-full bg-[#00B982] animate-pulse" />
               SYSTEM SECURE
             </span>
           </div>
 
-          <div className="mt-2 pt-2 border-t border-white/[0.06] flex items-center justify-between text-[10px] text-[#9AAEAA] font-mono">
+          <div className="mt-2 pt-2 border-t border-[#EDF2F0] flex items-center justify-between text-[10px] text-[#5F7074] font-mono">
             <span className="truncate">{userRole ? userRole.replace(/_/g, ' ') : 'CONTROLLER'}</span>
-            <span className="text-[#00D68F] font-bold">FIPS 140-2</span>
+            <span className="text-[#008A63] font-bold">FIPS 140-2</span>
           </div>
         </div>
 
@@ -240,7 +240,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
         <div className="space-y-4">
           {sections.map(section => (
             <div key={section.title} className="space-y-1">
-              <p className="text-[9.5px] font-mono font-bold text-[#617773] uppercase tracking-wider px-3 py-1">
+              <p className="text-[9.5px] font-mono font-bold text-[#879598] uppercase tracking-wider px-3 py-1">
                 {section.title}
               </p>
               <div className="space-y-0.5">
@@ -254,13 +254,13 @@ export const Sidebar: React.FC<SidebarProps> = ({
                       onClick={() => onSelectSubTab(item.id)}
                       className={`w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-xs font-semibold transition-all relative cursor-pointer ${
                         isActive
-                          ? 'bg-[#0D211E] text-[#00D68F] font-bold border-l-2 border-[#00D68F] shadow-[inset_0_0_12px_rgba(0,214,143,0.06)]'
-                          : 'text-[#9AAEAA] hover:bg-[#102723]/60 hover:text-[#F4F8F7] border-l-2 border-transparent'
+                          ? 'bg-[#E5F8F1] text-[#008A63] font-bold border-l-[3px] border-[#00B982] shadow-2xs'
+                          : 'text-[#53635F] hover:bg-[#F4F8F7] hover:text-[#172A35] border-l-[3px] border-transparent'
                       }`}
                     >
                       <Icon
                         className={`w-4 h-4 shrink-0 transition-colors ${
-                          isActive ? 'text-[#00D68F]' : 'text-[#617773] group-hover:text-[#9AAEAA]'
+                          isActive ? 'text-[#008A63]' : 'text-[#879598] group-hover:text-[#53635F]'
                         }`}
                       />
                       <span className="truncate">{item.label}</span>
@@ -274,11 +274,11 @@ export const Sidebar: React.FC<SidebarProps> = ({
       </div>
 
       {/* Terminal Session & Sign Out Footer */}
-      <div className="p-3.5 border-t border-white/[0.08] bg-[#06110F]/80 space-y-2">
-        <div className="flex items-center justify-between px-2 text-[10px] font-mono text-[#617773]">
+      <div className="p-3.5 border-t border-[#E5ECE9] bg-[#F8FAFA] space-y-2">
+        <div className="flex items-center justify-between px-2 text-[10px] font-mono text-[#879598]">
           <span>TERMINAL SESSION</span>
-          <span className="inline-flex items-center gap-1 text-[#00D68F]">
-            <span className="w-1.5 h-1.5 rounded-full bg-[#00D68F]" />
+          <span className="inline-flex items-center gap-1 text-[#008A63] font-semibold">
+            <span className="w-1.5 h-1.5 rounded-full bg-[#00B982]" />
             BOUND
           </span>
         </div>
@@ -286,7 +286,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
         <button
           type="button"
           onClick={onLogout}
-          className="w-full flex items-center justify-center gap-2 px-3 py-2 rounded-lg text-xs font-semibold text-[#FF5C6C] hover:bg-[#FF5C6C]/10 border border-[#FF5C6C]/20 hover:border-[#FF5C6C]/40 transition-all cursor-pointer"
+          className="w-full flex items-center justify-center gap-2 px-3 py-2 rounded-lg text-xs font-semibold text-[#D64550] bg-white hover:bg-[#FFF0F1] border border-[#FAD1D5] hover:border-[#F7B6BC] transition-all cursor-pointer shadow-2xs"
         >
           <LogOut className="w-3.5 h-3.5" />
           <span>Sign Out of Enclave</span>

@@ -979,40 +979,44 @@ export const ExamManagerWorkspace: React.FC<ExamManagerWorkspaceProps> = ({
           <SecurityStatusBar />
 
           {/* 3. 4 Interactive KPI Stat Cards */}
-          <div className="grid grid-cols-2 lg:grid-cols-4 gap-3.5">
+          <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
             <StatCard
               label="TOTAL EXAMINATIONS"
               count={examinations.length.toString().padStart(2, '0')}
-              description="Active examination configurations"
+              description="Active examinations"
               trend="+2 this month"
               icon={Shield}
+              accentColor="emerald"
               isActive={dashboardCardFilter === 'ALL'}
               onClick={() => setDashboardCardFilter('ALL')}
             />
             <StatCard
               label="QUESTION POOL"
               count={questions.length}
-              description="Total in vault repository"
-              trend="100% Cryptographically Sealed"
+              description="Stored in secure enclave"
+              trend="100% Sealed"
               icon={Database}
+              accentColor="teal"
               isActive={dashboardCardFilter === 'READY'}
               onClick={() => setDashboardCardFilter('READY')}
             />
             <StatCard
               label="VERIFIED QUESTIONS"
               count={verifiedCount}
-              description="Passed AI verification & review"
+              description="Integrity verified"
               trend="98.4% Integrity Index"
               icon={CheckCircle2}
+              accentColor="emerald"
               isActive={dashboardCardFilter === 'VERIFIED'}
               onClick={() => setDashboardCardFilter('VERIFIED')}
             />
             <StatCard
               label="QUARANTINED"
               count={quarantinedCount.toString().padStart(2, '0')}
-              description="Flagged for manual review"
+              description="Review required"
               trend="0 Active Threats"
               icon={AlertTriangle}
+              accentColor="rose"
               isActive={dashboardCardFilter === 'QUARANTINED'}
               onClick={() => setDashboardCardFilter('QUARANTINED')}
             />

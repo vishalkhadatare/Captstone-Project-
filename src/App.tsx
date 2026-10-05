@@ -242,22 +242,25 @@ export function App() {
 
   // Logged-in User Dashboard Workspace
   return (
-    <div className="min-h-screen bg-[#06110F] text-[#F4F8F7] flex flex-col font-['Figtree',sans-serif] selection:bg-[#00D68F] selection:text-[#06110F] relative overflow-x-hidden transition-colors duration-300">
-      {/* Subtle Enterprise Mission-Control Grid & Radial Ambiance */}
+    <div
+      className="min-h-screen text-[#172A35] flex flex-col font-['Figtree',sans-serif] selection:bg-[#00D68F] selection:text-[#06110F] relative overflow-x-hidden transition-colors duration-300"
+      style={{
+        background: 'linear-gradient(135deg, #F7FBFA 0%, #F0F8F5 50%, #F7FAFC 100%)',
+      }}
+    >
+      {/* Subtle Enterprise Ambient Tint & Micro Grid */}
       <div className="fixed inset-0 pointer-events-none z-0">
-        {/* Subtle radial spotlight at top */}
         <div
-          className="absolute top-0 left-1/2 -translate-x-1/2 w-[1200px] h-[550px] opacity-25 blur-[120px]"
+          className="absolute top-0 left-1/2 -translate-x-1/2 w-[1200px] h-[450px] opacity-40 blur-[140px]"
           style={{
-            background: 'radial-gradient(ellipse at 50% 0%, rgba(0, 214, 143, 0.18) 0%, rgba(24, 200, 178, 0.06) 50%, transparent 80%)',
+            background: 'radial-gradient(ellipse at 50% 0%, rgba(0, 214, 143, 0.08) 0%, rgba(24, 200, 178, 0.03) 50%, transparent 80%)',
           }}
         />
-        {/* Engineering Micro Grid */}
         <div
-          className="absolute inset-0 opacity-[0.03]"
+          className="absolute inset-0 opacity-[0.025]"
           style={{
-            backgroundImage: 'linear-gradient(rgba(255, 255, 255, 0.12) 1px, transparent 1px), linear-gradient(90deg, rgba(255, 255, 255, 0.12) 1px, transparent 1px)',
-            backgroundSize: '28px 28px',
+            backgroundImage: 'linear-gradient(#008A63 1px, transparent 1px), linear-gradient(90deg, #008A63 1px, transparent 1px)',
+            backgroundSize: '32px 32px',
           }}
         />
       </div>
@@ -348,18 +351,18 @@ export function App() {
         </main>
       </div>
 
-      {/* Geometric Balance Frosted Glass Footer */}
-      <footer className="h-10 bg-white/50 dark:bg-[#080B11]/50 backdrop-blur-2xl border-t border-slate-200/80 dark:border-white/10 flex items-center justify-between px-6 lg:px-8 text-[11px] text-[#64748B] dark:text-slate-400 font-medium relative z-10">
+      {/* Light Enterprise Security Footer */}
+      <footer className="h-10 bg-white/90 backdrop-blur-md border-t border-[#E5ECE9] flex items-center justify-between px-6 lg:px-8 text-[11px] text-[#5F7074] font-medium relative z-10">
         <div className="flex items-center gap-4">
-          <span className="font-bold text-[#0F172A] dark:text-white uppercase tracking-wider">
+          <span className="font-bold text-[#172A35] uppercase tracking-wider">
             Security: FIPS 140-2 AES-256-GCM / RSA-2048
           </span>
-          <span className="text-slate-300 dark:text-white/20">|</span>
-          <span className="font-mono text-[#475569] dark:text-slate-300">
+          <span className="text-[#CBD8D5]">|</span>
+          <span className="font-mono text-[#5F7074]">
             Immutable Audit Ledger Hash: SHA-256
           </span>
         </div>
-        <p className="text-[#64748B] dark:text-slate-400">ZeroLeak © 2026 Educational Integrity Assurance System</p>
+        <p className="text-[#5F7074]">ZeroLeak © 2026 Educational Integrity Assurance System</p>
       </footer>
     </div>
   );

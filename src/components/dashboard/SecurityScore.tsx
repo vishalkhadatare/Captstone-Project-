@@ -8,24 +8,24 @@ export const SecurityScore: React.FC = () => {
   const strokeDashoffset = circumference - (score / 100) * circumference;
 
   return (
-    <div className="rounded-xl bg-[#0D211E] border border-white/[0.08] p-5 shadow-[0_4px_20px_rgba(0,0,0,0.3)] flex flex-col justify-between space-y-4">
+    <div className="rounded-xl bg-white border border-[#E4ECE9] p-5 shadow-[0_2px_10px_rgba(30,60,50,0.04)] flex flex-col justify-between space-y-4">
       {/* Header */}
-      <div className="flex items-center justify-between pb-3 border-b border-white/[0.06]">
+      <div className="flex items-center justify-between pb-3 border-b border-[#EEF3F1]">
         <div className="flex items-center gap-2">
-          <div className="p-1.5 rounded-lg bg-[#00D68F]/10 text-[#00D68F] border border-[#00D68F]/20">
+          <div className="p-1.5 rounded-lg bg-[#ECFBF5] text-[#008A63] border border-[#B8EBD6]">
             <ShieldCheck className="w-4 h-4" />
           </div>
           <div>
-            <h3 className="text-xs font-mono font-bold uppercase tracking-wider text-[#F4F8F7]">
+            <h3 className="text-xs font-mono font-bold uppercase tracking-wider text-[#172A35]">
               ZEROLEAK SECURITY STATUS
             </h3>
-            <p className="text-[11px] text-[#9AAEAA]">
+            <p className="text-[11px] text-[#5F7074]">
               Real-time cryptographic assurance & compliance
             </p>
           </div>
         </div>
 
-        <span className="px-2 py-0.5 rounded-md text-[9px] font-mono font-bold uppercase tracking-widest text-[#00D68F] bg-[#00D68F]/10 border border-[#00D68F]/25">
+        <span className="px-2 py-0.5 rounded-md text-[9px] font-mono font-bold uppercase tracking-widest text-[#52636B] bg-[#F5F8FA] border border-[#DCE5E8]">
           FIPS 140-2
         </span>
       </div>
@@ -40,7 +40,7 @@ export const SecurityScore: React.FC = () => {
               cx="50"
               cy="50"
               r={radius}
-              className="text-[#132D29]"
+              className="text-[#E7F8F1]"
               strokeWidth="7"
               stroke="currentColor"
               fill="transparent"
@@ -50,7 +50,7 @@ export const SecurityScore: React.FC = () => {
               cx="50"
               cy="50"
               r={radius}
-              className="text-[#00D68F] transition-all duration-1000 ease-out"
+              className="text-[#008A63] transition-all duration-1000 ease-out"
               strokeWidth="7"
               strokeDasharray={circumference}
               strokeDashoffset={strokeDashoffset}
@@ -60,10 +60,10 @@ export const SecurityScore: React.FC = () => {
             />
           </svg>
           <div className="absolute flex flex-col items-center justify-center text-center">
-            <span className="text-2xl font-black text-[#F4F8F7] font-mono leading-none">
+            <span className="text-2xl font-black text-[#172A35] font-mono leading-none">
               {score}%
             </span>
-            <span className="text-[9px] font-mono font-semibold uppercase tracking-wider text-[#9AAEAA] mt-0.5">
+            <span className="text-[9px] font-mono font-semibold uppercase tracking-wider text-[#6B7B78] mt-0.5">
               SCORE
             </span>
           </div>
@@ -71,79 +71,79 @@ export const SecurityScore: React.FC = () => {
 
         {/* High-level status text */}
         <div className="flex-1 space-y-1.5">
-          <div className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md bg-[#00D68F]/10 text-[#00D68F] text-[10px] font-mono font-bold">
-            <span className="w-1.5 h-1.5 rounded-full bg-[#00D68F] animate-pulse" />
-            MAXIMUM RESILIENCE
+          <div className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md bg-[#ECFBF5] text-[#008A63] text-[10px] font-mono font-bold border border-[#B8EBD6]">
+            <span className="w-1.5 h-1.5 rounded-full bg-[#00B982] animate-pulse" />
+            SECURITY STATUS: OPTIMAL
           </div>
-          <p className="text-xs text-[#F4F8F7] font-semibold leading-snug">
-            All cryptographic barriers operational
+          <p className="text-xs text-[#172A35] font-semibold leading-snug">
+            All cryptographic and enclave protections operational
           </p>
-          <p className="text-[11px] text-[#9AAEAA] leading-relaxed">
+          <p className="text-[11px] text-[#5F7074] leading-relaxed">
             Hardware enclave isolation, key derivation, and dual-custody verification pass zero-leak compliance checks.
           </p>
         </div>
       </div>
 
       {/* Metrics Breakdown Grid */}
-      <div className="space-y-2 pt-2 border-t border-white/[0.06] text-xs">
+      <div className="space-y-2 pt-2 border-t border-[#EEF3F1] text-xs">
         {/* Encryption */}
-        <div className="flex items-center justify-between py-1 px-2 rounded-lg bg-[#102723]/60 border border-white/[0.04]">
-          <div className="flex items-center gap-2 text-[#9AAEAA]">
-            <Lock className="w-3.5 h-3.5 text-[#18C8B2]" />
-            <span className="text-[11px]">Hardware Encryption</span>
+        <div className="flex items-center justify-between py-1.5 px-2.5 rounded-lg bg-[#F8FAFA] border border-[#EDF2F0]">
+          <div className="flex items-center gap-2 text-[#364845]">
+            <Lock className="w-3.5 h-3.5 text-[#2474A6]" />
+            <span className="text-[11px] font-medium">Hardware Encryption</span>
           </div>
           <div className="flex items-center gap-2">
-            <span className="text-[10px] font-mono text-[#617773]">AES-256-GCM</span>
-            <span className="text-xs font-mono font-bold text-[#00D68F]">100%</span>
+            <span className="text-[10px] font-mono text-[#879598]">AES-256-GCM</span>
+            <span className="text-xs font-mono font-bold text-[#008A63]">100%</span>
           </div>
         </div>
 
         {/* Question Integrity */}
-        <div className="flex items-center justify-between py-1 px-2 rounded-lg bg-[#102723]/60 border border-white/[0.04]">
-          <div className="flex items-center gap-2 text-[#9AAEAA]">
-            <FileCheck className="w-3.5 h-3.5 text-[#00D68F]" />
-            <span className="text-[11px]">Question Integrity</span>
+        <div className="flex items-center justify-between py-1.5 px-2.5 rounded-lg bg-[#F8FAFA] border border-[#EDF2F0]">
+          <div className="flex items-center gap-2 text-[#364845]">
+            <FileCheck className="w-3.5 h-3.5 text-[#008A63]" />
+            <span className="text-[11px] font-medium">Question Integrity</span>
           </div>
           <div className="flex items-center gap-2">
-            <span className="text-[10px] font-mono text-[#617773]">Zero-Leak Hash</span>
-            <span className="text-xs font-mono font-bold text-[#00D68F]">98%</span>
+            <span className="text-[10px] font-mono text-[#879598]">Zero-Leak Hash</span>
+            <span className="text-xs font-mono font-bold text-[#008A63]">98%</span>
           </div>
         </div>
 
         {/* Access Control */}
-        <div className="flex items-center justify-between py-1 px-2 rounded-lg bg-[#102723]/60 border border-white/[0.04]">
-          <div className="flex items-center gap-2 text-[#9AAEAA]">
-            <Key className="w-3.5 h-3.5 text-[#18C8B2]" />
-            <span className="text-[11px]">Access Control & Binding</span>
+        <div className="flex items-center justify-between py-1.5 px-2.5 rounded-lg bg-[#F8FAFA] border border-[#EDF2F0]">
+          <div className="flex items-center gap-2 text-[#364845]">
+            <Key className="w-3.5 h-3.5 text-[#2474A6]" />
+            <span className="text-[11px] font-medium">Access Control & Binding</span>
           </div>
           <div className="flex items-center gap-2">
-            <span className="text-[10px] font-mono text-[#617773]">ECDSA P-256</span>
-            <span className="text-xs font-mono font-bold text-[#00D68F]">100%</span>
+            <span className="text-[10px] font-mono text-[#879598]">ECDSA P-256</span>
+            <span className="text-xs font-mono font-bold text-[#008A63]">100%</span>
           </div>
         </div>
 
         {/* Audit Coverage */}
-        <div className="flex items-center justify-between py-1 px-2 rounded-lg bg-[#102723]/60 border border-white/[0.04]">
-          <div className="flex items-center gap-2 text-[#9AAEAA]">
-            <Shield className="w-3.5 h-3.5 text-[#4DA3FF]" />
-            <span className="text-[11px]">Audit Ledger Coverage</span>
+        <div className="flex items-center justify-between py-1.5 px-2.5 rounded-lg bg-[#F8FAFA] border border-[#EDF2F0]">
+          <div className="flex items-center gap-2 text-[#364845]">
+            <Shield className="w-3.5 h-3.5 text-[#2474A6]" />
+            <span className="text-[11px] font-medium">Audit Ledger Coverage</span>
           </div>
           <div className="flex items-center gap-2">
-            <span className="text-[10px] font-mono text-[#617773]">Tamper-Proof</span>
-            <span className="text-xs font-mono font-bold text-[#00D68F]">97%</span>
+            <span className="text-[10px] font-mono text-[#879598]">Tamper-Proof</span>
+            <span className="text-xs font-mono font-bold text-[#008A63]">97%</span>
           </div>
         </div>
 
         {/* Threat Detection */}
-        <div className="flex items-center justify-between py-1 px-2 rounded-lg bg-[#102723]/60 border border-white/[0.04]">
-          <div className="flex items-center gap-2 text-[#9AAEAA]">
-            <Eye className="w-3.5 h-3.5 text-[#00D68F]" />
-            <span className="text-[11px]">Threat Detection AI</span>
+        <div className="flex items-center justify-between py-1.5 px-2.5 rounded-lg bg-[#F8FAFA] border border-[#EDF2F0]">
+          <div className="flex items-center gap-2 text-[#364845]">
+            <Eye className="w-3.5 h-3.5 text-[#008A63]" />
+            <span className="text-[11px] font-medium">Threat Detection AI</span>
           </div>
           <div className="flex items-center gap-2">
-            <span className="text-[10px] font-mono text-[#617773]">Continuous</span>
-            <span className="inline-flex items-center gap-1 text-[11px] font-mono font-bold text-[#00D68F]">
-              <span className="w-1.5 h-1.5 rounded-full bg-[#00D68F] animate-pulse" />
+            <span className="text-[10px] font-mono text-[#879598]">Continuous</span>
+            <span className="inline-flex items-center gap-1 text-[11px] font-mono font-bold text-[#008A63]">
+              <span className="w-1.5 h-1.5 rounded-full bg-[#00B982] animate-pulse" />
               Active
             </span>
           </div>
