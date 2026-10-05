@@ -43,10 +43,12 @@ interface QuickAccount {
   role: UserRole;
   title: string;
   badge: string;
+  tier: string;
   email: string;
   password: string;
   description: string;
   icon: React.ReactNode;
+  iconBg: string;
   accent: string;
 }
 
@@ -55,51 +57,61 @@ const DEMO_ACCOUNTS: QuickAccount[] = [
     role: 'ORG_OWNER',
     title: 'Organization Owner & Registrar',
     badge: 'Authority Head',
+    tier: 'Tier 1: Root Governance',
     email: 'owner@test.com',
     password: 'owner123',
     description: 'Institution accreditation, document uploads, manager delegation, security keys.',
-    icon: <Building2 className="w-4 h-4 text-amber-700" />,
-    accent: 'border-amber-200 bg-amber-50/50 hover:border-amber-400',
+    icon: <Building2 className="w-4 h-4 text-amber-600" />,
+    iconBg: 'bg-[#FFF5E7] text-amber-600 border border-amber-200/80',
+    accent: 'border-amber-200/70',
   },
   {
     role: 'EXAM_MANAGER',
     title: 'Controller of Examinations',
     badge: 'Paper Authority',
+    tier: 'Tier 2: Exam Synthesis',
     email: 'manager@nbte.edu.in',
     password: 'Password123!',
     description: 'Exam scheduling (MCQ & Theory), AI blueprint analysis, AES-256 paper generation.',
-    icon: <UserCheck className="w-4 h-4 text-emerald-700" />,
-    accent: 'border-emerald-200 bg-emerald-50/50 hover:border-emerald-400',
+    icon: <UserCheck className="w-4 h-4 text-emerald-600" />,
+    iconBg: 'bg-[#EAF9F3] text-emerald-600 border border-emerald-200/80',
+    accent: 'border-emerald-200/70',
   },
   {
     role: 'TRANSLATOR',
     title: 'Linguistic Translator',
     badge: 'Multilingual Lead',
+    tier: 'Tier 3: Linguistic Seal',
     email: 'translator@nbte.edu.in',
     password: 'Password123!',
     description: 'Translate questions into Hindi, Marathi, Gujarati, Tamil, etc. with AI assistant.',
-    icon: <Languages className="w-4 h-4 text-purple-700" />,
-    accent: 'border-purple-200 bg-purple-50/50 hover:border-purple-400',
+    icon: <Languages className="w-4 h-4 text-purple-600" />,
+    iconBg: 'bg-[#F4F0FF] text-purple-600 border border-purple-200/80',
+    accent: 'border-purple-200/70',
   },
   {
     role: 'CENTRE_OPERATOR',
     title: 'Centre Superintendent & Operator',
     badge: 'Secure Print',
+    tier: 'Tier 4: Time-Locked Decrypt',
     email: 'operator@centre101.edu.in',
     password: 'Password123!',
     description: 'Time-locked decryption, authorized copy printing with dynamic forensic watermark.',
-    icon: <Printer className="w-4 h-4 text-teal-700" />,
-    accent: 'border-teal-200 bg-teal-50/50 hover:border-teal-400',
+    icon: <Printer className="w-4 h-4 text-sky-600" />,
+    iconBg: 'bg-[#EDF8FC] text-sky-600 border border-sky-200/80',
+    accent: 'border-sky-200/70',
   },
   {
     role: 'AUDITOR',
     title: 'Chief Vigilance & Security Auditor',
     badge: 'Independent Audit',
+    tier: 'Tier 1: Read-Only Audit Ledger',
     email: 'auditor@gov-audit.gov.in',
     password: 'Password123!',
     description: 'Tamper-proof blockchain audit ledger, security incident monitoring & quarantine logs.',
-    icon: <ShieldAlert className="w-4 h-4 text-rose-700" />,
-    accent: 'border-rose-200 bg-rose-50/50 hover:border-rose-400',
+    icon: <ShieldAlert className="w-4 h-4 text-indigo-600" />,
+    iconBg: 'bg-[#EEF2FF] text-indigo-600 border border-indigo-200/80',
+    accent: 'border-indigo-200/70',
   },
 ];
 
@@ -300,96 +312,100 @@ export const LoginPage: React.FC<LoginPageProps> = ({
   };
 
   return (
-    <div className="min-h-screen cyber-mesh-bg relative flex flex-col justify-center py-10 px-4 sm:px-6 lg:px-8 font-['Figtree',sans-serif] overflow-hidden selection:bg-[#00cc5f] selection:text-black">
-      {/* Background Ambient Glowing Wave Curves */}
-      <div
-        className="fixed inset-0 pointer-events-none overflow-hidden z-0"
-        style={{
-          filter: 'blur(12px) drop-shadow(0 0 25px rgba(0,255,119,0.25))',
-          opacity: 0.22,
-        }}
-      >
+    <div className="min-h-screen bg-[#F7FAFA] relative flex flex-col justify-center py-8 sm:py-12 px-4 sm:px-6 lg:px-8 font-['Figtree',sans-serif] overflow-x-hidden text-[#142B38] selection:bg-[#00A878] selection:text-white">
+      {/* Soft Light Radial Ambient Gradients (No heavy neon clouds) */}
+      <div className="fixed inset-0 pointer-events-none overflow-hidden z-0">
         <div
-          className="absolute inset-0 w-full h-full"
+          className="absolute -top-[15%] -left-[10%] w-[55vw] h-[55vw] rounded-full pointer-events-none"
           style={{
-            backgroundImage: 'url(/curve-secondary.svg)',
-            backgroundRepeat: 'repeat',
-            backgroundPosition: '0 0',
+            background: 'radial-gradient(circle, rgba(0, 168, 120, 0.055) 0%, transparent 70%)',
           }}
         />
         <div
-          className="absolute inset-0 w-full h-full"
+          className="absolute top-[5%] -right-[10%] w-[50vw] h-[50vw] rounded-full pointer-events-none"
           style={{
-            backgroundImage: 'url(/curve-primary.svg)',
-            backgroundRepeat: 'repeat',
-            backgroundPosition: '0 0',
+            background: 'radial-gradient(circle, rgba(0, 184, 217, 0.04) 0%, transparent 70%)',
+          }}
+        />
+        <div
+          className="absolute -bottom-[20%] left-[20%] w-[60vw] h-[60vw] rounded-full pointer-events-none"
+          style={{
+            background: 'radial-gradient(circle, rgba(40, 120, 216, 0.025) 0%, transparent 70%)',
+          }}
+        />
+        {/* Subtle Technical Dot Grid (24px x 24px, faint opacity) */}
+        <div
+          className="absolute inset-0 w-full h-full pointer-events-none opacity-[0.035]"
+          style={{
+            backgroundImage: 'radial-gradient(#64748B 1.2px, transparent 1.2px)',
+            backgroundSize: '24px 24px',
           }}
         />
       </div>
 
-      {/* Background Ambient Decorative Lights */}
-      <div className="cyber-grid pointer-events-none absolute inset-0 opacity-40" />
-      <div className="absolute -top-32 -left-32 w-96 h-96 bg-emerald-500/10 rounded-full blur-3xl pointer-events-none" />
-      <div className="absolute top-1/3 -right-32 w-96 h-96 bg-teal-500/10 rounded-full blur-3xl pointer-events-none" />
-      <div className="absolute -bottom-32 left-1/3 w-96 h-96 bg-blue-500/10 rounded-full blur-3xl pointer-events-none" />
-
-      <div className="max-w-6xl mx-auto w-full relative z-10">
+      <div className="max-w-[1260px] mx-auto w-full relative z-10">
         {/* Top Enclave Bar */}
         <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 mb-6">
           <button
             onClick={onBackToLanding}
-            className="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-full bg-white/70 dark:bg-white/[0.05] border border-slate-200/90 dark:border-white/10 text-xs font-semibold text-slate-600 dark:text-slate-300 hover:text-emerald-500 hover:border-emerald-300 shadow-xs backdrop-blur-xl transition-all group cursor-pointer"
+            className="inline-flex items-center gap-2 h-9 px-3.5 rounded-full bg-white/90 hover:bg-white border border-[#D7E3E7] hover:border-emerald-300 text-xs font-semibold text-[#142B38] shadow-2xs backdrop-blur-md transition-all group cursor-pointer"
           >
-            <ArrowLeft className="w-4 h-4 transition-transform group-hover:-translate-x-1" />
+            <ArrowLeft className="w-4 h-4 transition-transform group-hover:-translate-x-1 text-slate-500 group-hover:text-emerald-600" />
             <span>Back to Portal Overview</span>
           </button>
 
-          <div className="inline-flex items-center gap-2.5 px-3.5 py-1.5 rounded-full bg-emerald-50/90 dark:bg-[#00cc5f]/10 border border-emerald-200/90 dark:border-[#00cc5f]/30 text-[11px] font-bold text-emerald-900 dark:text-[#00cc5f] shadow-2xs backdrop-blur-xl">
+          <div className="inline-flex items-center gap-2.5 px-3.5 py-1.5 rounded-full bg-[#ECFAF4] border border-[#BFE9D8] text-[11px] font-mono font-bold text-[#008A63] shadow-2xs">
             <span className="relative flex h-2 w-2">
-              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
-              <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-600 dark:bg-[#00cc5f]"></span>
+              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-[#00C98B] opacity-75"></span>
+              <span className="relative inline-flex rounded-full h-2 w-2 bg-[#00A878]"></span>
             </span>
             <span className="tracking-wide">FIPS 140-2 LEVEL 4 VALIDATED ENCLAVE</span>
-            <span className="text-emerald-300 dark:text-emerald-500/40">|</span>
-            <span className="font-mono text-emerald-700 dark:text-[#00cc5f] text-[10px]">AES-256-GCM</span>
+            <span className="text-emerald-300">|</span>
+            <span className="font-mono text-[#008A63] text-[10px]">AES-256-GCM</span>
           </div>
         </div>
 
-        <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-start">
-          {/* Left Column: Login Form & Terminal Binding */}
+        <div className="grid grid-cols-1 lg:grid-cols-12 gap-7 lg:gap-8 items-start">
+          {/* Left Column: Login Form & Terminal Binding (~44%) */}
           <div className="lg:col-span-5 space-y-4">
-            <div className="bg-white/80 dark:bg-[#0B0F17]/65 backdrop-blur-2xl border border-slate-200/90 dark:border-white/15 rounded-3xl p-6 sm:p-8 shadow-[0_20px_50px_-10px_rgba(15,23,42,0.07)] dark:shadow-[0_25px_60px_rgba(0,0,0,0.8),0_0_30px_rgba(0,204,95,0.1)] space-y-5 relative overflow-hidden">
-              {/* Top Accent Gradient Bar */}
-              <div className="absolute top-0 left-0 right-0 h-1.5 bg-gradient-to-r from-emerald-600 via-teal-500 to-cyan-500" />
+            <div className="bg-white border border-[#DCE7EA] rounded-[18px] p-7 sm:p-8 shadow-[0_12px_35px_rgba(30,70,80,0.08)] space-y-5 relative overflow-hidden">
+              {/* Top Accent Gradient Line */}
+              <div className="absolute top-0 left-0 right-0 h-[2.5px] bg-gradient-to-r from-[#00A878] via-[#00B8D9] to-[#2878D8]" />
 
-              <div className="space-y-2">
-                <div className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-emerald-50 dark:bg-[#00cc5f]/15 text-emerald-800 dark:text-[#00cc5f] border border-emerald-200 dark:border-[#00cc5f]/30 text-[10px] font-bold uppercase tracking-wider backdrop-blur-md">
-                  <ShieldCheck className="w-3.5 h-3.5 text-emerald-600 dark:text-[#00cc5f]" />
-                  <span>Authentication Gateway</span>
+              <div className="space-y-2.5">
+                <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-[#EAF9F3] text-[#008A63] border border-[#BDE8D7] text-[10.5px] font-mono font-bold uppercase tracking-wider">
+                  <ShieldCheck className="w-3.5 h-3.5 text-[#00A878]" />
+                  <span>AUTHENTICATION GATEWAY</span>
                 </div>
 
                 <div className="flex items-center gap-3.5 pt-1">
-                  <ZeroLeakLogo variant="icon" size="sm" imgHeightClass="h-10 w-10" />
+                  <ZeroLeakLogo variant="icon" size="sm" imgHeightClass="h-11 w-11 shrink-0" />
                   <div>
-                    <h1 className="text-xl font-black text-slate-950 dark:text-white tracking-tight leading-tight">
+                    <h1 className="text-[23px] sm:text-[25px] font-black text-[#142B38] tracking-tight leading-tight">
                       ZeroLeak Enclave Sign In
                     </h1>
-                    <p className="text-[11px] text-slate-500 dark:text-slate-400 font-medium leading-normal mt-0.5">
+                    <p className="text-[13px] text-[#6B7D84] font-medium leading-normal mt-0.5">
                       National High-Assurance Examination Network
                     </p>
                   </div>
                 </div>
+
+                {/* Connection Verified Indicator */}
+                <div className="flex items-center gap-1.5 pt-0.5 text-[11px] font-mono font-bold text-[#00A878]">
+                  <span className="h-1.5 w-1.5 rounded-full bg-[#00A878] inline-block animate-pulse"></span>
+                  <span>ENCLAVE CONNECTION VERIFIED</span>
+                </div>
               </div>
 
               {errorMessage && (
-                <div className="p-3.5 bg-rose-50/90 border border-rose-200 text-rose-800 text-xs rounded-2xl flex items-start gap-2.5 shadow-2xs animate-in fade-in">
+                <div className="p-3.5 bg-rose-50 border border-rose-200 text-rose-800 text-xs rounded-xl flex items-start gap-2.5 shadow-2xs animate-in fade-in">
                   <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5 text-rose-600" />
                   <span className="leading-relaxed font-medium">{errorMessage}</span>
                 </div>
               )}
 
               {deviceBlock && (
-                <div className="p-3.5 bg-amber-50/90 border border-amber-300 text-amber-900 text-xs rounded-2xl space-y-2.5 shadow-2xs animate-in fade-in">
+                <div className="p-3.5 bg-amber-50 border border-amber-200 text-amber-900 text-xs rounded-xl space-y-2.5 shadow-2xs animate-in fade-in">
                   <div className="flex items-start gap-2.5">
                     <ShieldAlert className="w-4 h-4 shrink-0 mt-0.5 text-amber-600" />
                     <span className="leading-relaxed font-medium">
@@ -402,7 +418,7 @@ export const LoginPage: React.FC<LoginPageProps> = ({
                     type="button"
                     onClick={handleRecoverDevice}
                     disabled={loading}
-                    className="w-full px-3 py-2 rounded-xl bg-amber-700 hover:bg-amber-600 disabled:opacity-50 text-white font-bold text-xs inline-flex items-center justify-center gap-2 transition-all cursor-pointer"
+                    className="w-full px-3 py-2 rounded-xl bg-amber-700 hover:bg-amber-600 disabled:opacity-50 text-white font-bold text-xs inline-flex items-center justify-center gap-2 transition-all cursor-pointer shadow-xs"
                   >
                     <RefreshCw className={`w-3.5 h-3.5 ${loading ? 'animate-spin' : ''}`} />
                     <span>{deviceBlock === 'REVOKED' ? 'Bind This Workstation Again' : 'Request Device Replacement'}</span>
@@ -417,32 +433,32 @@ export const LoginPage: React.FC<LoginPageProps> = ({
               )}
 
               {replacementStatus && (
-                <div className="p-3.5 bg-emerald-50/90 border border-emerald-200 text-emerald-900 text-xs rounded-2xl flex items-start gap-2.5 shadow-2xs animate-in fade-in">
-                  <CheckCircle2 className="w-4 h-4 shrink-0 mt-0.5 text-emerald-600" />
+                <div className="p-3.5 bg-[#EAF9F3] border border-[#BDE8D7] text-[#008A63] text-xs rounded-xl flex items-start gap-2.5 shadow-2xs animate-in fade-in">
+                  <CheckCircle2 className="w-4 h-4 shrink-0 mt-0.5 text-[#00A878]" />
                   <span className="leading-relaxed font-medium">{replacementStatus}</span>
                 </div>
               )}
 
-              {/* Hardware Device Signature Card */}
-              <div className="p-3.5 rounded-2xl bg-slate-900 text-slate-100 border border-slate-800 text-[11px] flex items-center justify-between shadow-inner">
+              {/* Hardware Device Signature Card (LIGHT ENTERPRISE CARD) */}
+              <div className="p-3.5 rounded-xl bg-[#F4F8FA] text-[#142B38] border border-[#DCE7EA] text-[11px] flex items-center justify-between shadow-2xs">
                 <div className="flex items-center gap-2.5 min-w-0">
-                  <div className="p-2 bg-emerald-950/80 rounded-xl border border-emerald-500/40 text-emerald-400 shrink-0">
+                  <div className="p-2 bg-[#E6F5EF] rounded-xl border border-[#BFE9D8] text-[#00A878] shrink-0">
                     <Laptop className="w-4 h-4" />
                   </div>
                   <div className="min-w-0">
-                    <span className="font-bold block text-slate-200 text-xs">Workstation Terminal Bound</span>
+                    <span className="font-bold block text-[#142B38] text-xs">Workstation Terminal Bound</span>
                     <button
                       type="button"
                       onClick={handleCopyFp}
                       title="Click to copy workstation fingerprint"
-                      className="font-mono text-[10px] text-slate-400 hover:text-emerald-300 transition-colors flex items-center gap-1 truncate text-left cursor-pointer"
+                      className="font-mono text-[10.5px] text-[#6B7D84] hover:text-[#00A878] transition-colors flex items-center gap-1.5 truncate text-left cursor-pointer"
                     >
                       <span className="truncate">{deviceFp}</span>
-                      {copiedFp ? <Check className="w-3 h-3 text-emerald-400 shrink-0" /> : <Copy className="w-3 h-3 shrink-0" />}
+                      {copiedFp ? <Check className="w-3 h-3 text-[#00A878] shrink-0" /> : <Copy className="w-3 h-3 shrink-0 text-[#8CA0A8]" />}
                     </button>
                   </div>
                 </div>
-                <span className="inline-flex items-center px-2.5 py-1 rounded-full text-[10px] font-bold bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 shrink-0">
+                <span className="inline-flex items-center px-2.5 py-1 rounded-full text-[10px] font-mono font-bold bg-[#EAF9F3] text-[#008A63] border border-[#BDE8D7] shrink-0">
                   ATTESTED
                 </span>
               </div>
@@ -450,11 +466,11 @@ export const LoginPage: React.FC<LoginPageProps> = ({
               {/* Primary Login Form */}
               <form onSubmit={e => handleLogin(e)} className="space-y-4 text-xs">
                 <div>
-                  <label className="block text-slate-700 font-bold mb-1.5">
+                  <label className="block text-[#142B38] font-bold text-xs mb-1.5">
                     Institutional Email / User Identifier *
                   </label>
-                  <div className="relative">
-                    <div className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-slate-400">
+                  <div className="relative h-[52px] rounded-[10px] bg-[#FAFCFD] border border-[#D7E2E6] focus-within:border-[#00A878] focus-within:ring-2 focus-within:ring-[#00A878]/15 focus-within:bg-white transition-all flex items-center">
+                    <div className="pl-3.5 flex items-center pointer-events-none text-[#8CA0A8]">
                       <Mail className="w-4 h-4" />
                     </div>
                     <input
@@ -463,26 +479,26 @@ export const LoginPage: React.FC<LoginPageProps> = ({
                       onChange={e => setIdentifier(e.target.value)}
                       placeholder="e.g. owner@test.com or manager@nbte.edu.in"
                       required
-                      className="w-full pl-10 pr-3.5 py-2.5 rounded-xl bg-slate-50/80 border border-slate-200 text-slate-900 focus:bg-white focus:border-emerald-600 focus:ring-2 focus:ring-emerald-500/20 focus:outline-hidden text-xs transition-all font-medium"
+                      className="w-full h-full pl-3 pr-3.5 bg-transparent border-0 text-[#142B38] placeholder-[#9AAAB0] text-xs font-medium focus:outline-hidden"
                     />
                   </div>
                 </div>
 
                 <div>
                   <div className="flex items-center justify-between mb-1.5">
-                    <label className="block text-slate-700 font-bold">
+                    <label className="block text-[#142B38] font-bold text-xs">
                       Password / Passphrase *
                     </label>
                     <button
                       type="button"
                       onClick={() => setShowForgotModal(true)}
-                      className="text-[11px] text-emerald-700 hover:text-emerald-900 font-bold hover:underline cursor-pointer"
+                      className="text-[11.5px] text-[#008A63] hover:text-[#006F4F] font-bold hover:underline cursor-pointer"
                     >
                       Forgot Passphrase?
                     </button>
                   </div>
-                  <div className="relative">
-                    <div className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-slate-400">
+                  <div className="relative h-[52px] rounded-[10px] bg-[#FAFCFD] border border-[#D7E2E6] focus-within:border-[#00A878] focus-within:ring-2 focus-within:ring-[#00A878]/15 focus-within:bg-white transition-all flex items-center">
+                    <div className="pl-3.5 flex items-center pointer-events-none text-[#8CA0A8]">
                       <Lock className="w-4 h-4" />
                     </div>
                     <input
@@ -491,12 +507,12 @@ export const LoginPage: React.FC<LoginPageProps> = ({
                       onChange={e => setPassword(e.target.value)}
                       placeholder="••••••••••••"
                       required
-                      className="w-full pl-10 pr-10 py-2.5 rounded-xl bg-slate-50/80 border border-slate-200 text-slate-900 focus:bg-white focus:border-emerald-600 focus:ring-2 focus:ring-emerald-500/20 focus:outline-hidden text-xs transition-all font-medium"
+                      className="w-full h-full pl-3 pr-10 bg-transparent border-0 text-[#142B38] placeholder-[#9AAAB0] text-xs font-medium focus:outline-hidden"
                     />
                     <button
                       type="button"
                       onClick={() => setShowPassword(!showPassword)}
-                      className="absolute inset-y-0 right-0 pr-3 flex items-center text-slate-400 hover:text-slate-600 cursor-pointer"
+                      className="absolute inset-y-0 right-0 pr-3.5 flex items-center text-[#8CA0A8] hover:text-[#142B38] cursor-pointer"
                     >
                       {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
                     </button>
@@ -506,42 +522,51 @@ export const LoginPage: React.FC<LoginPageProps> = ({
                 <button
                   type="submit"
                   disabled={loading}
-                  className="w-full py-3.5 btn-gradient-emerald disabled:opacity-50 text-white rounded-xl font-extrabold flex items-center justify-center gap-2 shadow-lg shadow-emerald-900/20 hover:shadow-emerald-900/30 transition-all text-xs tracking-wider uppercase cursor-pointer"
+                  className="w-full h-[52px] rounded-[10px] bg-gradient-to-r from-[#00A878] to-[#00C98B] hover:opacity-95 text-white font-extrabold flex items-center justify-center gap-2 shadow-[0_8px_18px_rgba(0,168,120,0.18)] hover:-translate-y-0.5 active:translate-y-0 transition-all text-xs tracking-wider uppercase cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed disabled:transform-none"
                 >
-                  <KeyRound className="w-4 h-4 text-emerald-200" />
+                  <KeyRound className="w-4 h-4 text-white" />
                   <span>{loading ? 'Authenticating Terminal...' : 'SIGN IN TO ENCLAVE'}</span>
                 </button>
               </form>
 
+              {/* Trust microcopy under CTA */}
+              <p className="text-[11.5px] text-[#7B8B91] text-center font-medium leading-relaxed">
+                🔒 Secure enclave authentication • Session protected by hardware-attested cryptography
+              </p>
+
               {/* Apply for Institutional Accreditation & Personnel Registration */}
-              <div className="pt-4 border-t border-slate-100 space-y-2">
-                <div className="p-3 bg-slate-50/90 rounded-2xl border border-slate-200/80 flex items-center justify-between">
+              <div className="pt-4 border-t border-[#EDF3F5] space-y-2.5">
+                <div className="h-[58px] px-3.5 bg-[#F8FBFC] rounded-[10px] border border-[#DCE7EA] flex items-center justify-between">
                   <div className="flex items-center gap-2.5">
-                    <Building2 className="w-4 h-4 text-emerald-700" />
-                    <span className="text-[11px] font-bold text-slate-700">New Educational Authority?</span>
+                    <div className="p-1.5 rounded-lg bg-[#EAF9F3] text-[#008A63]">
+                      <Building2 className="w-4 h-4" />
+                    </div>
+                    <span className="text-[11.5px] font-bold text-[#142B38]">New Educational Authority?</span>
                   </div>
                   <button
                     type="button"
                     onClick={navigateRegister}
-                    className="text-[11px] text-emerald-800 hover:text-emerald-950 font-bold hover:underline cursor-pointer"
+                    className="text-[11.5px] text-[#008A63] hover:text-[#006F4F] font-bold hover:underline cursor-pointer"
                   >
                     Apply for Accreditation &rarr;
                   </button>
                 </div>
 
                 {onOpenPersonnelRegister && (
-                  <div className="p-3 bg-blue-50/80 rounded-2xl border border-blue-200/80 flex items-center justify-between">
+                  <div className="h-[58px] px-3.5 bg-[#F5F9FF] rounded-[10px] border border-[#D0E2F5] flex items-center justify-between">
                     <div className="flex items-center gap-2.5">
-                      <FileCheck2 className="w-4 h-4 text-blue-700 shrink-0" />
+                      <div className="p-1.5 rounded-lg bg-blue-100 text-blue-700 shrink-0">
+                        <FileCheck2 className="w-4 h-4" />
+                      </div>
                       <div>
-                        <span className="text-[11px] font-bold text-slate-800 block leading-tight">Translator or Centre Operator?</span>
-                        <span className="text-[10px] text-slate-500">Dedicated personnel self-registration portal</span>
+                        <span className="text-[11.5px] font-bold text-[#142B38] block leading-tight">Translator or Centre Operator?</span>
+                        <span className="text-[10px] text-[#6B7D84]">Dedicated personnel self-registration portal</span>
                       </div>
                     </div>
                     <button
                       type="button"
                       onClick={() => onOpenPersonnelRegister()}
-                      className="text-[11px] text-blue-700 hover:text-blue-900 font-bold hover:underline cursor-pointer shrink-0 ml-2"
+                      className="text-[11.5px] text-[#2878D8] hover:text-[#1E64BD] font-bold hover:underline cursor-pointer shrink-0 ml-2"
                     >
                       Register &rarr;
                     </button>
@@ -550,11 +575,12 @@ export const LoginPage: React.FC<LoginPageProps> = ({
               </div>
             </div>
 
-            <div className="text-center space-y-1">
-              <p className="text-[11px] text-slate-500 font-medium">
+            {/* Footer below Left Card */}
+            <div className="text-center space-y-1.5 pt-1">
+              <p className="text-[11px] text-[#6B7D84] font-medium">
                 Protected by ZeroLeak Mathematical Zero-Trust Cryptographic Protocol
               </p>
-              <div className="flex items-center justify-center gap-2 text-[10px] text-slate-400">
+              <div className="flex items-center justify-center gap-2 text-[10.5px] font-mono text-[#8C9CA3]">
                 <span>Hardware Attested</span>
                 <span>•</span>
                 <span>Post-Quantum Key Schedule</span>
@@ -564,38 +590,38 @@ export const LoginPage: React.FC<LoginPageProps> = ({
             </div>
           </div>
 
-          {/* Right Column: All 5 Role Credentials & Quick-Login Cards */}
+          {/* Right Column: All 5 Role Credentials & Quick-Login Cards (~56%) */}
           <div className="lg:col-span-7 space-y-4">
-            <div className="bg-white/80 dark:bg-[#0B0F17]/65 backdrop-blur-2xl p-6 sm:p-8 border border-slate-200/90 dark:border-white/15 rounded-3xl shadow-[0_20px_50px_-10px_rgba(15,23,42,0.07)] dark:shadow-[0_25px_60px_rgba(0,0,0,0.8),0_0_30px_rgba(0,204,95,0.1)] relative overflow-hidden">
+            <div className="bg-white border border-[#DCE7EA] rounded-[18px] p-6 sm:p-7 shadow-[0_12px_35px_rgba(30,70,80,0.06)] relative overflow-hidden space-y-4">
               {/* Top Accent Gradient Bar */}
-              <div className="absolute top-0 left-0 right-0 h-1.5 bg-gradient-to-r from-amber-500 via-emerald-500 to-rose-500" />
+              <div className="absolute top-0 left-0 right-0 h-[2.5px] bg-gradient-to-r from-amber-500 via-[#00A878] to-[#2878D8]" />
 
-              <div className="flex items-center justify-between border-b border-slate-100 dark:border-white/10 pb-3.5 mb-4">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between border-b border-[#EDF3F5] pb-3.5 gap-2">
                 <div>
-                  <h2 className="text-sm font-bold text-slate-900 dark:text-white flex items-center gap-2">
-                    <Sparkles className="w-4 h-4 text-[#00cc5f]" />
+                  <h2 className="text-base sm:text-lg font-bold text-[#142B38] flex items-center gap-2">
+                    <Sparkles className="w-4 h-4 text-[#00A878]" />
                     <span>Instant Institutional Test Accounts</span>
                   </h2>
-                  <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-0.5">
+                  <p className="text-[12.5px] text-[#6A7B83] mt-0.5">
                     Select any role below to test the complete end-to-end examination lifecycle.
                   </p>
                 </div>
-                <span className="px-2.5 py-1 rounded-full text-[10px] font-bold bg-emerald-50 dark:bg-[#00cc5f]/15 text-emerald-800 dark:text-[#00cc5f] border border-emerald-200 dark:border-[#00cc5f]/30 uppercase tracking-wider backdrop-blur-md">
+                <span className="self-start sm:self-auto px-3 py-1 rounded-full text-[10.5px] font-mono font-bold bg-[#ECFAF4] text-[#008A63] border border-[#BFE9D8] uppercase tracking-wider shrink-0">
                   5 Roles Active
                 </span>
               </div>
 
               {onOpenPersonnelRegister && (
-                <div className="mb-4 p-3.5 rounded-2xl bg-gradient-to-r from-blue-50/90 via-indigo-50/70 to-teal-50/80 dark:from-blue-950/40 dark:via-indigo-950/30 dark:to-teal-950/40 border border-blue-200/90 dark:border-blue-500/30 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 shadow-2xs backdrop-blur-md">
+                <div className="p-3.5 rounded-2xl bg-gradient-to-r from-[#F1F7FF] to-[#F6FAFF] border border-[#C8DDF4] flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 shadow-2xs">
                   <div className="flex items-center gap-2.5">
-                    <div className="p-2 rounded-xl bg-blue-600 text-white shadow-xs shrink-0">
+                    <div className="p-2 rounded-xl bg-[#2878D8] text-white shadow-xs shrink-0">
                       <FileCheck2 className="w-4 h-4" />
                     </div>
                     <div>
-                      <span className="font-bold text-xs text-blue-950 dark:text-white block">
+                      <span className="font-bold text-xs text-[#142B38] block">
                         Join Institutional Personnel
                       </span>
-                      <span className="text-[11px] text-blue-800 dark:text-blue-300">
+                      <span className="text-[11px] text-[#4A6478]">
                         Register as Linguistic Translator or Centre Operator.
                       </span>
                     </div>
@@ -603,7 +629,7 @@ export const LoginPage: React.FC<LoginPageProps> = ({
                   <button
                     type="button"
                     onClick={() => onOpenPersonnelRegister()}
-                    className="px-3 py-1.5 rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-bold text-xs shadow-xs transition-colors shrink-0 cursor-pointer"
+                    className="h-8 px-3.5 rounded-xl bg-[#2878D8] hover:bg-[#1E64BD] text-white font-bold text-xs shadow-xs transition-colors shrink-0 cursor-pointer"
                   >
                     Open Registration &rarr;
                   </button>
@@ -616,57 +642,61 @@ export const LoginPage: React.FC<LoginPageProps> = ({
                   return (
                     <div
                       key={acc.role}
-                      className={`p-4 rounded-2xl border transition-all flex flex-col justify-between text-xs relative ${acc.accent} dark:bg-white/[0.03] dark:border-white/10 dark:hover:border-[#00cc5f]/50 shadow-2xs hover:shadow-md hover:-translate-y-0.5 backdrop-blur-xl`}
+                      className={`p-4 rounded-[14px] border border-[#DCE7EA] bg-white transition-all flex flex-col justify-between text-xs relative shadow-[0_2px_8px_rgba(30,60,70,0.04)] hover:shadow-[0_6px_18px_rgba(30,70,80,0.08)] hover:border-[#BFE0DC] hover:-translate-y-0.5`}
                     >
                       <div className="space-y-2">
-                        <div className="flex items-center justify-between">
-                          <div className="flex items-center gap-2">
-                            <div className="p-1.5 rounded-xl bg-white dark:bg-white/10 shadow-xs">
+                        <div className="flex items-start justify-between gap-2">
+                          <div className="flex items-center gap-2 min-w-0">
+                            <div className={`p-1.5 rounded-xl shadow-xs shrink-0 ${acc.iconBg}`}>
                               {acc.icon}
                             </div>
-                            <span className="font-bold text-slate-900 dark:text-white text-xs">
+                            <span className="font-bold text-[#142B38] text-xs truncate">
                               {acc.title}
                             </span>
                           </div>
-                          <span className="text-[9px] font-bold px-2 py-0.5 rounded-full bg-white dark:bg-white/10 border border-slate-200/80 dark:border-white/10 text-slate-700 dark:text-slate-300 shadow-2xs backdrop-blur-sm">
+                          <span className="text-[9.5px] font-mono font-bold px-2 py-0.5 rounded-full bg-[#F4F8FA] border border-[#DCE7EA] text-[#4A6478] shrink-0">
                             {acc.badge}
                           </span>
                         </div>
 
-                        <p className="text-[11px] text-slate-600 dark:text-slate-400 leading-relaxed line-clamp-2">
+                        <div className="text-[10px] font-mono text-[#8C9CA3] font-semibold">
+                          {acc.tier}
+                        </div>
+
+                        <p className="text-[11px] text-[#667780] leading-relaxed line-clamp-2">
                           {acc.description}
                         </p>
 
-                        <div className="bg-white/95 dark:bg-white/[0.04] p-2.5 rounded-xl border border-slate-200/80 dark:border-white/10 font-mono text-[10px] space-y-1 mt-2 shadow-2xs backdrop-blur-md">
-                          <div className="flex items-center justify-between text-slate-700 dark:text-slate-300">
-                            <span className="text-slate-400">User:</span>
-                            <span className="font-bold text-slate-900 dark:text-white truncate max-w-[170px]">{acc.email}</span>
+                        <div className="bg-[#F7FAFB] p-2.5 rounded-xl border border-dashed border-[#D5E2E7] font-mono text-[10px] space-y-1 mt-2">
+                          <div className="flex items-center justify-between text-[#6B7D84]">
+                            <span className="text-[#8C9CA3]">User:</span>
+                            <span className="font-bold text-[#142B38] truncate max-w-[170px]">{acc.email}</span>
                           </div>
-                          <div className="flex items-center justify-between text-slate-700 dark:text-slate-300">
-                            <span className="text-slate-400">Pass:</span>
-                            <span className="font-bold text-emerald-800 dark:text-[#00cc5f]">{acc.password}</span>
+                          <div className="flex items-center justify-between text-[#6B7D84]">
+                            <span className="text-[#8C9CA3]">Pass:</span>
+                            <span className="font-bold text-[#00A878]">{acc.password}</span>
                           </div>
                         </div>
                       </div>
 
-                      <div className="flex items-center gap-2 mt-3.5 pt-2.5 border-t border-slate-200/60 dark:border-white/10">
+                      <div className="flex items-center gap-2 mt-3.5 pt-2.5 border-t border-[#EDF3F5]">
                         <button
                           type="button"
                           onClick={() => handleQuickLogin(acc)}
                           disabled={loading}
-                          className="flex-1 py-2 px-3 bg-slate-900 hover:bg-slate-800 text-white rounded-xl font-bold text-[11px] flex items-center justify-center gap-1.5 transition-all shadow-2xs hover:shadow-sm cursor-pointer"
+                          className="h-[40px] flex-1 px-3 bg-[#132A38] hover:bg-[#1C3B4E] text-white rounded-[8px] font-bold text-xs flex items-center justify-center gap-1.5 transition-all shadow-2xs hover:shadow-xs cursor-pointer"
                         >
-                          <KeyRound className="w-3.5 h-3.5 text-emerald-400" />
+                          <KeyRound className="w-3.5 h-3.5 text-[#00C98B]" />
                           <span>Auto-Fill & Sign In</span>
                         </button>
                         <button
                           type="button"
                           onClick={e => handleCopyCredentials(acc, e)}
                           title="Copy credentials"
-                          className="p-2 rounded-xl bg-white hover:bg-slate-100 text-slate-600 border border-slate-200 transition-colors cursor-pointer shadow-2xs"
+                          className="h-[40px] w-[40px] rounded-[8px] bg-white hover:bg-[#F4F8FA] text-[#6B7D84] hover:text-[#142B38] border border-[#DCE7EA] flex items-center justify-center transition-colors cursor-pointer shadow-2xs"
                         >
                           {isCopied ? (
-                            <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
+                            <CheckCircle2 className="w-3.5 h-3.5 text-[#00A878]" />
                           ) : (
                             <Copy className="w-3.5 h-3.5" />
                           )}
@@ -676,7 +706,7 @@ export const LoginPage: React.FC<LoginPageProps> = ({
                             type="button"
                             onClick={() => onOpenPersonnelRegister(acc.role as any)}
                             title={`Register new ${acc.title}`}
-                            className="px-2.5 py-2 rounded-xl bg-blue-50 hover:bg-blue-100 text-blue-700 border border-blue-200 transition-colors cursor-pointer shadow-2xs text-[10px] font-bold shrink-0"
+                            className="h-[40px] px-2.5 rounded-[8px] bg-[#EEF5FC] hover:bg-[#E2EEF9] text-[#2878D8] border border-[#D0E2F5] transition-colors cursor-pointer shadow-2xs text-[10px] font-bold shrink-0"
                           >
                             + Register
                           </button>
@@ -687,28 +717,27 @@ export const LoginPage: React.FC<LoginPageProps> = ({
                 })}
               </div>
 
-              {/* Universal Password & Pipeline Banner */}
-              <div className="mt-4 p-3 rounded-2xl bg-gradient-to-r from-emerald-50 to-teal-50 border border-emerald-200/80 text-[11px] text-emerald-950 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2 shadow-2xs">
+              {/* Universal Password Banner */}
+              <div className="mt-4 p-3 rounded-xl bg-[#F3FAF7] border border-[#BDE8D7] text-[11.5px] text-[#142B38] flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2 shadow-2xs">
                 <div className="flex items-center gap-2">
-                  <ShieldCheck className="w-4 h-4 text-emerald-700 shrink-0" />
-                  <span>Pre-seeded with real multi-tier exam questions and audit ledger entries.</span>
+                  <ShieldCheck className="w-4 h-4 text-[#00A878] shrink-0" />
+                  <span className="font-medium text-[#1E3A34]">Pre-seeded with real multi-tier exam questions and audit ledger entries.</span>
                 </div>
-                <span className="font-mono font-bold bg-white px-2.5 py-1 rounded-lg border border-emerald-200 text-emerald-900 shrink-0">
+                <span className="font-mono font-bold bg-white px-2.5 py-1 rounded-lg border border-[#BDE8D7] text-[#008A63] text-xs shrink-0 shadow-2xs">
                   Universal Pass: Password123!
                 </span>
               </div>
 
-              {/* Educational Authority Flow Indicator */}
-              <div className="mt-3 pt-3 border-t border-slate-100 text-[10px] text-slate-500 flex flex-wrap items-center justify-center gap-2">
-                <span className="font-bold text-slate-700">Governance Pipeline:</span>
-                <span className="px-2 py-0.5 rounded-full bg-amber-50 text-amber-800 border border-amber-200 font-medium">1. Org Owner</span>
-                <span>&rarr;</span>
-                <span className="px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-800 border border-emerald-200 font-medium">2. Exam Manager</span>
-                <span>&rarr;</span>
-                <span className="px-2 py-0.5 rounded-full bg-blue-50 text-blue-800 border border-blue-200 font-medium">3. Linguistic Translator</span>
-                <span>&rarr;</span>
-                <span className="px-2 py-0.5 rounded-full bg-teal-50 text-teal-800 border border-teal-200 font-medium">4. Centre Operator</span>
-                <span>&rarr;</span>
+              {/* Bottom Security Architecture Pipeline Flow */}
+              <div className="mt-3 pt-3 border-t border-[#EDF3F5] text-[10.5px] text-[#6B7D84] flex flex-wrap items-center justify-center gap-2 font-mono">
+                <span className="font-bold text-[#142B38] tracking-wider uppercase font-sans">SECURITY ARCHITECTURE:</span>
+                <span className="px-2 py-0.5 rounded-full bg-[#EAF9F3] text-[#008A63] border border-[#BDE8D7] font-bold">1. IDENTITY</span>
+                <span className="text-[#8C9CA3]">&rarr;</span>
+                <span className="px-2 py-0.5 rounded-full bg-[#EBF7FD] text-[#0284C7] border border-[#BAE6FD] font-bold">2. ATTESTATION</span>
+                <span className="text-[#8C9CA3]">&rarr;</span>
+                <span className="px-2 py-0.5 rounded-full bg-[#F4F0FF] text-[#7C3AED] border border-[#DDD6FE] font-bold">3. ENCRYPTION</span>
+                <span className="text-[#8C9CA3]">&rarr;</span>
+                <span className="px-2 py-0.5 rounded-full bg-[#EEF2FF] text-[#4F46E5] border border-[#C7D2FE] font-bold">4. EXAM CONTROL</span>
               </div>
             </div>
           </div>
@@ -717,36 +746,36 @@ export const LoginPage: React.FC<LoginPageProps> = ({
 
       {/* Forgot Password Modal */}
       {showForgotModal && (
-        <div className="fixed inset-0 z-50 bg-slate-950/40 backdrop-blur-xs flex items-center justify-center p-4">
-          <div className="bg-white rounded-xl border border-slate-200 shadow-xl max-w-md w-full p-6 space-y-4 text-xs">
-            <div className="flex items-center justify-between border-b pb-3">
-              <div className="flex items-center gap-2 text-slate-900 font-bold text-sm">
-                <Lock className="w-4 h-4 text-emerald-900" />
+        <div className="fixed inset-0 z-50 bg-[#0B171F]/40 backdrop-blur-xs flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl border border-[#DCE7EA] shadow-2xl max-w-md w-full p-6 space-y-4 text-xs">
+            <div className="flex items-center justify-between border-b border-[#EDF3F5] pb-3">
+              <div className="flex items-center gap-2 text-[#142B38] font-bold text-sm">
+                <Lock className="w-4 h-4 text-[#00A878]" />
                 <span>Passphrase Recovery Protocol</span>
               </div>
               <button
                 onClick={() => setShowForgotModal(false)}
-                className="text-slate-400 hover:text-slate-600 cursor-pointer"
+                className="text-[#8C9CA3] hover:text-[#142B38] cursor-pointer"
               >
                 <X className="w-4 h-4" />
               </button>
             </div>
 
-            <p className="text-slate-600 leading-relaxed">
+            <p className="text-[#4A6478] leading-relaxed">
               ZeroLeak uses cryptographic zero-knowledge credentials. Passphrase resets cannot be performed via unauthenticated public links.
             </p>
 
-            <div className="p-3 bg-slate-50 border border-slate-200 rounded-lg text-slate-700 space-y-1">
-              <span className="font-bold text-slate-900 block">Security Procedure:</span>
-              <p className="text-[11px]">
-                Please contact your institution's <strong>Organization Owner / Registrar</strong> to verify your identity and generate a new encrypted authorization passphrase for your registered hardware terminal.
+            <div className="p-3 bg-[#F4F8FA] border border-[#DCE7EA] rounded-xl text-[#142B38] space-y-1">
+              <span className="font-bold text-[#142B38] block">Security Procedure:</span>
+              <p className="text-[11px] text-[#4A6478]">
+                Please contact your institution's <strong className="text-[#142B38]">Organization Owner / Registrar</strong> to verify your identity and generate a new encrypted authorization passphrase for your registered hardware terminal.
               </p>
             </div>
 
             <div className="flex justify-end pt-2">
               <button
                 onClick={() => setShowForgotModal(false)}
-                className="px-4 py-2 bg-emerald-900 text-white rounded-lg font-bold text-xs hover:bg-emerald-800 cursor-pointer"
+                className="px-4 py-2 bg-gradient-to-r from-[#00A878] to-[#00C98B] text-white rounded-xl font-bold text-xs hover:opacity-95 cursor-pointer shadow-xs"
               >
                 Understood
               </button>
