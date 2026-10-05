@@ -12051,6 +12051,161 @@ async function startServer() {
     }
   });
 
+  // ==========================================
+  // WEBRTC LIVE AUDIO SIGNALING FOR ENCLAVE SESSIONS
+  // ==========================================
+  interface WebRtcSessionSignal {
+    offer?: { sdp: string; type: string; timestamp: number } | null;
+    answer?: { sdp: string; type: string; timestamp: number } | null;
+    translatorCandidates: Array<{ candidate: any; timestamp: number }>;
+    auditorCandidates: Array<{ candidate: any; timestamp: number }>;
+    activeListeners: number;
+    lastUpdated: number;
+  }
+
+  const authorityWebRtcSignals = new Map<string, WebRtcSessionSignal>();
+
+  function getOrCreateSignal(sessionId: string): WebRtcSessionSignal {
+    let sig = authorityWebRtcSignals.get(sessionId);
+    if (!sig) {
+      sig = {
+        offer: null,
+        answer: null,
+        translatorCandidates: [],
+        auditorCandidates: [],
+        activeListeners: 0,
+        lastUpdated: Date.now(),
+      };
+      authorityWebRtcSignals.set(sessionId, sig);
+    }
+    return sig;
+  }
+
+  // Translator publishes SDP offer
+  app.post('/api/authority-proctor/sessions/:id/signal/offer', authenticateToken, async (req: Request, res: Response) => {
+    try {
+      const sessionId = req.params.id;
+      const { offer } = req.body;
+      if (!offer || !offer.sdp) {
+        return res.status(400).json({ error: 'Valid SDP offer is required' });
+      }
+      const sig = getOrCreateSignal(sessionId);
+      sig.offer = { sdp: offer.sdp, type: offer.type || 'offer', timestamp: Date.now() };
+      sig.answer = null;
+      sig.translatorCandidates = [];
+      sig.auditorCandidates = [];
+      sig.lastUpdated = Date.now();
+      return res.json({ success: true });
+    } catch (e: any) {
+      return res.status(500).json({ error: e.message });
+    }
+  });
+
+  // Auditor fetches SDP offer
+  app.get('/api/authority-proctor/sessions/:id/signal/offer', authenticateToken, async (req: Request, res: Response) => {
+    try {
+      const sessionId = req.params.id;
+      const sig = authorityWebRtcSignals.get(sessionId);
+      return res.json({
+        success: true,
+        offer: sig?.offer || null,
+        activeListeners: sig?.activeListeners || 0,
+      });
+    } catch (e: any) {
+      return res.status(500).json({ error: e.message });
+    }
+  });
+
+  // Auditor posts SDP answer
+  app.post('/api/authority-proctor/sessions/:id/signal/answer', authenticateToken, async (req: Request, res: Response) => {
+    try {
+      const sessionId = req.params.id;
+      const { answer } = req.body;
+      if (!answer || !answer.sdp) {
+        return res.status(400).json({ error: 'Valid SDP answer is required' });
+      }
+      const sig = getOrCreateSignal(sessionId);
+      sig.answer = { sdp: answer.sdp, type: answer.type || 'answer', timestamp: Date.now() };
+      sig.activeListeners = Math.max(1, sig.activeListeners);
+      sig.lastUpdated = Date.now();
+      return res.json({ success: true });
+    } catch (e: any) {
+      return res.status(500).json({ error: e.message });
+    }
+  });
+
+  // Translator fetches SDP answer
+  app.get('/api/authority-proctor/sessions/:id/signal/answer', authenticateToken, async (req: Request, res: Response) => {
+    try {
+      const sessionId = req.params.id;
+      const sig = authorityWebRtcSignals.get(sessionId);
+      return res.json({
+        success: true,
+        answer: sig?.answer || null,
+      });
+    } catch (e: any) {
+      return res.status(500).json({ error: e.message });
+    }
+  });
+
+  // ICE Candidate exchange
+  app.post('/api/authority-proctor/sessions/:id/signal/candidate', authenticateToken, async (req: Request, res: Response) => {
+    try {
+      const sessionId = req.params.id;
+      const { sender, candidate } = req.body;
+      if (!sender || !candidate) {
+        return res.status(400).json({ error: 'sender and candidate are required' });
+      }
+      const sig = getOrCreateSignal(sessionId);
+      if (sender === 'TRANSLATOR') {
+        sig.translatorCandidates.push({ candidate, timestamp: Date.now() });
+      } else {
+        sig.auditorCandidates.push({ candidate, timestamp: Date.now() });
+      }
+      sig.lastUpdated = Date.now();
+      return res.json({ success: true });
+    } catch (e: any) {
+      return res.status(500).json({ error: e.message });
+    }
+  });
+
+  // Fetch ICE Candidates for recipient
+  app.get('/api/authority-proctor/sessions/:id/signal/candidates', authenticateToken, async (req: Request, res: Response) => {
+    try {
+      const sessionId = req.params.id;
+      const sender = req.query.sender as string;
+      const sig = authorityWebRtcSignals.get(sessionId);
+      if (!sig) {
+        return res.json({ success: true, candidates: [] });
+      }
+      const candidates = sender === 'TRANSLATOR'
+        ? sig.translatorCandidates.map(c => c.candidate)
+        : sig.auditorCandidates.map(c => c.candidate);
+      return res.json({ success: true, candidates });
+    } catch (e: any) {
+      return res.status(500).json({ error: e.message });
+    }
+  });
+
+  // Stop live audio listening session
+  app.post('/api/authority-proctor/sessions/:id/signal/stop', authenticateToken, async (req: Request, res: Response) => {
+    try {
+      const sessionId = req.params.id;
+      const sig = authorityWebRtcSignals.get(sessionId);
+      if (sig) {
+        sig.activeListeners = Math.max(0, sig.activeListeners - 1);
+        if (sig.activeListeners === 0) {
+          sig.answer = null;
+          sig.auditorCandidates = [];
+        }
+        sig.lastUpdated = Date.now();
+      }
+      return res.json({ success: true });
+    } catch (e: any) {
+      return res.status(500).json({ error: e.message });
+    }
+  });
+
   // End session
   app.post('/api/authority-proctor/sessions/end', authenticateToken, async (req: Request, res: Response) => {
     try {
@@ -12058,6 +12213,7 @@ async function startServer() {
       if (!session_id) {
         return res.status(400).json({ error: 'session_id is required' });
       }
+      authorityWebRtcSignals.delete(session_id);
       const db = await getDb();
       endAuthorityEnclaveSession(db, session_id);
       return res.json({ success: true });

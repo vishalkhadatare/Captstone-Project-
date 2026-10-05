@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   ShieldAlert,
   ShieldCheck,
@@ -171,6 +171,153 @@ export const AuthoritySurveillanceDashboard: React.FC<AuthoritySurveillanceDashb
 
   // Status Notification
   const [statusMessage, setStatusMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
+
+  // WebRTC Real-Time Live Audio Surveillance State
+  const [isLiveAudioStreaming, setIsLiveAudioStreaming] = useState(false);
+  const [liveAudioConnecting, setLiveAudioConnecting] = useState(false);
+  const [liveAudioError, setLiveAudioError] = useState<string | null>(null);
+  const [liveAudioVolume, setLiveAudioVolume] = useState(1);
+  const [isLiveAudioMuted, setIsLiveAudioMuted] = useState(false);
+
+  const liveAudioPlayerRef = useRef<HTMLAudioElement | null>(null);
+  const auditorPeerConnRef = useRef<RTCPeerConnection | null>(null);
+  const candidatePollIntervalRef = useRef<any>(null);
+
+  const handleStartLiveAudio = async (sessionId: string) => {
+    setLiveAudioConnecting(true);
+    setLiveAudioError(null);
+
+    try {
+      // 1. Fetch SDP offer from translator
+      const offerRes = await api.authorityProctor.getOffer(sessionId);
+      if (!offerRes.offer || !offerRes.offer.sdp) {
+        throw new Error('Translator has not initiated an audio feed yet, or workstation microphone is inactive.');
+      }
+
+      // 2. Clean up any previous peer connection
+      if (auditorPeerConnRef.current) {
+        auditorPeerConnRef.current.close();
+        auditorPeerConnRef.current = null;
+      }
+
+      const pc = new RTCPeerConnection({
+        iceServers: [
+          { urls: 'stun:stun.l.google.com:19302' },
+          { urls: 'stun:stun1.l.google.com:19302' },
+        ],
+      });
+      auditorPeerConnRef.current = pc;
+
+      // 3. Handle incoming remote audio track
+      pc.ontrack = (event) => {
+        if (liveAudioPlayerRef.current && event.streams[0]) {
+          liveAudioPlayerRef.current.srcObject = event.streams[0];
+          liveAudioPlayerRef.current.volume = isLiveAudioMuted ? 0 : liveAudioVolume;
+          liveAudioPlayerRef.current.play().catch((e) => {
+            console.warn('Audio auto-play policy notice:', e);
+          });
+        }
+      };
+
+      // 4. Handle Auditor ICE candidates
+      pc.onicecandidate = (event) => {
+        if (event.candidate) {
+          api.authorityProctor.postCandidate(sessionId, 'AUDITOR', event.candidate).catch(() => {});
+        }
+      };
+
+      // 5. Set Remote Description (offer)
+      await pc.setRemoteDescription(new RTCSessionDescription(offerRes.offer));
+
+      // 6. Create Answer
+      const answer = await pc.createAnswer();
+      await pc.setLocalDescription(answer);
+
+      // 7. Post Answer to backend
+      await api.authorityProctor.postAnswer(sessionId, {
+        sdp: answer.sdp,
+        type: answer.type,
+      });
+
+      // 8. Fetch translator ICE candidates
+      const candRes = await api.authorityProctor.getCandidates(sessionId, 'TRANSLATOR');
+      if (candRes.candidates && Array.isArray(candRes.candidates)) {
+        for (const cand of candRes.candidates) {
+          try {
+            await pc.addIceCandidate(new RTCIceCandidate(cand));
+          } catch {}
+        }
+      }
+
+      // 9. Periodic candidate sync
+      candidatePollIntervalRef.current = setInterval(async () => {
+        try {
+          const update = await api.authorityProctor.getCandidates(sessionId, 'TRANSLATOR');
+          if (update.candidates && Array.isArray(update.candidates)) {
+            for (const cand of update.candidates) {
+              try {
+                await pc.addIceCandidate(new RTCIceCandidate(cand));
+              } catch {}
+            }
+          }
+        } catch {}
+      }, 2500);
+
+      setIsLiveAudioStreaming(true);
+    } catch (err: any) {
+      console.error('Start live audio failed:', err);
+      setLiveAudioError(err.message || 'Unable to establish WebRTC audio stream.');
+      setIsLiveAudioStreaming(false);
+    } finally {
+      setLiveAudioConnecting(false);
+    }
+  };
+
+  const handleStopLiveAudio = (sessionId?: string) => {
+    if (candidatePollIntervalRef.current) {
+      clearInterval(candidatePollIntervalRef.current);
+      candidatePollIntervalRef.current = null;
+    }
+    if (auditorPeerConnRef.current) {
+      auditorPeerConnRef.current.close();
+      auditorPeerConnRef.current = null;
+    }
+    if (liveAudioPlayerRef.current) {
+      liveAudioPlayerRef.current.pause();
+      liveAudioPlayerRef.current.srcObject = null;
+    }
+    setIsLiveAudioStreaming(false);
+    setLiveAudioConnecting(false);
+    if (sessionId) {
+      api.authorityProctor.stopLiveAudio(sessionId).catch(() => {});
+    }
+  };
+
+  const handleVolumeChange = (vol: number) => {
+    setLiveAudioVolume(vol);
+    if (liveAudioPlayerRef.current) {
+      liveAudioPlayerRef.current.volume = isLiveAudioMuted ? 0 : vol;
+    }
+  };
+
+  const handleToggleMute = () => {
+    const newMuted = !isLiveAudioMuted;
+    setIsLiveAudioMuted(newMuted);
+    if (liveAudioPlayerRef.current) {
+      liveAudioPlayerRef.current.volume = newMuted ? 0 : liveAudioVolume;
+    }
+  };
+
+  const handleCloseReview = () => {
+    handleStopLiveAudio(selectedSession?.id);
+    setSelectedSession(null);
+  };
+
+  useEffect(() => {
+    return () => {
+      handleStopLiveAudio();
+    };
+  }, []);
 
   useEffect(() => {
     loadDashboard();
@@ -757,7 +904,7 @@ export const AuthoritySurveillanceDashboard: React.FC<AuthoritySurveillanceDashb
                 </div>
 
                 <button
-                  onClick={() => setSelectedSession(null)}
+                  onClick={handleCloseReview}
                   className="p-1.5 rounded-xl text-slate-400 hover:text-slate-700 hover:bg-slate-100 border border-transparent hover:border-slate-200 transition-colors cursor-pointer ml-1"
                   title="Close Modal"
                 >
@@ -995,6 +1142,129 @@ export const AuthoritySurveillanceDashboard: React.FC<AuthoritySurveillanceDashb
                         </div>
                       </div>
                     ) : null}
+                  </div>
+
+                  {/* Authorized Real-Time Live Audio Surveillance (WebRTC) */}
+                  <div className="bg-white rounded-xl border border-slate-200/90 p-4 shadow-xs space-y-3">
+                    <div className="flex items-center justify-between">
+                      <span className="text-[11px] font-bold text-slate-700 uppercase tracking-wider flex items-center gap-1.5">
+                        <Mic className="w-3.5 h-3.5 text-blue-600" />
+                        Live Microphone Surveillance
+                      </span>
+                      <span className={`text-[10px] font-mono px-2 py-0.5 rounded-full border ${
+                        isLiveAudioStreaming
+                          ? 'bg-blue-50 text-blue-700 border-blue-200 animate-pulse'
+                          : 'bg-slate-100 text-slate-600 border-slate-200'
+                      }`}>
+                        {isLiveAudioStreaming ? '● LIVE AUDIO ACTIVE' : 'STANDBY'}
+                      </span>
+                    </div>
+
+                    <div className="bg-slate-50 rounded-xl p-3 border border-slate-100 space-y-2.5">
+                      <div className="flex items-center justify-between text-xs">
+                        <span className="text-slate-500 font-medium">Workstation Audio Level:</span>
+                        <span className="font-mono font-bold text-slate-800">
+                          {selectedSession.microphone_status === 'ACTIVE'
+                            ? `${selectedSession.audio_level_db ?? -45} dB`
+                            : 'Inactive'}
+                        </span>
+                      </div>
+
+                      {/* Decibel audio level visual bar */}
+                      <div className="w-full bg-slate-200 rounded-full h-1.5 overflow-hidden">
+                        <div
+                          className={`h-full rounded-full transition-all duration-300 ${
+                            isLiveAudioStreaming
+                              ? 'bg-blue-500'
+                              : selectedSession.microphone_status === 'ACTIVE'
+                              ? 'bg-emerald-500'
+                              : 'bg-slate-300'
+                          }`}
+                          style={{
+                            width: `${Math.min(
+                              100,
+                              Math.max(8, ((selectedSession.audio_level_db ?? -60) + 65) * 2)
+                            )}%`,
+                          }}
+                        />
+                      </div>
+
+                      <p className="text-[11px] text-slate-500 leading-relaxed">
+                        {isLiveAudioStreaming
+                          ? 'Secure WebRTC continuous audio connection active. Audio is streaming directly to your auditor speakers/headphones.'
+                          : 'Listen to authorized continuous live microphone audio from the translator workstation in real-time.'}
+                      </p>
+
+                      {liveAudioError && (
+                        <div className="p-2 rounded-lg bg-rose-50 border border-rose-200 text-rose-700 text-[11px] flex items-center gap-1.5">
+                          <AlertCircle className="w-3.5 h-3.5 shrink-0 text-rose-600" />
+                          <span>{liveAudioError}</span>
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Audio Controls */}
+                    {!isLiveAudioStreaming ? (
+                      <button
+                        type="button"
+                        onClick={() => handleStartLiveAudio(selectedSession.id)}
+                        disabled={liveAudioConnecting || selectedSession.status !== 'ACTIVE'}
+                        className="w-full py-2.5 rounded-xl bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white font-semibold text-xs flex items-center justify-center gap-2 shadow-xs transition-colors cursor-pointer"
+                      >
+                        {liveAudioConnecting ? (
+                          <>
+                            <RefreshCw className="w-4 h-4 animate-spin" />
+                            <span>Connecting WebRTC Live Audio...</span>
+                          </>
+                        ) : (
+                          <>
+                            <Volume2 className="w-4 h-4" />
+                            <span>Start Live Audio</span>
+                          </>
+                        )}
+                      </button>
+                    ) : (
+                      <div className="space-y-2 pt-1">
+                        <div className="flex items-center justify-between gap-3 bg-blue-50/70 p-2.5 rounded-xl border border-blue-200/70">
+                          <button
+                            type="button"
+                            onClick={handleToggleMute}
+                            className="p-1.5 rounded-lg bg-white border border-blue-200 text-blue-700 hover:bg-blue-100 transition-colors cursor-pointer"
+                            title={isLiveAudioMuted ? 'Unmute Live Audio' : 'Mute Live Audio'}
+                          >
+                            {isLiveAudioMuted ? <VolumeX className="w-4 h-4 text-rose-600" /> : <Volume2 className="w-4 h-4 text-blue-600" />}
+                          </button>
+
+                          <div className="flex-1 flex items-center gap-2">
+                            <span className="text-[10px] font-mono text-slate-500">Vol:</span>
+                            <input
+                              type="range"
+                              min="0"
+                              max="1"
+                              step="0.05"
+                              value={isLiveAudioMuted ? 0 : liveAudioVolume}
+                              onChange={(e) => handleVolumeChange(parseFloat(e.target.value))}
+                              className="w-full accent-blue-600 h-1.5 cursor-pointer"
+                            />
+                            <span className="text-[10px] font-mono font-semibold text-slate-700 w-8 text-right">
+                              {Math.round((isLiveAudioMuted ? 0 : liveAudioVolume) * 100)}%
+                            </span>
+                          </div>
+                        </div>
+
+                        <button
+                          type="button"
+                          onClick={() => handleStopLiveAudio(selectedSession.id)}
+                          className="w-full py-2 rounded-xl bg-rose-50 hover:bg-rose-100 border border-rose-200 text-rose-700 font-semibold text-xs flex items-center justify-center gap-1.5 transition-colors cursor-pointer"
+                        >
+                          <VolumeX className="w-4 h-4" />
+                          <span>Stop Live Audio</span>
+                        </button>
+                      </div>
+                    )}
+
+                    {/* Hidden HTML5 Audio Element for WebRTC Stream Playback */}
+                    <audio ref={liveAudioPlayerRef} autoPlay playsInline className="hidden" />
                   </div>
 
                   {/* CBI Chief Vigilance & Security Auditor Review Actions */}

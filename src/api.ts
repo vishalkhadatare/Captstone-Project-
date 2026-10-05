@@ -1364,6 +1364,31 @@ export const api = {
         method: 'POST',
         body: JSON.stringify({ reason }),
       }),
+    postOffer: (sessionId: string, offer: any) =>
+      request<{ success: boolean }>(`/api/authority-proctor/sessions/${sessionId}/signal/offer`, {
+        method: 'POST',
+        body: JSON.stringify({ offer }),
+      }),
+    getOffer: (sessionId: string) =>
+      request<{ success: boolean; offer: any | null; activeListeners?: number }>(`/api/authority-proctor/sessions/${sessionId}/signal/offer`),
+    postAnswer: (sessionId: string, answer: any) =>
+      request<{ success: boolean }>(`/api/authority-proctor/sessions/${sessionId}/signal/answer`, {
+        method: 'POST',
+        body: JSON.stringify({ answer }),
+      }),
+    getAnswer: (sessionId: string) =>
+      request<{ success: boolean; answer: any | null }>(`/api/authority-proctor/sessions/${sessionId}/signal/answer`),
+    postCandidate: (sessionId: string, sender: 'TRANSLATOR' | 'AUDITOR', candidate: any) =>
+      request<{ success: boolean }>(`/api/authority-proctor/sessions/${sessionId}/signal/candidate`, {
+        method: 'POST',
+        body: JSON.stringify({ sender, candidate }),
+      }),
+    getCandidates: (sessionId: string, sender: 'TRANSLATOR' | 'AUDITOR') =>
+      request<{ success: boolean; candidates: any[] }>(`/api/authority-proctor/sessions/${sessionId}/signal/candidates?sender=${sender}`),
+    stopLiveAudio: (sessionId: string) =>
+      request<{ success: boolean }>(`/api/authority-proctor/sessions/${sessionId}/signal/stop`, {
+        method: 'POST',
+      }),
   },
   multiPaper: {
     getSourcePapers: (examId?: string) =>

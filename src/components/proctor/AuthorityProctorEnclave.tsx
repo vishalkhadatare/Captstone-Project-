@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import {
   ShieldAlert,
   ShieldCheck,
@@ -156,9 +156,37 @@ export const AuthorityProctorEnclave: React.FC<AuthorityProctorEnclaveProps> = (
     }, 4000);
   };
 
-  // Video & Audio DOM / Context Refs
-  const videoRef = useRef<HTMLVideoElement>(null);
+  // Video & Audio DOM / Hardware State
+  const videoRef = useRef<HTMLVideoElement | null>(null);
   const audioMonitorRef = useRef<AudioMonitor | null>(null);
+  const peerConnectionRef = useRef<RTCPeerConnection | null>(null);
+  const [cameraVideoRendering, setCameraVideoRendering] = useState(false);
+
+  // Callback ref: immediately attaches stream and plays video whenever the <video> DOM element mounts
+  const setVideoRef = useCallback((el: HTMLVideoElement | null) => {
+    videoRef.current = el;
+    if (el && streamRef.current) {
+      if (el.srcObject !== streamRef.current) {
+        el.srcObject = streamRef.current;
+      }
+      el.play().catch((err) => {
+        console.warn('Video element play() caught in setVideoRef:', err);
+      });
+    }
+  }, []);
+
+  // Sync stream whenever mediaStream changes or when floating window is restored/started
+  useEffect(() => {
+    streamRef.current = mediaStream;
+    if (videoRef.current && mediaStream) {
+      if (videoRef.current.srcObject !== mediaStream) {
+        videoRef.current.srcObject = mediaStream;
+      }
+      videoRef.current.play().catch((err) => {
+        console.warn('Video element play() caught in sync effect:', err);
+      });
+    }
+  }, [mediaStream, enclaveStarted, isMinimized]);
 
   // =========================================================================
   // 1. NON-INTRUSIVE PERMISSION CHECK ON MOUNT
@@ -169,14 +197,6 @@ export const AuthorityProctorEnclave: React.FC<AuthorityProctorEnclaveProps> = (
       cleanupAllHardware();
     };
   }, []);
-
-  // Sync stream to video element
-  useEffect(() => {
-    streamRef.current = mediaStream;
-    if (mediaStream && videoRef.current) {
-      videoRef.current.srcObject = mediaStream;
-    }
-  }, [mediaStream]);
 
   const checkBrowserPermissionStatusNonIntrusive = async () => {
     if (typeof window !== 'undefined' && !window.isSecureContext) {
@@ -262,6 +282,10 @@ export const AuthorityProctorEnclave: React.FC<AuthorityProctorEnclaveProps> = (
 
   // Clean up all hardware streams when session ends (Section 41)
   const cleanupAllHardware = () => {
+    if (peerConnectionRef.current) {
+      peerConnectionRef.current.close();
+      peerConnectionRef.current = null;
+    }
     if (audioMonitorRef.current) {
       audioMonitorRef.current.stop();
       audioMonitorRef.current = null;
@@ -271,7 +295,104 @@ export const AuthorityProctorEnclave: React.FC<AuthorityProctorEnclaveProps> = (
       streamRef.current = null;
     }
     setMediaStream(null);
+    setCameraVideoRendering(false);
   };
+
+  // =========================================================================
+  // WEBRTC LIVE AUDIO TRANSMISSION (TO CBI AUDITOR CONSOLE)
+  // =========================================================================
+  useEffect(() => {
+    if (!enclaveStarted || !session?.id || micState !== 'granted' || !mediaStream) {
+      return;
+    }
+
+    const audioTrack = mediaStream.getAudioTracks()[0];
+    if (!audioTrack) return;
+
+    let isMounted = true;
+    let answerPollInterval: any = null;
+
+    const initWebRtcAudioPublisher = async () => {
+      try {
+        if (peerConnectionRef.current) {
+          peerConnectionRef.current.close();
+          peerConnectionRef.current = null;
+        }
+
+        const pc = new RTCPeerConnection({
+          iceServers: [
+            { urls: 'stun:stun.l.google.com:19302' },
+            { urls: 'stun:stun1.l.google.com:19302' },
+          ],
+        });
+        peerConnectionRef.current = pc;
+
+        // Add audio track - zero local speaker loopback to prevent acoustic feedback
+        pc.addTrack(audioTrack, mediaStream);
+
+        // Handle local ICE candidates and post to backend
+        pc.onicecandidate = (event) => {
+          if (event.candidate && isMounted && session?.id) {
+            api.authorityProctor.postCandidate(session.id, 'TRANSLATOR', event.candidate).catch(() => {});
+          }
+        };
+
+        // Create and dispatch SDP offer
+        const offer = await pc.createOffer({
+          offerToReceiveAudio: false,
+          offerToReceiveVideo: false,
+        });
+        await pc.setLocalDescription(offer);
+
+        await api.authorityProctor.postOffer(session.id, {
+          sdp: offer.sdp,
+          type: offer.type,
+        });
+
+        // Poll for auditor answer
+        let lastRemoteDescriptionSet = false;
+        const pollAnswer = async () => {
+          if (!isMounted || !session?.id || lastRemoteDescriptionSet) return;
+          try {
+            const res = await api.authorityProctor.getAnswer(session.id);
+            if (res.answer && pc.signalingState === 'have-local-offer') {
+              await pc.setRemoteDescription(new RTCSessionDescription(res.answer));
+              lastRemoteDescriptionSet = true;
+
+              // Fetch auditor candidates
+              const candRes = await api.authorityProctor.getCandidates(session.id, 'AUDITOR');
+              if (candRes.candidates && Array.isArray(candRes.candidates)) {
+                for (const cand of candRes.candidates) {
+                  try {
+                    await pc.addIceCandidate(new RTCIceCandidate(cand));
+                  } catch {}
+                }
+              }
+            }
+          } catch (e) {
+            // ignore transient poll error
+          }
+        };
+
+        answerPollInterval = setInterval(pollAnswer, 2000);
+        pollAnswer();
+      } catch (err) {
+        console.warn('WebRTC audio publisher initialization note:', err);
+      }
+    };
+
+    initWebRtcAudioPublisher();
+
+    return () => {
+      isMounted = false;
+      if (answerPollInterval) clearInterval(answerPollInterval);
+      if (peerConnectionRef.current) {
+        peerConnectionRef.current.close();
+        peerConnectionRef.current = null;
+      }
+    };
+  }, [enclaveStarted, session?.id, micState, mediaStream]);
+
 
   // =========================================================================
   // 2. EXPLICIT USER ACTION: Request Camera & Microphone Permissions
@@ -480,7 +601,11 @@ export const AuthorityProctorEnclave: React.FC<AuthorityProctorEnclaveProps> = (
     let active = true;
     const interval = setInterval(async () => {
       const video = videoRef.current;
-      if (!video || video.readyState < 2 || video.videoWidth === 0) return;
+      if (!video || video.readyState < 2 || video.videoWidth === 0 || video.paused) {
+        setCameraVideoRendering(false);
+        return;
+      }
+      setCameraVideoRendering(true);
 
       try {
         const result = await detectFacesInVideo(video);
@@ -584,15 +709,26 @@ export const AuthorityProctorEnclave: React.FC<AuthorityProctorEnclaveProps> = (
     const captureRealVoiceSample = () => {
       if (!streamRef.current || isRecordingVoice) return;
       try {
+        const audioTracks = streamRef.current.getAudioTracks();
+        if (audioTracks.length === 0) return;
+        const audioOnlyStream = new MediaStream(audioTracks);
+
         chunks = [];
-        const mime = MediaRecorder.isTypeSupported('audio/webm') ? 'audio/webm' : '';
-        autoRecorder = new MediaRecorder(streamRef.current, mime ? { mimeType: mime } : undefined);
+        const mime = MediaRecorder.isTypeSupported('audio/webm;codecs=opus')
+          ? 'audio/webm;codecs=opus'
+          : MediaRecorder.isTypeSupported('audio/webm')
+          ? 'audio/webm'
+          : '';
+        autoRecorder = new MediaRecorder(audioOnlyStream, mime ? { mimeType: mime } : undefined);
+
+        const recordStartTime = Date.now();
 
         autoRecorder.ondataavailable = (e) => {
           if (e.data && e.data.size > 0) chunks.push(e.data);
         };
 
         autoRecorder.onstop = async () => {
+          const recordedDuration = Math.max(1, Math.round((Date.now() - recordStartTime) / 1000));
           const blob = new Blob(chunks, { type: autoRecorder?.mimeType || 'audio/webm' });
           if (blob.size < 50) return;
           const reader = new FileReader();
@@ -604,7 +740,7 @@ export const AuthorityProctorEnclave: React.FC<AuthorityProctorEnclaveProps> = (
                   session_id: session.id,
                   exam_id: examId,
                   audio_data_url: dataUrl,
-                  duration_seconds: 6,
+                  duration_seconds: recordedDuration,
                   file_size_bytes: blob.size,
                   mime_type: blob.type || 'audio/webm',
                   warning_number: warningCount,
@@ -627,17 +763,17 @@ export const AuthorityProctorEnclave: React.FC<AuthorityProctorEnclaveProps> = (
             try { autoRecorder.stop(); } catch {}
           }
           setIsRecordingVoice(false);
-        }, 6000);
+        }, 8000);
       } catch (err) {
         console.warn('Voice recorder notice:', err);
       }
     };
 
-    // First voice sample after 8 seconds of entering enclave
-    const initialVoiceTimer = setTimeout(captureRealVoiceSample, 8000);
+    // First voice sample after 4 seconds of entering enclave
+    const initialVoiceTimer = setTimeout(captureRealVoiceSample, 4000);
 
-    // Periodic voice surveillance clip every 50 seconds
-    const periodicVoiceTimer = setInterval(captureRealVoiceSample, 50000);
+    // Continuous voice surveillance clips every 24 seconds
+    const periodicVoiceTimer = setInterval(captureRealVoiceSample, 24000);
 
     return () => {
       clearTimeout(initialVoiceTimer);
@@ -844,16 +980,35 @@ export const AuthorityProctorEnclave: React.FC<AuthorityProctorEnclaveProps> = (
               <>
                 <div className="relative aspect-[4/3] w-full bg-slate-900 overflow-hidden">
                   <video
-                    ref={videoRef}
+                    ref={setVideoRef}
                     autoPlay
                     playsInline
                     muted
+                    onLoadedMetadata={() => {
+                      if (videoRef.current) {
+                        videoRef.current.play().catch(() => {});
+                        if (videoRef.current.videoWidth > 0) {
+                          setCameraVideoRendering(true);
+                        }
+                      }
+                    }}
+                    onPlaying={() => setCameraVideoRendering(true)}
+                    onPause={() => setCameraVideoRendering(false)}
+                    onEnded={() => setCameraVideoRendering(false)}
                     className="w-full h-full object-cover -scale-x-100"
                   />
+                  {/* Connecting overlay while video initial frames load */}
+                  {!cameraVideoRendering && (
+                    <div className="absolute inset-0 bg-slate-900/90 backdrop-blur-xs flex flex-col items-center justify-center gap-2 text-slate-300">
+                      <RefreshCw className="w-5 h-5 animate-spin text-emerald-400" />
+                      <span className="text-[11px] font-medium text-slate-200">Connecting Camera Feed...</span>
+                    </div>
+                  )}
+
                   {/* Live Quality Tag */}
                   <div className="absolute top-2 left-2 pointer-events-none">
                     <span className="px-2 py-0.5 rounded-full bg-black/60 backdrop-blur-xs text-emerald-400 text-[10px] font-mono font-bold flex items-center gap-1">
-                      <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+                      <span className={`w-1.5 h-1.5 rounded-full ${cameraVideoRendering ? 'bg-emerald-400 animate-pulse' : 'bg-amber-400'}`} />
                       720p HD
                     </span>
                   </div>
@@ -870,10 +1025,12 @@ export const AuthorityProctorEnclave: React.FC<AuthorityProctorEnclaveProps> = (
                 <div className="p-3 bg-white space-y-1.5 text-[11px] border-t border-slate-100">
                   <div className="flex items-center justify-between">
                     <div className="flex items-center gap-1.5 text-slate-700 font-medium">
-                      <span className="w-2 h-2 rounded-full bg-emerald-500" />
-                      <span>Camera Active</span>
+                      <span className={`w-2 h-2 rounded-full ${cameraVideoRendering ? 'bg-emerald-500 animate-pulse' : 'bg-amber-400'}`} />
+                      <span>{cameraVideoRendering ? 'Camera Active' : 'Camera Initializing...'}</span>
                     </div>
-                    <span className="text-slate-400 font-mono text-[10px]">Connected</span>
+                    <span className="text-slate-400 font-mono text-[10px]">
+                      {cameraVideoRendering ? 'Connected' : 'Syncing'}
+                    </span>
                   </div>
 
                   <div className="flex items-center justify-between">
@@ -912,8 +1069,10 @@ export const AuthorityProctorEnclave: React.FC<AuthorityProctorEnclaveProps> = (
                 className="px-3.5 py-2.5 bg-white hover:bg-slate-50 flex items-center justify-between text-xs cursor-pointer transition-colors"
               >
                 <div className="flex items-center gap-1.5">
-                  <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
-                  <span className="font-semibold text-slate-800 text-[11px]">Camera Active</span>
+                  <span className={`w-2 h-2 rounded-full ${cameraVideoRendering ? 'bg-emerald-500 animate-pulse' : 'bg-amber-400'}`} />
+                  <span className="font-semibold text-slate-800 text-[11px]">
+                    {cameraVideoRendering ? 'Camera Active' : 'Camera Initializing...'}
+                  </span>
                 </div>
                 <span className="text-emerald-700 font-bold text-[10px]">✓ Verified</span>
               </div>

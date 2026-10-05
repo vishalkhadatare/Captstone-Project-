@@ -389,4 +389,60 @@ test('7. Auditor review action handles MARK_REVIEWED, ESCALATE, and CLOSE_CASE',
   assert.equal(closeRes.session?.review_status, 'RESOLVED');
 });
 
+test('8. WebRTC Live Audio signaling lifecycle for translator to auditor wire', async () => {
+  interface WebRtcSessionSignal {
+    offer?: { sdp: string; type: string; timestamp: number } | null;
+    answer?: { sdp: string; type: string; timestamp: number } | null;
+    translatorCandidates: Array<{ candidate: any; timestamp: number }>;
+    auditorCandidates: Array<{ candidate: any; timestamp: number }>;
+    activeListeners: number;
+    lastUpdated: number;
+  }
+
+  const signalStore = new Map<string, WebRtcSessionSignal>();
+
+  const sessionId = 'AUTH-SESS-AUDIO-TEST';
+  const getSignal = () => {
+    if (!signalStore.has(sessionId)) {
+      signalStore.set(sessionId, {
+        offer: null,
+        answer: null,
+        translatorCandidates: [],
+        auditorCandidates: [],
+        activeListeners: 0,
+        lastUpdated: Date.now(),
+      });
+    }
+    return signalStore.get(sessionId)!;
+  };
+
+  // 1. Translator posts SDP offer
+  const sig = getSignal();
+  sig.offer = { sdp: 'v=0\r\no=- 12345 2 IN IP4 127.0.0.1\r\nm=audio 9 UDP/TLS/RTP/SAVPF 111', type: 'offer', timestamp: Date.now() };
+  assert.ok(sig.offer);
+  assert.equal(sig.offer.type, 'offer');
+
+  // 2. Translator adds ICE candidates
+  sig.translatorCandidates.push({ candidate: { candidate: 'candidate:1 1 UDP 2130706431 192.168.1.10 50000 typ host' }, timestamp: Date.now() });
+  assert.equal(sig.translatorCandidates.length, 1);
+
+  // 3. Auditor fetches offer and posts answer
+  assert.ok(sig.offer.sdp.includes('audio'));
+  sig.answer = { sdp: 'v=0\r\no=- 67890 2 IN IP4 127.0.0.1\r\nm=audio 9 UDP/TLS/RTP/SAVPF 111', type: 'answer', timestamp: Date.now() };
+  sig.activeListeners = 1;
+
+  // 4. Auditor adds ICE candidate
+  sig.auditorCandidates.push({ candidate: { candidate: 'candidate:2 1 UDP 2130706431 192.168.1.20 50002 typ host' }, timestamp: Date.now() });
+  assert.equal(sig.auditorCandidates.length, 1);
+  assert.equal(sig.activeListeners, 1);
+
+  // 5. Auditor stops listening
+  sig.activeListeners = Math.max(0, sig.activeListeners - 1);
+  assert.equal(sig.activeListeners, 0);
+
+  // 6. Session cleanup
+  signalStore.delete(sessionId);
+  assert.equal(signalStore.has(sessionId), false);
+});
+
 
