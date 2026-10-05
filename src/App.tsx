@@ -47,9 +47,9 @@ export function App() {
     trusted_devices: 'trusted-devices',
     all_examinations: 'all-examinations',
     create_examination: 'create-examination',
-    question_workflow: 'competitive-examination',
+    question_workflow: 'question-workflow',
     question_pools: 'question-pools',
-    blueprint_pattern: 'competitive-examination',
+    blueprint_pattern: 'blueprint-pattern',
     paper_generation: 'paper-generation',
     multi_paper_generator: 'multi-paper-generator',
     paper_versions: 'paper-versions',
@@ -61,10 +61,20 @@ export function App() {
     print_management: 'print-management',
     device_status: 'device-status',
     audit_trail: 'audit-trail',
+    user_activity: 'user-activity',
     login_history: 'login-history',
+    device_activity: 'device-activity',
+    role_activity: 'role-activity',
+    paper_security: 'paper-security',
     paper_events: 'paper-events',
+    encryption_unlock: 'encryption-unlock',
+    print_security: 'print-security',
     printing_events: 'printing-events',
     regeneration_events: 'regeneration-events',
+    proctoring_evidence: 'proctoring-evidence',
+    watermark_investigations: 'watermark-investigations',
+    security_reports: 'security-reports',
+    user_activity_reports: 'user-activity-reports',
     proctor_dashboard: 'proctor-dashboard',
   };
 
@@ -81,10 +91,6 @@ export function App() {
 
   const syncTabFromLocation = () => {
     const hash = window.location.hash.replace(/^#\/?/, '').replace(/^#/, '');
-    if (hash === 'question-workflow' || hash === 'blueprint-pattern') {
-      setActiveSubTab('question_workflow');
-      return;
-    }
     const matchedTab = (Object.entries(tabToHashMap) as [NavSubTab, string][]).find(([, value]) => value === hash)?.[0];
     const requestedTab = matchedTab === 'proctor_dashboard' && (currentUser?.role === 'ORG_OWNER' || currentUser?.role === 'EXAM_MANAGER')
       ? 'dashboard'

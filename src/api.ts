@@ -1144,9 +1144,39 @@ export const api = {
     }),
 
   // Audit & Security
-  getAuditEvents: () => request<{ events: AuditEvent[] }>('/api/audit/events'),
+  getAuditEvents: (params?: Record<string, string>) => {
+    const qs = params ? '?' + new URLSearchParams(params).toString() : '';
+    return request<{ events: AuditEvent[]; total?: number }>(`/api/audit/events${qs}`);
+  },
+  getAuditorDashboardMetrics: () => request<AuditorDashboardMetrics>('/api/audit/dashboard-stats'),
+  verifyAuditIntegrity: () => request<{ verified: boolean; chainedCount: number; brokenAt?: string; status: string }>('/api/audit/verify-integrity'),
+  getUserActivity: () => request<{ users: UserSessionActivity[] }>('/api/audit/user-activity'),
+  getUserSecurityProfile: (userId: string) => request<UserSecurityProfile>(`/api/audit/user-profile/${encodeURIComponent(userId)}`),
+  getDeviceActivity: () => request<{ devices: DeviceActivityItem[] }>('/api/audit/device-activity'),
+  getDeviceHistory: (deviceId: string) => request<{ events: AuditEvent[]; securityEvents: SecurityEvent[] }>(`/api/audit/device-history/${encodeURIComponent(deviceId)}`),
+  getPaperSecurityOverview: () => request<{ papers: PaperSecurityOverview[] }>('/api/audit/paper-security'),
   getSecurityEvents: () => request<{ events: SecurityEvent[]; metrics: any }>('/api/security/events'),
+  transitionSecurityEvent: (id: string, payload: { status: string; notes?: string }) =>
+    request<{ message: string; event: SecurityEvent }>(`/api/security/events/${encodeURIComponent(id)}/transition`, {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    }),
   resolveSecurityEvent: (event_id: string) => request<{ message: string }>('/api/security/resolve-event', { method: 'POST', body: JSON.stringify({ event_id }) }),
+  getSecurityEvidence: () => request<{ evidence: SecurityEvidenceRecord[] }>('/api/audit/evidence'),
+  investigateWatermark: (payload: { leak_source_type: string; input_reference?: string; extracted_signature?: string }) =>
+    request<{ investigation: WatermarkInvestigationRecord }>('/api/audit/watermark/investigate', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    }),
+  getWatermarkInvestigations: () => request<{ investigations: WatermarkInvestigationRecord[] }>('/api/audit/watermark/investigations'),
+  getAuditReportSummary: (params?: Record<string, string>) => {
+    const qs = params ? '?' + new URLSearchParams(params).toString() : '';
+    return request<AuditReportSummary>(`/api/audit/reports/summary${qs}`);
+  },
+  exportAuditReport: (params?: Record<string, string>) => {
+    const qs = params ? '?' + new URLSearchParams(params).toString() : '';
+    return request<{ data: any[]; summary: any }>(`/api/audit/reports/export${qs}`);
+  },
   getNotifications: () => request<{ notifications: NotificationItem[] }>('/api/notifications'),
   markNotificationRead: (id: string) => request<{ message: string }>(`/api/notifications/${id}/read`, { method: 'POST' }),
 

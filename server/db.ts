@@ -162,11 +162,11 @@ export async function hydrateFromPostgres(db: Database): Promise<void> {
     'generated_papers',
     'generated_paper_questions',
     'candidate_paper_assignments',
-    'competitive_exams',
-    'competitive_question_pool_files',
-    'competitive_question_pools',
-    'competitive_questions',
-    'competitive_generated_papers',
+    'security_evidence',
+    'watermark_investigations',
+    'user_sessions',
+    'early_unlock_requests',
+    'key_contribution_requests',
   ];
 
   let totalRowsLoaded = 0;
@@ -893,6 +893,89 @@ function initializeSchema(db: Database) {
       created_at TEXT NOT NULL
     );
 
+    -- Security Evidence Vault (Proctoring Webcam Snapshots with Cryptographic Hash)
+    CREATE TABLE IF NOT EXISTS security_evidence (
+      id TEXT PRIMARY KEY,
+      org_id TEXT NOT NULL,
+      user_id TEXT,
+      exam_id TEXT,
+      paper_id TEXT,
+      session_id TEXT,
+      device_id TEXT,
+      event_id TEXT,
+      captured_at TEXT NOT NULL,
+      mime_type TEXT NOT NULL DEFAULT 'image/jpeg',
+      image_data TEXT,
+      hash TEXT NOT NULL,
+      created_at TEXT NOT NULL
+    );
+
+    -- Watermark Forensics Investigations
+    CREATE TABLE IF NOT EXISTS watermark_investigations (
+      id TEXT PRIMARY KEY,
+      org_id TEXT NOT NULL,
+      investigator_user_id TEXT NOT NULL,
+      investigator_role TEXT NOT NULL,
+      leak_source_type TEXT NOT NULL,
+      input_reference TEXT,
+      extracted_signature TEXT,
+      status TEXT NOT NULL,
+      resolved_exam_id TEXT,
+      resolved_paper_id TEXT,
+      resolved_paper_version TEXT,
+      resolved_copy_id TEXT,
+      resolved_centre_id TEXT,
+      resolved_device_id TEXT,
+      resolved_print_tx TEXT,
+      resolved_details_json TEXT,
+      created_at TEXT NOT NULL
+    );
+
+    -- User Session Activity Tracking
+    CREATE TABLE IF NOT EXISTS user_sessions (
+      id TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL,
+      user_email TEXT,
+      role TEXT,
+      org_id TEXT NOT NULL,
+      device_id TEXT,
+      ip_address TEXT,
+      login_time TEXT NOT NULL,
+      logout_time TEXT,
+      session_duration_seconds INTEGER DEFAULT 0,
+      auth_result TEXT NOT NULL DEFAULT 'SUCCESS',
+      failed_attempts INTEGER DEFAULT 0,
+      status TEXT NOT NULL DEFAULT 'ACTIVE',
+      created_at TEXT NOT NULL
+    );
+
+    -- Early Unlock Requests
+    CREATE TABLE IF NOT EXISTS early_unlock_requests (
+      id TEXT PRIMARY KEY,
+      org_id TEXT NOT NULL,
+      exam_id TEXT NOT NULL,
+      requested_by TEXT NOT NULL,
+      reason TEXT NOT NULL,
+      target_unlock_time TEXT NOT NULL,
+      status TEXT NOT NULL DEFAULT 'PENDING',
+      reviewed_by TEXT,
+      reviewed_at TEXT,
+      created_at TEXT NOT NULL
+    );
+
+    -- Key Contribution Requests
+    CREATE TABLE IF NOT EXISTS key_contribution_requests (
+      id TEXT PRIMARY KEY,
+      org_id TEXT NOT NULL,
+      exam_id TEXT NOT NULL,
+      paper_version_id TEXT NOT NULL,
+      contributor_user_id TEXT,
+      contributor_role TEXT,
+      status TEXT NOT NULL DEFAULT 'PENDING',
+      share_index INTEGER,
+      created_at TEXT NOT NULL
+    );
+
     -- Exam Attempts (Candidate proctored attempts)
     CREATE TABLE IF NOT EXISTS exam_attempts (
       id TEXT PRIMARY KEY,
@@ -1142,8 +1225,30 @@ function initializeSchema(db: Database) {
 
   safeAddColumn('proctor_events', 'session_id TEXT');
   safeAddColumn('proctor_events', 'user_id TEXT');
-  safeAddColumn('proctor_events', 'user_role TEXT');
   safeAddColumn('proctor_events', 'snapshot_thumbnail TEXT');
+
+  // Auditor & Security Schema Compatibility Columns
+  safeAddColumn('audit_events', 'event_category TEXT DEFAULT "SYSTEM"');
+  safeAddColumn('audit_events', 'severity TEXT DEFAULT "INFO"');
+  safeAddColumn('audit_events', 'target_user_id TEXT');
+  safeAddColumn('audit_events', 'paper_id TEXT');
+  safeAddColumn('audit_events', 'paper_version_id TEXT');
+  safeAddColumn('audit_events', 'session_id TEXT');
+  safeAddColumn('audit_events', 'centre_id TEXT');
+  safeAddColumn('audit_events', 'previous_event_hash TEXT');
+  safeAddColumn('audit_events', 'event_hash TEXT');
+
+  safeAddColumn('security_events', 'role TEXT');
+  safeAddColumn('security_events', 'exam_id TEXT');
+  safeAddColumn('security_events', 'paper_id TEXT');
+  safeAddColumn('security_events', 'device_id TEXT');
+  safeAddColumn('security_events', 'status TEXT DEFAULT "OPEN"');
+  safeAddColumn('security_events', 'resolved_by TEXT');
+  safeAddColumn('security_events', 'resolved_at TEXT');
+  safeAddColumn('security_events', 'resolution_notes TEXT');
+
+  safeAddColumn('trusted_devices', 'last_seen_at TEXT');
+  safeAddColumn('trusted_devices', 'auth_failures INTEGER DEFAULT 0');
 
   try {
     const proctorCols = executeQuery(db, 'PRAGMA table_info(proctor_events)', []);

@@ -582,15 +582,22 @@ async function startServer() {
     };
   };
 
-  // Helper to log Audit Events
+  // Helper to log Audit Events with cryptographic SHA-256 hash chaining
   async function logAuditEvent(params: {
     event_type: string;
+    event_category?: string;
+    severity?: 'INFO' | 'LOW' | 'MEDIUM' | 'HIGH' | 'CRITICAL';
     user_id?: string;
     user_email?: string;
     role?: string;
+    target_user_id?: string;
     org_id?: string;
     exam_id?: string;
+    paper_id?: string;
+    paper_version_id?: string;
     device_id?: string;
+    session_id?: string;
+    centre_id?: string;
     ip_address?: string;
     status?: string;
     details?: any;
@@ -598,25 +605,50 @@ async function startServer() {
     try {
       const db = await getDb();
       const id = uuidv4();
+      const nowIso = new Date().toISOString();
+      const orgId = params.org_id || null;
+
+      const lastRow = orgId
+        ? executeQuery(db, 'SELECT event_hash FROM audit_events WHERE org_id = ? ORDER BY created_at DESC LIMIT 1', [orgId])[0]
+        : executeQuery(db, 'SELECT event_hash FROM audit_events ORDER BY created_at DESC LIMIT 1', [])[0];
+
+      const previous_event_hash = lastRow?.event_hash || 'GENESIS_0000000000000000000000000000000000000000000000000000000000000000';
+      const event_hash = crypto
+        .createHash('sha256')
+        .update(previous_event_hash + id + params.event_type + (orgId || '') + (params.user_id || '') + nowIso)
+        .digest('hex');
+
       const tx_ref = generateTxHash(params.event_type + (params.user_id || ''));
       executeRun(
         db,
-        `INSERT INTO audit_events (id, event_type, user_id, user_email, role, org_id, exam_id, device_id, ip_address, status, tx_ref, details_json, created_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        `INSERT INTO audit_events (
+          id, event_type, event_category, severity, user_id, user_email, role, target_user_id,
+          org_id, exam_id, paper_id, paper_version_id, device_id, session_id, centre_id,
+          ip_address, status, tx_ref, details_json, previous_event_hash, event_hash, created_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         [
           id,
           params.event_type,
+          params.event_category || 'SYSTEM',
+          params.severity || 'INFO',
           params.user_id || null,
           params.user_email || null,
           params.role || null,
-          params.org_id || null,
+          params.target_user_id || null,
+          orgId,
           params.exam_id || null,
+          params.paper_id || null,
+          params.paper_version_id || null,
           params.device_id || null,
+          params.session_id || null,
+          params.centre_id || null,
           params.ip_address || '127.0.0.1',
           params.status || 'SUCCESS',
           tx_ref,
           params.details ? JSON.stringify(params.details) : null,
-          new Date().toISOString(),
+          previous_event_hash,
+          event_hash,
+          nowIso,
         ]
       );
     } catch (e) {
@@ -677,11 +709,16 @@ async function startServer() {
   // Helper to log Security & Threat Events
   async function logSecurityEvent(params: {
     event_type: string;
-    severity: 'LOW' | 'MEDIUM' | 'HIGH' | 'CRITICAL';
+    severity: 'INFO' | 'LOW' | 'MEDIUM' | 'HIGH' | 'CRITICAL';
     user_id?: string;
+    role?: string;
     org_id?: string;
+    exam_id?: string;
+    paper_id?: string;
+    device_id?: string;
     ip_address?: string;
     details?: any;
+    status?: string;
   }) {
     try {
       const db = await getDb();
@@ -698,22 +735,73 @@ async function startServer() {
 
       executeRun(
         db,
-        `INSERT INTO security_events (id, event_type, severity, risk_score, user_id, org_id, ip_address, details_json, resolved, timestamp)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, ?)`,
+        `INSERT INTO security_events (id, event_type, severity, risk_score, user_id, role, org_id, exam_id, paper_id, device_id, ip_address, details_json, resolved, status, timestamp)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?)`,
         [
           id,
           params.event_type,
           params.severity,
           threatScore.riskScore,
           params.user_id || null,
+          params.role || null,
           params.org_id || null,
+          params.exam_id || null,
+          params.paper_id || null,
+          params.device_id || null,
           params.ip_address || '127.0.0.1',
           params.details ? JSON.stringify(params.details) : null,
+          params.status || 'OPEN',
           new Date().toISOString(),
         ]
       );
     } catch (e) {
       console.error('Security event logging failure:', e);
+    }
+  }
+
+  // Helper to store proctoring camera evidence securely with cryptographic SHA-256 hash
+  async function storeSecurityEvidence(params: {
+    org_id: string;
+    user_id?: string;
+    exam_id?: string;
+    paper_id?: string;
+    session_id?: string;
+    device_id?: string;
+    event_id?: string;
+    mime_type?: string;
+    image_data: string;
+  }): Promise<{ id: string; hash: string } | null> {
+    if (!params.image_data) return null;
+    try {
+      const db = await getDb();
+      const id = `EVID-${uuidv4().substring(0, 8).toUpperCase()}`;
+      const nowIso = new Date().toISOString();
+      const hash = crypto.createHash('sha256').update(params.image_data).digest('hex');
+
+      executeRun(
+        db,
+        `INSERT INTO security_evidence (id, org_id, user_id, exam_id, paper_id, session_id, device_id, event_id, captured_at, mime_type, image_data, hash, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        [
+          id,
+          params.org_id,
+          params.user_id || null,
+          params.exam_id || null,
+          params.paper_id || null,
+          params.session_id || null,
+          params.device_id || null,
+          params.event_id || null,
+          nowIso,
+          params.mime_type || 'image/jpeg',
+          params.image_data,
+          hash,
+          nowIso,
+        ]
+      );
+      return { id, hash };
+    } catch (e) {
+      console.error('Security evidence storage error:', e);
+      return null;
     }
   }
 
@@ -11220,35 +11308,374 @@ async function startServer() {
   // 8. AUDIT, THREAT DETECTION & SECURITY
   // ==========================================
 
-  // Audit Events
-  app.get('/api/audit/events', authenticateToken, async (req: Request, res: Response) => {
+  // Auditor Dashboard Metrics (100% database-driven from real records)
+  app.get('/api/audit/dashboard-stats', authenticateToken, requireRole(['AUDITOR', 'ORG_OWNER']), async (req: Request, res: Response) => {
     try {
       const db = await getDb();
-      const events = executeQuery(
-        db,
-        'SELECT * FROM audit_events WHERE org_id = ? OR org_id IS NULL ORDER BY created_at DESC LIMIT 200',
-        [req.user!.org_id]
-      );
-      return res.json({ events });
+      const orgId = req.user!.org_id;
+
+      const totalAuditEvents = Number(executeQuery(db, 'SELECT COUNT(*) as c FROM audit_events WHERE org_id = ?', [orgId])[0]?.c || 0);
+
+      const startOfDay = new Date();
+      startOfDay.setHours(0, 0, 0, 0);
+      const todayIso = startOfDay.toISOString();
+      const todayEvents = Number(executeQuery(db, 'SELECT COUNT(*) as c FROM audit_events WHERE org_id = ? AND created_at >= ?', [orgId, todayIso])[0]?.c || 0);
+
+      const highCriticalEvents = Number(executeQuery(db, 'SELECT COUNT(*) as c FROM security_events WHERE org_id = ? AND severity IN ("HIGH", "CRITICAL")', [orgId])[0]?.c || 0);
+      const activeSecurityEvents = Number(executeQuery(db, 'SELECT COUNT(*) as c FROM security_events WHERE org_id = ? AND (resolved = 0 OR status NOT IN ("RESOLVED", "DISMISSED"))', [orgId])[0]?.c || 0);
+      const failedLogins = Number(executeQuery(db, 'SELECT COUNT(*) as c FROM audit_events WHERE org_id = ? AND event_type IN ("LOGIN_FAILED", "FAILED_LOGIN")', [orgId])[0]?.c || 0);
+      const unauthorizedAttempts = Number(executeQuery(db, 'SELECT COUNT(*) as c FROM security_events WHERE org_id = ? AND event_type LIKE "%UNAUTHORIZED%"', [orgId])[0]?.c || 0);
+      const suspendedDevices = Number(executeQuery(db, 'SELECT COUNT(*) as c FROM trusted_devices WHERE org_id = ? AND status IN ("SUSPENDED", "DISABLED", "REVOKED")', [orgId])[0]?.c || 0);
+      const proctoringIncidents = Number(executeQuery(db, 'SELECT COUNT(*) as c FROM proctor_events pe JOIN authority_proctor_sessions aps ON pe.session_id = aps.id WHERE aps.org_id = ? AND pe.severity IN ("MEDIUM", "HIGH", "CRITICAL")', [orgId])[0]?.c || 0);
+      const pendingKeyRequests = Number(executeQuery(db, 'SELECT COUNT(*) as c FROM key_contribution_requests WHERE org_id = ? AND status = "PENDING"', [orgId])[0]?.c || 0);
+      const pendingUnlockRequests = Number(executeQuery(db, 'SELECT COUNT(*) as c FROM early_unlock_requests WHERE org_id = ? AND status = "PENDING"', [orgId])[0]?.c || 0);
+      const printViolations = Number(executeQuery(db, 'SELECT COUNT(*) as c FROM security_events WHERE org_id = ? AND (event_type LIKE "%PRINT%" OR details_json LIKE "%print%")', [orgId])[0]?.c || 0);
+      const watermarkInvestigations = Number(executeQuery(db, 'SELECT COUNT(*) as c FROM watermark_investigations WHERE org_id = ?', [orgId])[0]?.c || 0);
+
+      // Verify SHA-256 event hash chain integrity for the organization
+      const chainEvents = executeQuery(db, 'SELECT id, event_type, org_id, user_id, previous_event_hash, event_hash, created_at FROM audit_events WHERE org_id = ? ORDER BY created_at ASC', [orgId]);
+      let chainValid = true;
+      let prevHash = 'GENESIS_0000000000000000000000000000000000000000000000000000000000000000';
+      for (const ev of chainEvents) {
+        if (ev.previous_event_hash && ev.previous_event_hash !== prevHash) {
+          chainValid = false;
+          break;
+        }
+        if (ev.event_hash) {
+          const expected = crypto.createHash('sha256').update((ev.previous_event_hash || prevHash) + ev.id + ev.event_type + (ev.org_id || '') + (ev.user_id || '') + ev.created_at).digest('hex');
+          if (expected !== ev.event_hash) {
+            chainValid = false;
+            break;
+          }
+          prevHash = ev.event_hash;
+        }
+      }
+
+      return res.json({
+        totalAuditEvents,
+        todayEvents,
+        highCriticalEvents,
+        activeSecurityEvents,
+        failedLogins,
+        unauthorizedAttempts,
+        suspendedDevices,
+        proctoringIncidents,
+        pendingKeyRequests,
+        pendingUnlockRequests,
+        printViolations,
+        watermarkInvestigations,
+        ledgerIntegrity: {
+          verified: chainValid,
+          chainedCount: chainEvents.length,
+          status: chainValid ? 'VERIFIED TAMPER-FREE' : 'INTEGRITY COMPROMISED',
+        },
+      });
+    } catch (e: any) {
+      console.error('Auditor dashboard error:', e);
+      return res.status(500).json({ error: e.message });
+    }
+  });
+
+  // Verify Audit Chain Integrity
+  app.get('/api/audit/verify-integrity', authenticateToken, requireRole(['AUDITOR', 'ORG_OWNER']), async (req: Request, res: Response) => {
+    try {
+      const db = await getDb();
+      const orgId = req.user!.org_id;
+      const chainEvents = executeQuery(db, 'SELECT id, event_type, org_id, user_id, previous_event_hash, event_hash, created_at FROM audit_events WHERE org_id = ? ORDER BY created_at ASC', [orgId]);
+
+      let chainValid = true;
+      let brokenAt: string | null = null;
+      let prevHash = 'GENESIS_0000000000000000000000000000000000000000000000000000000000000000';
+
+      for (const ev of chainEvents) {
+        if (ev.previous_event_hash && ev.previous_event_hash !== prevHash) {
+          chainValid = false;
+          brokenAt = ev.id;
+          break;
+        }
+        if (ev.event_hash) {
+          const expected = crypto.createHash('sha256').update((ev.previous_event_hash || prevHash) + ev.id + ev.event_type + (ev.org_id || '') + (ev.user_id || '') + ev.created_at).digest('hex');
+          if (expected !== ev.event_hash) {
+            chainValid = false;
+            brokenAt = ev.id;
+            break;
+          }
+          prevHash = ev.event_hash;
+        }
+      }
+
+      return res.json({
+        verified: chainValid,
+        chainedCount: chainEvents.length,
+        brokenAt,
+        status: chainValid ? 'TAMPER_FREE' : 'HASH_CHAIN_MISMATCH',
+      });
     } catch (e: any) {
       return res.status(500).json({ error: e.message });
     }
   });
 
-  // Security Events & Threat Metrics
-  app.get('/api/security/events', authenticateToken, async (req: Request, res: Response) => {
+  // Filterable Audit Events
+  app.get('/api/audit/events', authenticateToken, requireRole(['AUDITOR', 'ORG_OWNER']), async (req: Request, res: Response) => {
     try {
       const db = await getDb();
+      const orgId = req.user!.org_id;
+      const { search, category, severity, user_id, role, event_type, exam_id, date_from, date_to, limit = 200 } = req.query;
+
+      let sql = 'SELECT * FROM audit_events WHERE org_id = ?';
+      const params: any[] = [orgId];
+
+      if (category && category !== 'ALL') {
+        sql += ' AND event_category = ?';
+        params.push(String(category));
+      }
+      if (severity && severity !== 'ALL') {
+        sql += ' AND severity = ?';
+        params.push(String(severity));
+      }
+      if (user_id) {
+        sql += ' AND user_id = ?';
+        params.push(String(user_id));
+      }
+      if (role && role !== 'ALL') {
+        sql += ' AND role = ?';
+        params.push(String(role));
+      }
+      if (event_type && event_type !== 'ALL') {
+        sql += ' AND event_type = ?';
+        params.push(String(event_type));
+      }
+      if (exam_id) {
+        sql += ' AND exam_id = ?';
+        params.push(String(exam_id));
+      }
+      if (date_from) {
+        sql += ' AND created_at >= ?';
+        params.push(String(date_from));
+      }
+      if (date_to) {
+        sql += ' AND created_at <= ?';
+        params.push(String(date_to));
+      }
+      if (search) {
+        sql += ' AND (event_type LIKE ? OR user_email LIKE ? OR tx_ref LIKE ? OR details_json LIKE ?)';
+        const pattern = `%${String(search).trim()}%`;
+        params.push(pattern, pattern, pattern, pattern);
+      }
+
+      sql += ' ORDER BY created_at DESC LIMIT ?';
+      params.push(Math.min(500, Number(limit) || 200));
+
+      const events = executeQuery(db, sql, params);
+      return res.json({ events, total: events.length });
+    } catch (e: any) {
+      return res.status(500).json({ error: e.message });
+    }
+  });
+
+  // User & Session Activity
+  app.get('/api/audit/user-activity', authenticateToken, requireRole(['AUDITOR', 'ORG_OWNER']), async (req: Request, res: Response) => {
+    try {
+      const db = await getDb();
+      const orgId = req.user!.org_id;
+
+      const sessions = executeQuery(
+        db,
+        `SELECT s.*, u.full_name as user_name,
+                (SELECT COUNT(*) FROM security_events se WHERE se.user_id = s.user_id) as security_events_count
+         FROM user_sessions s
+         LEFT JOIN users u ON s.user_id = u.id
+         WHERE s.org_id = ?
+         ORDER BY s.login_time DESC
+         LIMIT 100`,
+        [orgId]
+      );
+
+      if (sessions.length === 0) {
+        const users = executeQuery(
+          db,
+          `SELECT u.id as user_id, u.full_name as user_name, u.email as user_email, u.role, u.org_id,
+                  u.last_login_at as login_time, u.status,
+                  (SELECT COUNT(*) FROM security_events se WHERE se.user_id = u.id) as security_events_count
+           FROM users u
+           WHERE u.org_id = ?
+           ORDER BY u.created_at DESC`,
+          [orgId]
+        );
+        const mapped = users.map((u: any) => ({
+          id: `SESS-${u.user_id}`,
+          user_id: u.user_id,
+          user_name: u.user_name,
+          user_email: u.user_email,
+          role: u.role,
+          org_id: u.org_id,
+          ip_address: '127.0.0.1',
+          login_time: u.login_time || new Date().toISOString(),
+          session_duration_seconds: 0,
+          auth_result: 'SUCCESS',
+          failed_attempts: 0,
+          status: u.status,
+          security_events_count: Number(u.security_events_count || 0),
+        }));
+        return res.json({ users: mapped });
+      }
+
+      return res.json({ users: sessions });
+    } catch (e: any) {
+      return res.status(500).json({ error: e.message });
+    }
+  });
+
+  // User Security Profile Detail View
+  app.get('/api/audit/user-profile/:userId', authenticateToken, requireRole(['AUDITOR', 'ORG_OWNER']), async (req: Request, res: Response) => {
+    try {
+      const db = await getDb();
+      const orgId = req.user!.org_id;
+      const targetUserId = req.params.userId;
+
+      const user = executeQuery(db, 'SELECT id, full_name, email, role, org_id, status, created_at FROM users WHERE id = ? AND org_id = ?', [targetUserId, orgId])[0];
+      if (!user) return res.status(404).json({ error: 'User not found in organization.' });
+
+      const recentSessions = executeQuery(db, 'SELECT * FROM user_sessions WHERE user_id = ? ORDER BY login_time DESC LIMIT 20', [targetUserId]);
+      const devices = executeQuery(db, 'SELECT id, device_uuid, device_name, operating_system, status, last_seen_at FROM trusted_devices WHERE user_id = ? AND org_id = ?', [targetUserId, orgId]);
+      const roleActivity = executeQuery(db, 'SELECT * FROM audit_events WHERE (user_id = ? OR target_user_id = ?) AND event_type LIKE "%ROLE%" ORDER BY created_at DESC LIMIT 20', [targetUserId, targetUserId]);
+      const examActivity = executeQuery(db, 'SELECT * FROM audit_events WHERE user_id = ? AND (event_type LIKE "%EXAM%" OR exam_id IS NOT NULL) ORDER BY created_at DESC LIMIT 20', [targetUserId]);
+      const paperActivity = executeQuery(db, 'SELECT * FROM audit_events WHERE user_id = ? AND event_type LIKE "%PAPER%" ORDER BY created_at DESC LIMIT 20', [targetUserId]);
+      const translationActivity = executeQuery(db, 'SELECT * FROM audit_events WHERE user_id = ? AND event_type LIKE "%TRANSLAT%" ORDER BY created_at DESC LIMIT 20', [targetUserId]);
+      const securityIncidents = executeQuery(db, 'SELECT * FROM security_events WHERE user_id = ? AND org_id = ? ORDER BY timestamp DESC LIMIT 20', [targetUserId, orgId]);
+      const printActivity = executeQuery(db, 'SELECT id, copy_id, exam_id, centre_id, printed_at, status FROM print_copies WHERE operator_user_id = ? ORDER BY printed_at DESC LIMIT 20', [targetUserId]);
+
+      return res.json({
+        user,
+        recentSessions,
+        devices,
+        roleActivity,
+        examActivity,
+        paperActivity,
+        translationActivity,
+        securityIncidents,
+        printActivity,
+      });
+    } catch (e: any) {
+      return res.status(500).json({ error: e.message });
+    }
+  });
+
+  // Device Activity
+  app.get('/api/audit/device-activity', authenticateToken, requireRole(['AUDITOR', 'ORG_OWNER']), async (req: Request, res: Response) => {
+    try {
+      const db = await getDb();
+      const orgId = req.user!.org_id;
+
+      const devices = executeQuery(
+        db,
+        `SELECT d.id, d.device_uuid, d.user_id, d.org_id, d.device_name, d.device_model,
+                d.operating_system, d.os_version, COALESCE(d.browser_os, '') as browser_info, d.browser_os, d.ip_address, d.status,
+                d.created_at as first_seen,
+                COALESCE(d.last_seen_at, d.last_authenticated_at, d.created_at) as last_seen,
+                COALESCE(d.auth_failures, 0) as auth_failures,
+                u.full_name as user_name, u.email as user_email, u.role,
+                (SELECT COUNT(*) FROM security_events se WHERE se.device_id = d.id OR se.ip_address = d.ip_address) as security_events_count
+         FROM trusted_devices d
+         LEFT JOIN users u ON d.user_id = u.id
+         WHERE d.org_id = ?
+         ORDER BY d.created_at DESC`,
+        [orgId]
+      );
+
+      return res.json({ devices });
+    } catch (e: any) {
+      return res.status(500).json({ error: e.message });
+    }
+  });
+
+  // Device Audit History
+  app.get('/api/audit/device-history/:deviceId', authenticateToken, requireRole(['AUDITOR', 'ORG_OWNER']), async (req: Request, res: Response) => {
+    try {
+      const db = await getDb();
+      const orgId = req.user!.org_id;
+      const deviceId = req.params.deviceId;
+
+      const events = executeQuery(db, 'SELECT * FROM audit_events WHERE org_id = ? AND device_id = ? ORDER BY created_at DESC LIMIT 50', [orgId, deviceId]);
+      const securityEvents = executeQuery(db, 'SELECT * FROM security_events WHERE org_id = ? AND device_id = ? ORDER BY timestamp DESC LIMIT 50', [orgId, deviceId]);
+
+      return res.json({ events, securityEvents });
+    } catch (e: any) {
+      return res.status(500).json({ error: e.message });
+    }
+  });
+
+  // Paper Security Overview
+  app.get('/api/audit/paper-security', authenticateToken, requireRole(['AUDITOR', 'ORG_OWNER']), async (req: Request, res: Response) => {
+    try {
+      const db = await getDb();
+      const orgId = req.user!.org_id;
+
+      const exams = executeQuery(db, 'SELECT * FROM examinations WHERE org_id = ? ORDER BY created_at DESC', [orgId]);
+      const papers: any[] = [];
+
+      for (const e of exams) {
+        const versions = executeQuery(db, 'SELECT id, version_code, status FROM paper_versions WHERE exam_id = ?', [e.id]);
+        const enc = executeQuery(db, 'SELECT * FROM encrypted_papers WHERE exam_id = ? LIMIT 1', [e.id])[0];
+        const shares = enc ? executeQuery(db, 'SELECT COUNT(*) as c, MAX(threshold) as th FROM key_shares WHERE paper_version_id = ?', [enc.paper_version_id])[0] : null;
+        const totalPrinted = Number(executeQuery(db, 'SELECT COUNT(*) as c FROM print_copies WHERE exam_id = ?', [e.id])[0]?.c || 0);
+        const quotaViolations = Number(executeQuery(db, 'SELECT COUNT(*) as c FROM security_events WHERE exam_id = ? AND (event_type LIKE "%PRINT%" OR details_json LIKE "%quota%")', [e.id])[0]?.c || 0);
+        const earlyUnlock = executeQuery(db, 'SELECT id FROM early_unlock_requests WHERE exam_id = ? AND status = "PENDING"', [e.id]).length > 0;
+
+        const unlockDateTime = new Date(`${e.exam_date}T${e.unlock_time}:00`);
+        const isUnlocked = isNaN(unlockDateTime.getTime()) ? true : Date.now() >= unlockDateTime.getTime();
+
+        papers.push({
+          examId: e.id,
+          examName: e.name,
+          subject: e.subject,
+          category: e.category,
+          examStatus: e.status,
+          versionsCount: versions.length,
+          encrypted: !!enc,
+          algorithm: enc ? 'AES-256-GCM' : undefined,
+          checksumSha256: enc?.checksum_sha256,
+          encryptedAt: enc?.encrypted_at,
+          shamirSharesCount: Number(shares?.c || 0),
+          shamirThreshold: Number(shares?.th || 3),
+          examDate: e.exam_date,
+          examTime: e.exam_time,
+          unlockTime: e.unlock_time,
+          isUnlocked,
+          earlyUnlockPending: earlyUnlock,
+          maxCopies: Number(e.max_copies || 500),
+          totalPrinted,
+          printQuotaViolations: quotaViolations,
+        });
+      }
+
+      return res.json({ papers });
+    } catch (e: any) {
+      return res.status(500).json({ error: e.message });
+    }
+  });
+
+  // Security Events & Threat Metrics with Timeline
+  app.get('/api/security/events', authenticateToken, requireRole(['AUDITOR', 'ORG_OWNER']), async (req: Request, res: Response) => {
+    try {
+      const db = await getDb();
+      const orgId = req.user!.org_id;
+
       const events = executeQuery(
         db,
-        'SELECT * FROM security_events WHERE org_id = ? OR org_id IS NULL ORDER BY timestamp DESC LIMIT 100',
-        [req.user!.org_id]
+        `SELECT se.*, u.full_name as user_name, u.email as user_email
+         FROM security_events se
+         LEFT JOIN users u ON se.user_id = u.id
+         WHERE se.org_id = ? OR se.org_id IS NULL
+         ORDER BY se.timestamp DESC
+         LIMIT 100`,
+        [orgId]
       );
 
       const criticalCount = events.filter(e => e.severity === 'CRITICAL' && !e.resolved).length;
       const highCount = events.filter(e => e.severity === 'HIGH' && !e.resolved).length;
       const averageRisk = events.length > 0
-        ? Math.round((events.reduce((a, b) => a + (b.risk_score || 0), 0) / events.length) * 100) / 100
+        ? Math.round((events.reduce((a: number, b: any) => a + (b.risk_score || 0), 0) / events.length) * 100) / 100
         : 0.05;
 
       return res.json({
@@ -11266,13 +11693,316 @@ async function startServer() {
     }
   });
 
+  // Transition Security Event Status along Investigation Timeline
+  app.post('/api/security/events/:id/transition', authenticateToken, requireRole(['ORG_OWNER', 'AUDITOR']), async (req: Request, res: Response) => {
+    try {
+      const db = await getDb();
+      const orgId = req.user!.org_id;
+      const eventId = req.params.id;
+      const { status, notes } = req.body;
+
+      const validStatuses = ['DETECTED', 'ALERTED', 'OPEN', 'INVESTIGATING', 'ACTION_TAKEN', 'RESOLVED', 'DISMISSED'];
+      if (!validStatuses.includes(status)) {
+        return res.status(400).json({ error: 'Invalid security event status.' });
+      }
+
+      const existing = executeQuery(db, 'SELECT * FROM security_events WHERE id = ? AND (org_id = ? OR org_id IS NULL)', [eventId, orgId])[0];
+      if (!existing) return res.status(404).json({ error: 'Security event not found in organization.' });
+
+      const isResolved = status === 'RESOLVED' || status === 'DISMISSED' ? 1 : 0;
+      const now = new Date().toISOString();
+
+      executeRun(
+        db,
+        'UPDATE security_events SET status = ?, resolved = ?, resolved_by = ?, resolved_at = ?, resolution_notes = ? WHERE id = ?',
+        [status, isResolved, req.user!.id, now, notes || '', eventId]
+      );
+
+      await logAuditEvent({
+        event_type: 'SECURITY_EVENT_STATUS_TRANSITION',
+        event_category: 'SECURITY',
+        severity: 'INFO',
+        user_id: req.user!.id,
+        user_email: req.user!.email,
+        role: req.user!.role,
+        org_id: orgId,
+        details: { eventId, from: existing.status, to: status, notes },
+      });
+
+      const updated = executeQuery(db, 'SELECT * FROM security_events WHERE id = ?', [eventId])[0];
+      return res.json({ message: `Security event transitioned to ${status}.`, event: updated });
+    } catch (e: any) {
+      return res.status(500).json({ error: e.message });
+    }
+  });
+
   // Resolve Security Alert
   app.post('/api/security/resolve-event', authenticateToken, requireRole(['ORG_OWNER', 'AUDITOR']), async (req: Request, res: Response) => {
     try {
-      const { event_id } = req.body;
+      const { event_id, notes } = req.body;
       const db = await getDb();
-      executeRun(db, 'UPDATE security_events SET resolved = 1 WHERE id = ?', [event_id]);
+      const orgId = req.user!.org_id;
+
+      const now = new Date().toISOString();
+      executeRun(
+        db,
+        'UPDATE security_events SET resolved = 1, status = "RESOLVED", resolved_by = ?, resolved_at = ?, resolution_notes = ? WHERE id = ? AND (org_id = ? OR org_id IS NULL)',
+        [req.user!.id, now, notes || 'Resolved by auditor', event_id, orgId]
+      );
+
+      await logAuditEvent({
+        event_type: 'SECURITY_EVENT_RESOLVED',
+        event_category: 'SECURITY',
+        severity: 'INFO',
+        user_id: req.user!.id,
+        user_email: req.user!.email,
+        role: req.user!.role,
+        org_id: orgId,
+        details: { event_id, resolved_at: now },
+      });
+
       return res.json({ message: 'Security incident resolved and archived.' });
+    } catch (e: any) {
+      return res.status(500).json({ error: e.message });
+    }
+  });
+
+  // Security Evidence Vault
+  app.get('/api/audit/evidence', authenticateToken, requireRole(['AUDITOR', 'ORG_OWNER']), async (req: Request, res: Response) => {
+    try {
+      const db = await getDb();
+      const orgId = req.user!.org_id;
+
+      const rows = executeQuery(
+        db,
+        `SELECT se.*, u.full_name as user_name, u.email as user_email, e.name as exam_name
+         FROM security_evidence se
+         LEFT JOIN users u ON se.user_id = u.id
+         LEFT JOIN examinations e ON se.exam_id = e.id
+         WHERE se.org_id = ?
+         ORDER BY se.captured_at DESC
+         LIMIT 100`,
+        [orgId]
+      );
+
+      const evidence = rows.map((r: any) => {
+        let integrity_status: 'VALID' | 'TAMPERED' = 'VALID';
+        if (r.image_data) {
+          const calcHash = crypto.createHash('sha256').update(r.image_data).digest('hex');
+          integrity_status = calcHash === r.hash ? 'VALID' : 'TAMPERED';
+        }
+        return {
+          ...r,
+          integrity_status,
+        };
+      });
+
+      return res.json({ evidence });
+    } catch (e: any) {
+      return res.status(500).json({ error: e.message });
+    }
+  });
+
+  // Watermark Forensic Investigation
+  app.post('/api/audit/watermark/investigate', authenticateToken, requireRole(['AUDITOR', 'ORG_OWNER']), async (req: Request, res: Response) => {
+    try {
+      const db = await getDb();
+      const orgId = req.user!.org_id;
+      const { leak_source_type, input_reference, extracted_signature } = req.body;
+
+      if (!leak_source_type) {
+        return res.status(400).json({ error: 'leak_source_type is required' });
+      }
+
+      const cleanSig = (extracted_signature || '').trim();
+      let status: 'VERIFIED' | 'TAMPERED' | 'NOT_RECOVERABLE' = 'NOT_RECOVERABLE';
+      let resolvedRecord: any = null;
+
+      if (cleanSig) {
+        const copyRows = executeQuery(
+          db,
+          `SELECT pc.*, e.name as exam_name, e.subject as exam_subject, e.category as exam_category,
+                  pv.version_code as paper_version, ec.centre_name, ec.centre_code,
+                  u.full_name as operator_name, u.email as operator_email
+           FROM print_copies pc
+           JOIN examinations e ON pc.exam_id = e.id
+           LEFT JOIN paper_versions pv ON pc.paper_version_id = pv.id
+           LEFT JOIN examination_centres ec ON (pc.centre_id = ec.id OR pc.centre_id = ec.centre_code)
+           LEFT JOIN users u ON pc.operator_user_id = u.id
+           WHERE e.org_id = ? AND (pc.copy_id = ? OR pc.tx_hash = ? OR pc.tx_hash LIKE ? OR pc.id = ?)
+           LIMIT 1`,
+          [orgId, cleanSig, cleanSig, `%${cleanSig}%`, cleanSig]
+        );
+
+        if (copyRows.length > 0) {
+          resolvedRecord = copyRows[0];
+          status = 'VERIFIED';
+        } else if (cleanSig.startsWith('COPY-') || cleanSig.startsWith('0x')) {
+          status = 'TAMPERED';
+        }
+      }
+
+      const invId = `WINV-${uuidv4().substring(0, 8).toUpperCase()}`;
+      const nowIso = new Date().toISOString();
+
+      executeRun(
+        db,
+        `INSERT INTO watermark_investigations (
+          id, org_id, investigator_user_id, investigator_role, leak_source_type,
+          input_reference, extracted_signature, status, resolved_exam_id, resolved_paper_id,
+          resolved_paper_version, resolved_copy_id, resolved_centre_id, resolved_device_id,
+          resolved_print_tx, resolved_details_json, created_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        [
+          invId,
+          orgId,
+          req.user!.id,
+          req.user!.role,
+          leak_source_type,
+          input_reference || null,
+          cleanSig || null,
+          status,
+          resolvedRecord?.exam_id || null,
+          resolvedRecord?.paper_version_id || null,
+          resolvedRecord?.paper_version || null,
+          resolvedRecord?.copy_id || null,
+          resolvedRecord?.centre_id || null,
+          resolvedRecord?.device_id || null,
+          resolvedRecord?.tx_hash || null,
+          resolvedRecord ? JSON.stringify(resolvedRecord) : null,
+          nowIso,
+        ]
+      );
+
+      await logAuditEvent({
+        event_type: 'LEAK_INVESTIGATION_CREATED',
+        event_category: 'FORENSICS',
+        severity: status === 'VERIFIED' ? 'CRITICAL' : 'HIGH',
+        user_id: req.user!.id,
+        user_email: req.user!.email,
+        role: req.user!.role,
+        org_id: orgId,
+        details: { invId, leak_source_type, status, resolvedCopy: resolvedRecord?.copy_id },
+      });
+
+      const invRow = executeQuery(db, 'SELECT * FROM watermark_investigations WHERE id = ?', [invId])[0];
+      return res.json({
+        investigation: {
+          ...invRow,
+          resolved_exam_name: resolvedRecord?.exam_name,
+          resolved_centre_name: resolvedRecord?.centre_name,
+          resolved_operator_name: resolvedRecord?.operator_name,
+          resolved_operator_email: resolvedRecord?.operator_email,
+        },
+      });
+    } catch (e: any) {
+      return res.status(500).json({ error: e.message });
+    }
+  });
+
+  // Watermark Investigations Ledger
+  app.get('/api/audit/watermark/investigations', authenticateToken, requireRole(['AUDITOR', 'ORG_OWNER']), async (req: Request, res: Response) => {
+    try {
+      const db = await getDb();
+      const orgId = req.user!.org_id;
+
+      const investigations = executeQuery(
+        db,
+        `SELECT wi.*, u.full_name as investigator_name, e.name as resolved_exam_name, ec.centre_name as resolved_centre_name
+         FROM watermark_investigations wi
+         LEFT JOIN users u ON wi.investigator_user_id = u.id
+         LEFT JOIN examinations e ON wi.resolved_exam_id = e.id
+         LEFT JOIN examination_centres ec ON wi.resolved_centre_id = ec.id
+         WHERE wi.org_id = ?
+         ORDER BY wi.created_at DESC
+         LIMIT 100`,
+        [orgId]
+      );
+
+      return res.json({ investigations });
+    } catch (e: any) {
+      return res.status(500).json({ error: e.message });
+    }
+  });
+
+  // Audit Report Summary & KPIs
+  app.get('/api/audit/reports/summary', authenticateToken, requireRole(['AUDITOR', 'ORG_OWNER']), async (req: Request, res: Response) => {
+    try {
+      const db = await getDb();
+      const orgId = req.user!.org_id;
+      const { date_from, date_to } = req.query;
+
+      let dateFilter = '';
+      const params: any[] = [orgId];
+      if (date_from) {
+        dateFilter += ' AND created_at >= ?';
+        params.push(String(date_from));
+      }
+      if (date_to) {
+        dateFilter += ' AND created_at <= ?';
+        params.push(String(date_to));
+      }
+
+      const totalEvents = Number(executeQuery(db, `SELECT COUNT(*) as c FROM audit_events WHERE org_id = ? ${dateFilter}`, params)[0]?.c || 0);
+      const successfulLogins = Number(executeQuery(db, `SELECT COUNT(*) as c FROM audit_events WHERE org_id = ? AND event_type IN ("LOGIN_SUCCESS", "USER_LOGIN") ${dateFilter}`, params)[0]?.c || 0);
+      const failedLogins = Number(executeQuery(db, `SELECT COUNT(*) as c FROM audit_events WHERE org_id = ? AND event_type IN ("LOGIN_FAILED", "FAILED_LOGIN") ${dateFilter}`, params)[0]?.c || 0);
+      const unauthorizedAttempts = Number(executeQuery(db, 'SELECT COUNT(*) as c FROM security_events WHERE org_id = ? AND event_type LIKE "%UNAUTHORIZED%"', [orgId])[0]?.c || 0);
+      const securityEventsCount = Number(executeQuery(db, 'SELECT COUNT(*) as c FROM security_events WHERE org_id = ?', [orgId])[0]?.c || 0);
+      const highCriticalEvents = Number(executeQuery(db, 'SELECT COUNT(*) as c FROM security_events WHERE org_id = ? AND severity IN ("HIGH", "CRITICAL")', [orgId])[0]?.c || 0);
+      const deviceEvents = Number(executeQuery(db, `SELECT COUNT(*) as c FROM audit_events WHERE org_id = ? AND event_type LIKE "%DEVICE%" ${dateFilter}`, params)[0]?.c || 0);
+      const proctoringEvents = Number(executeQuery(db, `SELECT COUNT(*) as c FROM audit_events WHERE org_id = ? AND event_type LIKE "%PROCTOR%" ${dateFilter}`, params)[0]?.c || 0);
+      const printEvents = Number(executeQuery(db, `SELECT COUNT(*) as c FROM audit_events WHERE org_id = ? AND event_type LIKE "%PRINT%" ${dateFilter}`, params)[0]?.c || 0);
+      const watermarkInvCount = Number(executeQuery(db, 'SELECT COUNT(*) as c FROM watermark_investigations WHERE org_id = ?', [orgId])[0]?.c || 0);
+
+      const catRows = executeQuery(db, `SELECT event_category, COUNT(*) as c FROM audit_events WHERE org_id = ? ${dateFilter} GROUP BY event_category`, params);
+      const byCategory: Record<string, number> = {};
+      catRows.forEach((r: any) => { byCategory[r.event_category || 'SYSTEM'] = Number(r.c); });
+
+      const sevRows = executeQuery(db, `SELECT severity, COUNT(*) as c FROM audit_events WHERE org_id = ? ${dateFilter} GROUP BY severity`, params);
+      const bySeverity: Record<string, number> = {};
+      sevRows.forEach((r: any) => { bySeverity[r.severity || 'INFO'] = Number(r.c); });
+
+      return res.json({
+        totalEvents,
+        successfulLogins,
+        failedLogins,
+        unauthorizedAttempts,
+        securityEvents: securityEventsCount,
+        highCriticalEvents,
+        deviceEvents,
+        proctoringEvents,
+        printEvents,
+        watermarkInvestigations: watermarkInvCount,
+        byCategory,
+        bySeverity,
+        generatedAt: new Date().toISOString(),
+      });
+    } catch (e: any) {
+      return res.status(500).json({ error: e.message });
+    }
+  });
+
+  // Export Audit Report Data
+  app.get('/api/audit/reports/export', authenticateToken, requireRole(['AUDITOR', 'ORG_OWNER']), async (req: Request, res: Response) => {
+    try {
+      const db = await getDb();
+      const orgId = req.user!.org_id;
+      const { date_from, date_to } = req.query;
+
+      let sql = 'SELECT * FROM audit_events WHERE org_id = ?';
+      const params: any[] = [orgId];
+      if (date_from) {
+        sql += ' AND created_at >= ?';
+        params.push(String(date_from));
+      }
+      if (date_to) {
+        sql += ' AND created_at <= ?';
+        params.push(String(date_to));
+      }
+      sql += ' ORDER BY created_at DESC LIMIT 1000';
+
+      const data = executeQuery(db, sql, params);
+      return res.json({ data, summary: { count: data.length, exportedAt: new Date().toISOString() } });
     } catch (e: any) {
       return res.status(500).json({ error: e.message });
     }

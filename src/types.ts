@@ -429,30 +429,226 @@ export interface PrintRelayEnvelope {
 export interface AuditEvent {
   id: string;
   event_type: string;
+  event_category?: string;
+  severity?: 'INFO' | 'LOW' | 'MEDIUM' | 'HIGH' | 'CRITICAL';
   user_id?: string;
   user_email?: string;
   role?: string;
+  target_user_id?: string;
   org_id?: string;
   exam_id?: string;
+  paper_id?: string;
+  paper_version_id?: string;
   device_id?: string;
+  session_id?: string;
+  centre_id?: string;
   ip_address?: string;
   status: string;
   tx_ref: string;
   details_json?: string;
+  previous_event_hash?: string;
+  event_hash?: string;
   created_at: string;
 }
 
 export interface SecurityEvent {
   id: string;
   event_type: string;
-  severity: 'LOW' | 'MEDIUM' | 'HIGH' | 'CRITICAL';
+  severity: 'INFO' | 'LOW' | 'MEDIUM' | 'HIGH' | 'CRITICAL';
   risk_score: number;
   user_id?: string;
+  user_email?: string;
+  role?: string;
   org_id?: string;
+  exam_id?: string;
+  paper_id?: string;
+  device_id?: string;
   ip_address?: string;
   details_json?: string;
   resolved: number;
+  status?: 'DETECTED' | 'ALERTED' | 'OPEN' | 'INVESTIGATING' | 'ACTION_TAKEN' | 'RESOLVED' | 'DISMISSED';
+  resolved_by?: string;
+  resolved_at?: string;
+  resolution_notes?: string;
   timestamp: string;
+}
+
+export interface AuditorDashboardMetrics {
+  totalAuditEvents: number;
+  todayEvents: number;
+  highCriticalEvents: number;
+  activeSecurityEvents: number;
+  failedLogins: number;
+  unauthorizedAttempts: number;
+  suspendedDevices: number;
+  proctoringIncidents: number;
+  pendingKeyRequests: number;
+  pendingUnlockRequests: number;
+  printViolations: number;
+  watermarkInvestigations: number;
+  ledgerIntegrity: {
+    verified: boolean;
+    chainedCount: number;
+    status: string;
+  };
+}
+
+export interface UserSessionActivity {
+  id: string;
+  user_id: string;
+  user_name?: string;
+  user_email: string;
+  role: string;
+  org_id: string;
+  device_id?: string;
+  device_name?: string;
+  ip_address: string;
+  login_time: string;
+  logout_time?: string;
+  session_duration_seconds: number;
+  auth_result: string;
+  failed_attempts: number;
+  status: string;
+  security_events_count?: number;
+}
+
+export interface UserSecurityProfile {
+  user: {
+    id: string;
+    full_name: string;
+    email: string;
+    role: string;
+    org_id: string;
+    status: string;
+    designation?: string;
+    created_at: string;
+  };
+  recentSessions: UserSessionActivity[];
+  devices: Array<{
+    id: string;
+    device_uuid: string;
+    device_name?: string;
+    operating_system?: string;
+    status: string;
+    last_seen_at?: string;
+  }>;
+  roleActivity: AuditEvent[];
+  examActivity: AuditEvent[];
+  paperActivity: AuditEvent[];
+  translationActivity: AuditEvent[];
+  securityIncidents: SecurityEvent[];
+  printActivity: Array<{
+    id: string;
+    copy_id: string;
+    exam_id: string;
+    centre_id: string;
+    printed_at: string;
+    status: string;
+  }>;
+}
+
+export interface DeviceActivityItem {
+  id: string;
+  device_uuid: string;
+  user_id: string;
+  user_name?: string;
+  user_email?: string;
+  role?: string;
+  org_id: string;
+  device_name?: string;
+  device_model?: string;
+  operating_system?: string;
+  os_version?: string;
+  browser_info?: string;
+  ip_address?: string;
+  status: string;
+  first_seen: string;
+  last_seen: string;
+  auth_failures: number;
+  security_events_count: number;
+}
+
+export interface PaperSecurityOverview {
+  examId: string;
+  examName: string;
+  subject: string;
+  category: string;
+  examStatus: string;
+  versionsCount: number;
+  encrypted: boolean;
+  algorithm?: string;
+  checksumSha256?: string;
+  encryptedAt?: string;
+  shamirSharesCount: number;
+  shamirThreshold: number;
+  examDate: string;
+  examTime: string;
+  unlockTime: string;
+  isUnlocked: boolean;
+  earlyUnlockPending: boolean;
+  maxCopies: number;
+  totalPrinted: number;
+  printQuotaViolations: number;
+}
+
+export interface SecurityEvidenceRecord {
+  id: string;
+  org_id: string;
+  user_id?: string;
+  user_name?: string;
+  user_email?: string;
+  exam_id?: string;
+  exam_name?: string;
+  session_id?: string;
+  device_id?: string;
+  event_id?: string;
+  captured_at: string;
+  mime_type: string;
+  image_data?: string;
+  hash: string;
+  integrity_status: 'VALID' | 'TAMPERED';
+}
+
+export interface WatermarkInvestigationRecord {
+  id: string;
+  org_id: string;
+  investigator_user_id: string;
+  investigator_name?: string;
+  investigator_role: string;
+  leak_source_type: string;
+  input_reference?: string;
+  extracted_signature?: string;
+  status: 'VERIFIED' | 'TAMPERED' | 'NOT_RECOVERABLE';
+  resolved_exam_id?: string;
+  resolved_exam_name?: string;
+  resolved_paper_id?: string;
+  resolved_paper_version?: string;
+  resolved_copy_id?: string;
+  resolved_centre_id?: string;
+  resolved_centre_name?: string;
+  resolved_device_id?: string;
+  resolved_operator_name?: string;
+  resolved_operator_email?: string;
+  resolved_print_tx?: string;
+  resolved_timestamp?: string;
+  resolved_details_json?: string;
+  created_at: string;
+}
+
+export interface AuditReportSummary {
+  totalEvents: number;
+  successfulLogins: number;
+  failedLogins: number;
+  unauthorizedAttempts: number;
+  securityEvents: number;
+  highCriticalEvents: number;
+  deviceEvents: number;
+  proctoringEvents: number;
+  printEvents: number;
+  watermarkInvestigations: number;
+  byCategory: Record<string, number>;
+  bySeverity: Record<string, number>;
+  generatedAt: string;
 }
 
 export interface NotificationItem {

@@ -680,6 +680,110 @@ ALTER TABLE audit_events ADD COLUMN IF NOT EXISTS event_type TEXT;
 ALTER TABLE audit_events ADD COLUMN IF NOT EXISTS ip_address TEXT;
 ALTER TABLE audit_events ADD COLUMN IF NOT EXISTS details_json TEXT;
 ALTER TABLE audit_events ADD COLUMN IF NOT EXISTS created_at TEXT;
+ALTER TABLE audit_events ADD COLUMN IF NOT EXISTS event_category TEXT DEFAULT 'SYSTEM';
+ALTER TABLE audit_events ADD COLUMN IF NOT EXISTS severity TEXT DEFAULT 'INFO';
+ALTER TABLE audit_events ADD COLUMN IF NOT EXISTS target_user_id TEXT;
+ALTER TABLE audit_events ADD COLUMN IF NOT EXISTS paper_id TEXT;
+ALTER TABLE audit_events ADD COLUMN IF NOT EXISTS paper_version_id TEXT;
+ALTER TABLE audit_events ADD COLUMN IF NOT EXISTS session_id TEXT;
+ALTER TABLE audit_events ADD COLUMN IF NOT EXISTS centre_id TEXT;
+ALTER TABLE audit_events ADD COLUMN IF NOT EXISTS previous_event_hash TEXT;
+ALTER TABLE audit_events ADD COLUMN IF NOT EXISTS event_hash TEXT;
+
+ALTER TABLE security_events ADD COLUMN IF NOT EXISTS role TEXT;
+ALTER TABLE security_events ADD COLUMN IF NOT EXISTS exam_id TEXT;
+ALTER TABLE security_events ADD COLUMN IF NOT EXISTS paper_id TEXT;
+ALTER TABLE security_events ADD COLUMN IF NOT EXISTS device_id TEXT;
+ALTER TABLE security_events ADD COLUMN IF NOT EXISTS status TEXT DEFAULT 'OPEN';
+ALTER TABLE security_events ADD COLUMN IF NOT EXISTS resolved_by TEXT;
+ALTER TABLE security_events ADD COLUMN IF NOT EXISTS resolved_at TEXT;
+ALTER TABLE security_events ADD COLUMN IF NOT EXISTS resolution_notes TEXT;
+
+ALTER TABLE trusted_devices ADD COLUMN IF NOT EXISTS last_seen_at TEXT;
+ALTER TABLE trusted_devices ADD COLUMN IF NOT EXISTS auth_failures INTEGER DEFAULT 0;
+
+-- 39. Security Evidence Vault
+CREATE TABLE IF NOT EXISTS security_evidence (
+    id TEXT PRIMARY KEY,
+    org_id TEXT NOT NULL,
+    user_id TEXT,
+    exam_id TEXT,
+    paper_id TEXT,
+    session_id TEXT,
+    device_id TEXT,
+    event_id TEXT,
+    captured_at TEXT NOT NULL,
+    mime_type TEXT NOT NULL DEFAULT 'image/jpeg',
+    image_data TEXT,
+    hash TEXT NOT NULL,
+    created_at TEXT NOT NULL
+);
+
+-- 40. Watermark Forensics Investigations
+CREATE TABLE IF NOT EXISTS watermark_investigations (
+    id TEXT PRIMARY KEY,
+    org_id TEXT NOT NULL,
+    investigator_user_id TEXT NOT NULL,
+    investigator_role TEXT NOT NULL,
+    leak_source_type TEXT NOT NULL,
+    input_reference TEXT,
+    extracted_signature TEXT,
+    status TEXT NOT NULL,
+    resolved_exam_id TEXT,
+    resolved_paper_id TEXT,
+    resolved_paper_version TEXT,
+    resolved_copy_id TEXT,
+    resolved_centre_id TEXT,
+    resolved_device_id TEXT,
+    resolved_print_tx TEXT,
+    resolved_details_json TEXT,
+    created_at TEXT NOT NULL
+);
+
+-- 41. User Session Activity Tracking
+CREATE TABLE IF NOT EXISTS user_sessions (
+    id TEXT PRIMARY KEY,
+    user_id TEXT NOT NULL,
+    user_email TEXT,
+    role TEXT,
+    org_id TEXT NOT NULL,
+    device_id TEXT,
+    ip_address TEXT,
+    login_time TEXT NOT NULL,
+    logout_time TEXT,
+    session_duration_seconds INTEGER DEFAULT 0,
+    auth_result TEXT NOT NULL DEFAULT 'SUCCESS',
+    failed_attempts INTEGER DEFAULT 0,
+    status TEXT NOT NULL DEFAULT 'ACTIVE',
+    created_at TEXT NOT NULL
+);
+
+-- 42. Early Unlock Requests
+CREATE TABLE IF NOT EXISTS early_unlock_requests (
+    id TEXT PRIMARY KEY,
+    org_id TEXT NOT NULL,
+    exam_id TEXT NOT NULL,
+    requested_by TEXT NOT NULL,
+    reason TEXT NOT NULL,
+    target_unlock_time TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'PENDING',
+    reviewed_by TEXT,
+    reviewed_at TEXT,
+    created_at TEXT NOT NULL
+);
+
+-- 43. Key Contribution Requests
+CREATE TABLE IF NOT EXISTS key_contribution_requests (
+    id TEXT PRIMARY KEY,
+    org_id TEXT NOT NULL,
+    exam_id TEXT NOT NULL,
+    paper_version_id TEXT NOT NULL,
+    contributor_user_id TEXT,
+    contributor_role TEXT,
+    status TEXT NOT NULL DEFAULT 'PENDING',
+    share_index INTEGER,
+    created_at TEXT NOT NULL
+);
 
 -- ==============================================================================
 -- 38. QUESTION PAPERS & PRESERVED PAGES

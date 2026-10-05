@@ -2,16 +2,13 @@ import React from 'react';
 import {
   LayoutDashboard,
   Building2,
-  FileCheck,
   FileText,
+  Layers,
   Users,
   Laptop,
   ShieldAlert,
   FolderLock,
   PlusCircle,
-  HelpCircle,
-  Cpu,
-  Layers,
   Printer,
   History,
   Lock,
@@ -20,8 +17,9 @@ import {
   Activity,
   LogOut,
   ShieldCheck,
-  Shuffle,
-  Award,
+  Camera,
+  Search,
+  BarChart3,
 } from 'lucide-react';
 import { UserRole } from '../types';
 
@@ -58,10 +56,20 @@ export type NavSubTab =
   | 'device_status'
   // Auditor
   | 'audit_trail'
+  | 'user_activity'
   | 'login_history'
+  | 'device_activity'
+  | 'role_activity'
+  | 'paper_security'
   | 'paper_events'
+  | 'encryption_unlock'
+  | 'print_security'
   | 'printing_events'
-  | 'regeneration_events';
+  | 'regeneration_events'
+  | 'proctoring_evidence'
+  | 'watermark_investigations'
+  | 'security_reports'
+  | 'user_activity_reports';
 
 interface SidebarProps {
   activeSubTab: NavSubTab;
@@ -118,15 +126,9 @@ export const Sidebar: React.FC<SidebarProps> = ({
             ],
           },
           {
-            title: 'Competitive Examination',
+            title: 'Paper Generation',
             items: [
-              { id: 'question_workflow', label: 'Competitive Examination', icon: Award },
-            ],
-          },
-          {
-            title: 'University',
-            items: [
-              { id: 'paper_generation', label: 'University Paper Generation', icon: Lock },
+              { id: 'paper_generation', label: 'Paper Generation', icon: Lock },
             ],
           },
           {
@@ -182,24 +184,36 @@ export const Sidebar: React.FC<SidebarProps> = ({
             items: [{ id: 'dashboard', label: 'Auditor Dashboard', icon: LayoutDashboard }],
           },
           {
-            title: 'Audit Logs',
+            title: 'Audit',
             items: [
-              { id: 'audit_trail', label: 'Immutable Audit Trail', icon: Activity },
-              { id: 'login_history', label: 'Login & Session History', icon: UserCheck },
+              { id: 'audit_trail', label: 'Audit Trail', icon: Activity },
+              { id: 'user_activity', label: 'User & Session Activity', icon: UserCheck },
+              { id: 'device_activity', label: 'Device Activity', icon: Laptop },
+              { id: 'role_activity', label: 'Role & Authority Activity', icon: ShieldCheck },
             ],
           },
           {
-            title: 'Security & Forensics',
+            title: 'Exam Security',
+            items: [
+              { id: 'paper_security', label: 'Paper Security', icon: Layers },
+              { id: 'encryption_unlock', label: 'Encryption & Unlock', icon: Lock },
+              { id: 'print_security', label: 'Print Security', icon: Printer },
+            ],
+          },
+          {
+            title: 'Threats & Forensics',
             items: [
               { id: 'security_events', label: 'Security & Threat Events', icon: ShieldAlert },
-              { id: 'paper_events', label: 'Paper Lifecycle Events', icon: Layers },
-              { id: 'printing_events', label: 'Printing Copy Logs', icon: Printer },
-              { id: 'regeneration_events', label: 'Regeneration Events', icon: History },
+              { id: 'proctoring_evidence', label: 'Proctoring & Evidence', icon: Camera },
+              { id: 'watermark_investigations', label: 'Watermark Investigations', icon: Search },
             ],
           },
           {
-            title: 'Leak Surveillance',
-            items: [{ id: 'proctor_dashboard', label: 'Authority Surveillance Audit', icon: ShieldAlert }],
+            title: 'Reports',
+            items: [
+              { id: 'security_reports', label: 'Security Reports', icon: FileText },
+              { id: 'user_activity_reports', label: 'User Activity Reports', icon: BarChart3 },
+            ],
           },
         ];
 
