@@ -1,5 +1,5 @@
 import React from 'react';
-import { PlusCircle, Sparkles, GraduationCap, Award, ShieldAlert, Building2, ChevronRight, Zap } from 'lucide-react';
+import { PlusCircle, Sparkles, GraduationCap, Award, ShieldAlert, Building2, ChevronRight, Zap, FolderLock } from 'lucide-react';
 import { NavSubTab } from '../Sidebar';
 
 interface QuickActionsProps {
@@ -41,12 +41,12 @@ export const QuickActions: React.FC<QuickActionsProps> = ({ onNavigateTab }) => 
       badge: 'Unified',
     },
     {
-      id: 'security_events' as NavSubTab,
-      label: 'Security Events & Audit',
-      description: 'Inspect cryptographic logs',
-      icon: ShieldAlert,
-      color: 'text-[#4DA3FF]',
-      badge: 'Audited',
+      id: 'all_examinations' as NavSubTab,
+      label: 'All Examinations Catalog',
+      description: 'Inspect examination blueprints & marks',
+      icon: FolderLock,
+      color: 'text-[#008A63]',
+      badge: 'Catalog',
     },
     {
       id: 'examination_centres' as NavSubTab,

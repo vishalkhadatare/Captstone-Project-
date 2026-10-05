@@ -135,21 +135,6 @@ export const Sidebar: React.FC<SidebarProps> = ({
             title: 'INFRASTRUCTURE',
             items: [{ id: 'examination_centres', label: 'Examination Centres', icon: Building2 }],
           },
-          {
-            title: 'SECURITY',
-            items: [
-              { id: 'security_events', label: 'Security Events', icon: ShieldAlert },
-              { id: 'audit_trail', label: 'Audit Logs', icon: History },
-              { id: 'proctor_dashboard', label: 'Threat Detection', icon: Activity },
-            ],
-          },
-          {
-            title: 'SYSTEM',
-            items: [
-              { id: 'security_settings', label: 'Settings', icon: Settings },
-              { id: 'device_status', label: 'System Health', icon: Cpu },
-            ],
-          },
         ];
 
       case 'TRANSLATOR':
