@@ -45,6 +45,8 @@ import {
   Mail,
   ShieldAlert,
   User as UserIcon,
+  Database,
+  Shield,
 } from 'lucide-react';
 import { User, Examination, Question, Organization, ExamType, ExtractedQuestion, QuestionAssignment, QuestionTranslation, ExaminationCentre, AddCentreResponse, EmergencyRegenerateResponse, SecurityEvent } from '../../types';
 import { api } from '../../api';
@@ -59,6 +61,17 @@ import { QuestionPaperPdfModal } from './QuestionPaperPdfModal';
 import { UniversityFormatGenerator } from './UniversityFormatGenerator';
 import { PaperGenerationModule } from '../PaperGenerationModule';
 import { CompetitiveExaminationUnifiedWorkflow } from '../competitive/CompetitiveExaminationUnifiedWorkflow';
+import {
+  DashboardHeader,
+  SecurityStatusBar,
+  StatCard,
+  SecurityScore,
+  AISynthesisPanel,
+  ExaminationTable,
+  SecurityActivity,
+  SystemHealth,
+  QuickActions,
+} from '../dashboard';
 
 interface ExamManagerWorkspaceProps {
   currentUser: User | null;
@@ -956,271 +969,87 @@ export const ExamManagerWorkspace: React.FC<ExamManagerWorkspaceProps> = ({
       {/* DASHBOARD */}
       {activeSubTab === 'dashboard' && (
         <div className="space-y-6">
-          {/* Futuristic Hero Banner */}
-          <div className="relative overflow-hidden rounded-3xl bg-gradient-to-br from-slate-950 via-[#06201b] to-slate-900 border border-emerald-500/25 p-7 text-white shadow-2xl">
-            <div className="absolute -right-16 -top-16 w-64 h-64 bg-emerald-500/15 rounded-full blur-3xl pointer-events-none" />
-            <div className="absolute right-1/3 -bottom-20 w-80 h-40 bg-teal-500/10 rounded-full blur-3xl pointer-events-none" />
+          {/* 1. Header with Controller greeting & CTAs */}
+          <DashboardHeader
+            onCreateExam={() => onSelectSubTab?.('create_examination')}
+            onOpenSynthesizer={() => onSelectSubTab?.('paper_generation')}
+          />
 
-            <div className="relative z-10 flex flex-col md:flex-row md:items-center justify-between gap-5">
-              <div className="space-y-2">
-                <div className="flex items-center gap-2">
-                  <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-[11px] font-black uppercase tracking-wider bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 backdrop-blur-md">
-                    <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
-                    Examination Controller Command Enclave
-                  </span>
-                  <span className="text-xs text-slate-400 font-mono">
-                    ZeroLeak v4.1 Active
-                  </span>
-                </div>
-                <h2 className="text-2xl sm:text-3xl font-black tracking-tight text-white">
-                  Exam Operations & Security Center
-                </h2>
-                <p className="text-xs sm:text-sm text-slate-300 max-w-2xl leading-relaxed">
-                  Real-time cryptographic control over examination blueprints, AI question synthesis, time-locked hardware enclaves, and verification pipelines.
-                </p>
-              </div>
+          {/* 2. Security Status Monitoring Console Bar */}
+          <SecurityStatusBar />
 
-              <div className="flex flex-wrap items-center gap-3">
-                {onSelectSubTab && (
-                  <button
-                    type="button"
-                    onClick={() => onSelectSubTab('paper_generation')}
-                    className="px-4 py-2.5 rounded-xl bg-gradient-to-r from-emerald-500 via-emerald-600 to-teal-600 hover:from-emerald-400 hover:to-teal-500 text-slate-950 font-black text-xs flex items-center gap-2 shadow-lg shadow-emerald-950/40 hover:scale-[1.02] transition-all cursor-pointer"
-                  >
-                    <Sparkles className="w-4 h-4 text-slate-950" />
-                    <span>AI Paper Synthesizer</span>
-                  </button>
-                )}
-                {onSelectSubTab && (
-                  <button
-                    type="button"
-                    onClick={() => onSelectSubTab('create_examination')}
-                    className="px-4 py-2.5 rounded-xl bg-slate-800/80 hover:bg-slate-700/80 text-white font-bold text-xs border border-white/15 flex items-center gap-2 backdrop-blur-md transition-all cursor-pointer"
-                  >
-                    <Plus className="w-4 h-4 text-emerald-400" />
-                    <span>New Blueprint</span>
-                  </button>
-                )}
-              </div>
-            </div>
-
-            {/* 4 Interactive Metric Cards */}
-            <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mt-7">
-              <button
-                type="button"
-                onClick={() => setDashboardCardFilter('ALL')}
-                className={`p-4 rounded-2xl border text-left transition-all cursor-pointer backdrop-blur-md hover:-translate-y-1 ${
-                  dashboardCardFilter === 'ALL'
-                    ? 'bg-gradient-to-br from-emerald-500 to-teal-600 text-slate-950 border-emerald-300 ring-4 ring-emerald-500/30 shadow-xl'
-                    : 'bg-white/5 border-white/10 text-white hover:bg-white/10 hover:border-emerald-500/40'
-                }`}
-              >
-                <div className="flex items-center justify-between">
-                  <span className={`text-[11px] font-bold uppercase tracking-wider ${dashboardCardFilter === 'ALL' ? 'text-slate-950/80' : 'text-slate-400'}`}>
-                    Total Exams
-                  </span>
-                  <Layers className={`w-4 h-4 ${dashboardCardFilter === 'ALL' ? 'text-slate-950' : 'text-emerald-400'}`} />
-                </div>
-                <span className="text-3xl font-black block mt-1.5 tracking-tight">{examinations.length}</span>
-                <span className={`text-[10px] font-bold block mt-1 ${dashboardCardFilter === 'ALL' ? 'text-slate-950/90' : 'text-emerald-400'}`}>
-                  Active Enclaves Configured
-                </span>
-              </button>
-
-              <button
-                type="button"
-                onClick={() => setDashboardCardFilter('READY')}
-                className={`p-4 rounded-2xl border text-left transition-all cursor-pointer backdrop-blur-md hover:-translate-y-1 ${
-                  dashboardCardFilter === 'READY'
-                    ? 'bg-gradient-to-br from-indigo-500 to-blue-600 text-white border-indigo-300 ring-4 ring-indigo-500/30 shadow-xl'
-                    : 'bg-white/5 border-white/10 text-white hover:bg-white/10 hover:border-indigo-500/40'
-                }`}
-              >
-                <div className="flex items-center justify-between">
-                  <span className={`text-[11px] font-bold uppercase tracking-wider ${dashboardCardFilter === 'READY' ? 'text-white/80' : 'text-slate-400'}`}>
-                    Question Pool
-                  </span>
-                  <FileText className={`w-4 h-4 ${dashboardCardFilter === 'READY' ? 'text-white' : 'text-indigo-400'}`} />
-                </div>
-                <span className="text-3xl font-black block mt-1.5 tracking-tight">{questions.length}</span>
-                <span className={`text-[10px] font-bold block mt-1 ${dashboardCardFilter === 'READY' ? 'text-white/90' : 'text-indigo-400'}`}>
-                  Total In Vault Repository
-                </span>
-              </button>
-
-              <button
-                type="button"
-                onClick={() => setDashboardCardFilter('VERIFIED')}
-                className={`p-4 rounded-2xl border text-left transition-all cursor-pointer backdrop-blur-md hover:-translate-y-1 ${
-                  dashboardCardFilter === 'VERIFIED'
-                    ? 'bg-gradient-to-br from-teal-500 to-emerald-600 text-slate-950 border-teal-300 ring-4 ring-teal-500/30 shadow-xl'
-                    : 'bg-white/5 border-white/10 text-white hover:bg-white/10 hover:border-teal-500/40'
-                }`}
-              >
-                <div className="flex items-center justify-between">
-                  <span className={`text-[11px] font-bold uppercase tracking-wider ${dashboardCardFilter === 'VERIFIED' ? 'text-slate-950/80' : 'text-slate-400'}`}>
-                    Verified & Eligible
-                  </span>
-                  <CheckCircle2 className={`w-4 h-4 ${dashboardCardFilter === 'VERIFIED' ? 'text-slate-950' : 'text-teal-400'}`} />
-                </div>
-                <span className="text-3xl font-black block mt-1.5 tracking-tight">{verifiedCount}</span>
-                <span className={`text-[10px] font-bold block mt-1 ${dashboardCardFilter === 'VERIFIED' ? 'text-slate-950/90' : 'text-teal-400'}`}>
-                  Passed AI Verification
-                </span>
-              </button>
-
-              <button
-                type="button"
-                onClick={() => setDashboardCardFilter('QUARANTINED')}
-                className={`p-4 rounded-2xl border text-left transition-all cursor-pointer backdrop-blur-md hover:-translate-y-1 ${
-                  dashboardCardFilter === 'QUARANTINED'
-                    ? 'bg-gradient-to-br from-rose-600 to-red-700 text-white border-rose-300 ring-4 ring-rose-500/30 shadow-xl'
-                    : 'bg-white/5 border-white/10 text-white hover:bg-white/10 hover:border-rose-500/40'
-                }`}
-              >
-                <div className="flex items-center justify-between">
-                  <span className={`text-[11px] font-bold uppercase tracking-wider ${dashboardCardFilter === 'QUARANTINED' ? 'text-white/80' : 'text-slate-400'}`}>
-                    Quarantined
-                  </span>
-                  <AlertTriangle className={`w-4 h-4 ${dashboardCardFilter === 'QUARANTINED' ? 'text-white' : 'text-rose-400'}`} />
-                </div>
-                <span className="text-3xl font-black block mt-1.5 tracking-tight">{quarantinedCount}</span>
-                <span className={`text-[10px] font-bold block mt-1 ${dashboardCardFilter === 'QUARANTINED' ? 'text-white/90' : 'text-rose-400'}`}>
-                  Flagged For Review
-                </span>
-              </button>
-            </div>
+          {/* 3. 4 Interactive KPI Stat Cards */}
+          <div className="grid grid-cols-2 lg:grid-cols-4 gap-3.5">
+            <StatCard
+              label="TOTAL EXAMINATIONS"
+              count={examinations.length.toString().padStart(2, '0')}
+              description="Active examination configurations"
+              trend="+2 this month"
+              icon={Shield}
+              isActive={dashboardCardFilter === 'ALL'}
+              onClick={() => setDashboardCardFilter('ALL')}
+            />
+            <StatCard
+              label="QUESTION POOL"
+              count={questions.length}
+              description="Total in vault repository"
+              trend="100% Cryptographically Sealed"
+              icon={Database}
+              isActive={dashboardCardFilter === 'READY'}
+              onClick={() => setDashboardCardFilter('READY')}
+            />
+            <StatCard
+              label="VERIFIED QUESTIONS"
+              count={verifiedCount}
+              description="Passed AI verification & review"
+              trend="98.4% Integrity Index"
+              icon={CheckCircle2}
+              isActive={dashboardCardFilter === 'VERIFIED'}
+              onClick={() => setDashboardCardFilter('VERIFIED')}
+            />
+            <StatCard
+              label="QUARANTINED"
+              count={quarantinedCount.toString().padStart(2, '0')}
+              description="Flagged for manual review"
+              trend="0 Active Threats"
+              icon={AlertTriangle}
+              isActive={dashboardCardFilter === 'QUARANTINED'}
+              onClick={() => setDashboardCardFilter('QUARANTINED')}
+            />
           </div>
 
-          {/* Active List based on Selected Interactive Metric Card */}
-          <div className="p-6 rounded-3xl bg-white border border-slate-200/90 shadow-sm space-y-4">
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-slate-100 pb-3">
-              <h3 className="text-sm font-bold text-slate-900 flex items-center gap-2">
-                <div className="p-1.5 rounded-lg bg-emerald-50 text-emerald-800 border border-emerald-200">
-                  <FolderLock className="w-4 h-4" />
-                </div>
-                <span>
-                  {dashboardCardFilter === 'VERIFIED'
-                    ? 'Verified & Paper-Eligible Question Pool'
-                    : dashboardCardFilter === 'QUARANTINED'
-                    ? 'Quarantined & Flagged Questions'
-                    : dashboardCardFilter === 'READY'
-                    ? 'Repository Question Inventory'
-                    : 'Active Examination Configurations'}
-                </span>
-              </h3>
-
-              <span className="text-xs text-slate-500 font-mono">
-                {dashboardCardFilter === 'ALL'
-                  ? `${examinations.length} Active Configurations`
-                  : dashboardCardFilter === 'VERIFIED'
-                  ? `${verifiedCount} Verified Questions`
-                  : dashboardCardFilter === 'QUARANTINED'
-                  ? `${quarantinedCount} Quarantined`
-                  : `${questions.length} Pool Questions`}
-              </span>
-            </div>
-
-            {dashboardCardFilter === 'ALL' ? (
-              examinations.length === 0 ? (
-                <p className="text-xs text-slate-400 p-8 text-center">No examinations created yet.</p>
-              ) : (
-                <div className="space-y-3">
-                  {examinations.map(ex => (
-                    <div
-                      key={ex.id}
-                      className="p-4 rounded-2xl bg-gradient-to-r from-slate-50 to-emerald-50/20 border border-slate-200/90 hover:border-emerald-500/40 hover:shadow-md transition-all flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs"
-                    >
-                      <div className="space-y-1">
-                        <div className="flex items-center gap-2">
-                          <span className="font-black text-slate-900 text-sm">{ex.name}</span>
-                          <span className="px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-emerald-100 text-emerald-900 border border-emerald-200">
-                            {ex.status}
-                          </span>
-                        </div>
-                        <div className="text-[11px] text-slate-600 font-medium flex flex-wrap items-center gap-3">
-                          <span className="font-semibold text-emerald-800">Subject: {ex.subject}</span>
-                          <span>•</span>
-                          <span>Date: {ex.exam_date} @ {ex.exam_time}</span>
-                          <span>•</span>
-                          <span className="font-mono text-slate-500">Unlock: {ex.unlock_time}</span>
-                        </div>
-                      </div>
-
-                      <div className="flex flex-wrap items-center gap-2">
-                        {ex.simulation_status === 'COMPLETED' ? (
-                          <span
-                            className="px-3 py-1.5 bg-emerald-50 text-emerald-800 border border-emerald-300 rounded-xl font-bold text-xs flex items-center gap-1.5 shadow-2xs"
-                            title="Simulation completed."
-                          >
-                            <CheckCircle2 className="w-4 h-4 text-emerald-600" />
-                            <span>Simulation Completed ✓</span>
-                          </span>
-                        ) : (
-                          <button
-                            type="button"
-                            onClick={() => handleSimulateExam(ex)}
-                            className="px-3.5 py-1.5 bg-emerald-700 hover:bg-emerald-600 text-white rounded-xl font-bold text-xs shadow-xs flex items-center gap-1.5 cursor-pointer transition-all"
-                            title="Start Proctored Final Paper Simulation"
-                          >
-                            <Camera className="w-3.5 h-3.5" />
-                            <span>Simulate Exam</span>
-                          </button>
-                        )}
-
-                        <button
-                          onClick={() => handleGeneratePaper(ex.id)}
-                          disabled={generating || org?.status !== 'VERIFIED'}
-                          className={`px-3.5 py-1.5 rounded-xl font-bold text-xs shadow-xs cursor-pointer transition-all ${
-                            ex.simulation_status === 'COMPLETED'
-                              ? 'bg-gradient-to-r from-emerald-800 to-teal-800 hover:from-emerald-700 hover:to-teal-700 text-white ring-2 ring-emerald-500/30'
-                              : 'bg-slate-900 hover:bg-slate-800 text-white disabled:opacity-40'
-                          }`}
-                        >
-                          Generate Paper
-                        </button>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              )
-            ) : (
-              <div className="space-y-2 max-h-[500px] overflow-y-auto">
-                {(questions || [])
-                  .filter(q => {
-                    if (dashboardCardFilter === 'VERIFIED') return q.status === 'VERIFIED' || q.status === 'ELIGIBLE_FOR_PAPER';
-                    if (dashboardCardFilter === 'QUARANTINED') return q.status === 'QUARANTINED' || q.status === 'COMPROMISED';
-                    return true;
-                  })
-                  .map(q => (
-                    <div
-                      key={q.id}
-                      className="p-3 rounded-lg bg-slate-50 border border-slate-200 flex items-start justify-between gap-3 text-xs"
-                    >
-                      <div className="space-y-1">
-                        <div className="flex items-center gap-2">
-                          <span className="font-mono font-bold text-slate-800">{q.id}</span>
-                          <span className="font-bold text-slate-900">{q.subject}</span>
-                          <span className="text-[11px] text-slate-500">({q.topic})</span>
-                        </div>
-                        <p className="text-slate-700 line-clamp-2 text-[11px]">{q.content_text}</p>
-                      </div>
-                      <span
-                        className={`px-2 py-0.5 rounded text-[10px] font-bold shrink-0 ${
-                          q.status === 'VERIFIED' || q.status === 'ELIGIBLE_FOR_PAPER'
-                            ? 'bg-emerald-100 text-emerald-900 border border-emerald-200'
-                            : q.status === 'QUARANTINED' || q.status === 'COMPROMISED'
-                            ? 'bg-rose-100 text-rose-900 border border-rose-200'
-                            : 'bg-amber-100 text-amber-900 border border-amber-200'
-                        }`}
-                      >
-                        {q.status}
-                      </span>
-                    </div>
-                  ))}
-              </div>
-            )}
+          {/* 4. Security Score & AI Question Synthesis Grid */}
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
+            <SecurityScore />
+            <AISynthesisPanel
+              totalQuestions={questions.length}
+              verifiedQuestions={verifiedCount}
+              onOpenSynthesizer={() => onSelectSubTab?.('paper_generation')}
+            />
           </div>
+
+          {/* 5. Active Examinations Table / Question Inventory */}
+          <ExaminationTable
+            examinations={examinations}
+            questions={questions}
+            activeFilter={dashboardCardFilter}
+            onFilterChange={setDashboardCardFilter}
+            onSimulate={handleSimulateExam}
+            onGeneratePaper={handleGeneratePaper}
+            isGenerating={generating}
+            isOrgVerified={org?.status === 'VERIFIED'}
+          />
+
+          {/* 6. System Health & Security Activity */}
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
+            <SecurityActivity />
+            <SystemHealth />
+          </div>
+
+          {/* 7. Quick Operations Pathways */}
+          <QuickActions
+            onNavigateTab={(tab) => onSelectSubTab?.(tab)}
+          />
         </div>
       )}
 

@@ -242,47 +242,25 @@ export function App() {
 
   // Logged-in User Dashboard Workspace
   return (
-    <div className="min-h-screen bg-[#FAFCFA] dark:bg-[#080B11] text-slate-900 dark:text-slate-100 flex flex-col font-['Figtree',sans-serif] selection:bg-[#00cc5f] selection:text-black relative overflow-x-hidden transition-colors duration-300">
-      {/* Background Ambient Glowing Wave Curves & Aurora */}
-      <div
-        className="fixed inset-0 pointer-events-none overflow-hidden z-0"
-        style={{
-          top: '56px',
-          filter: 'blur(10px) drop-shadow(0 0 25px rgba(0,255,119,0.3))',
-          opacity: 0.32,
-        }}
-      >
+    <div className="min-h-screen bg-[#06110F] text-[#F4F8F7] flex flex-col font-['Figtree',sans-serif] selection:bg-[#00D68F] selection:text-[#06110F] relative overflow-x-hidden transition-colors duration-300">
+      {/* Subtle Enterprise Mission-Control Grid & Radial Ambiance */}
+      <div className="fixed inset-0 pointer-events-none z-0">
+        {/* Subtle radial spotlight at top */}
         <div
-          className="absolute inset-0 w-full h-full"
+          className="absolute top-0 left-1/2 -translate-x-1/2 w-[1200px] h-[550px] opacity-25 blur-[120px]"
           style={{
-            backgroundImage: 'url(/curve-secondary.svg)',
-            backgroundRepeat: 'repeat',
-            backgroundPosition: '0 0',
+            background: 'radial-gradient(ellipse at 50% 0%, rgba(0, 214, 143, 0.18) 0%, rgba(24, 200, 178, 0.06) 50%, transparent 80%)',
           }}
         />
+        {/* Engineering Micro Grid */}
         <div
-          className="absolute inset-0 w-full h-full"
+          className="absolute inset-0 opacity-[0.03]"
           style={{
-            backgroundImage: 'url(/curve-primary.svg)',
-            backgroundRepeat: 'repeat',
-            backgroundPosition: '0 0',
+            backgroundImage: 'linear-gradient(rgba(255, 255, 255, 0.12) 1px, transparent 1px), linear-gradient(90deg, rgba(255, 255, 255, 0.12) 1px, transparent 1px)',
+            backgroundSize: '28px 28px',
           }}
         />
       </div>
-
-      {/* Radiant Mint Ambient Halos (strandsagents.com style) */}
-      <div
-        className="fixed top-0 left-1/4 -translate-x-1/2 w-[900px] h-[500px] pointer-events-none z-0 opacity-40 dark:opacity-20 blur-[130px]"
-        style={{
-          background: 'radial-gradient(circle, rgba(0, 204, 95, 0.28) 0%, rgba(0, 220, 130, 0.12) 50%, transparent 75%)',
-        }}
-      />
-      <div
-        className="fixed bottom-0 right-10 w-[700px] h-[450px] pointer-events-none z-0 opacity-30 dark:opacity-15 blur-[120px]"
-        style={{
-          background: 'radial-gradient(circle, rgba(0, 204, 95, 0.22) 0%, transparent 70%)',
-        }}
-      />
 
       {/* Device Approval Modal */}
       <DeviceApprovalModal
@@ -312,8 +290,8 @@ export function App() {
         />
 
         {/* Dynamic Operational Content View */}
-        <main className="flex-1 p-6 lg:p-8 overflow-y-auto">
-          <div className="max-w-6xl mx-auto space-y-6">
+        <main className="flex-1 p-5 sm:p-6 lg:p-7 overflow-y-auto">
+          <div className="max-w-7xl mx-auto space-y-6">
             <ErrorBoundary fallbackTitle="Workspace Interface Interrupted">
               {/* User Profile & Security Settings */}
               {(activeSubTab === 'profile' || activeSubTab === 'security_settings') ? (

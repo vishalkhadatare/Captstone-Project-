@@ -2,26 +2,24 @@ import React from 'react';
 import {
   LayoutDashboard,
   Building2,
-  FileCheck,
-  FileText,
-  Users,
-  Laptop,
-  ShieldAlert,
   FolderLock,
   PlusCircle,
-  HelpCircle,
   Cpu,
   Layers,
   Printer,
   History,
   Lock,
-  UserCheck,
-  Languages,
   Activity,
   LogOut,
   ShieldCheck,
-  Shuffle,
+  ShieldAlert,
   Award,
+  GraduationCap,
+  Settings,
+  Shield,
+  FileText,
+  Laptop,
+  Users,
 } from 'lucide-react';
 import { UserRole } from '../types';
 
@@ -92,114 +90,121 @@ export const Sidebar: React.FC<SidebarProps> = ({
       case 'ORG_OWNER':
         return [
           {
-            title: 'Overview',
+            title: 'OVERVIEW',
             items: [{ id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard }],
           },
           {
-            title: 'Access Control',
+            title: 'ACCESS CONTROL',
             items: [
               { id: 'authorized_managers', label: 'Authorized Managers', icon: Users },
               { id: 'trusted_devices', label: 'Trusted Workstations', icon: Laptop },
             ],
+          },
+          {
+            title: 'SECURITY',
+            items: [{ id: 'security_events', label: 'Security Events', icon: ShieldAlert }],
           },
         ];
 
       case 'EXAM_MANAGER':
         return [
           {
-            title: 'Overview',
+            title: 'OVERVIEW',
             items: [{ id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard }],
           },
           {
-            title: 'Examinations',
+            title: 'EXAMINATIONS',
             items: [
               { id: 'all_examinations', label: 'All Examinations', icon: FolderLock },
               { id: 'create_examination', label: 'Create Examination', icon: PlusCircle },
             ],
           },
           {
-            title: 'Competitive Examination',
+            title: 'COMPETITIVE EXAMINATIONS',
             items: [
               { id: 'question_workflow', label: 'Competitive Examination', icon: Award },
             ],
           },
           {
-            title: 'University',
+            title: 'UNIVERSITY',
             items: [
-              { id: 'paper_generation', label: 'University Paper Generation', icon: Lock },
+              { id: 'paper_generation', label: 'University Paper Generation', icon: GraduationCap },
             ],
           },
           {
-            title: 'Examination Centres',
+            title: 'INFRASTRUCTURE',
             items: [{ id: 'examination_centres', label: 'Examination Centres', icon: Building2 }],
           },
           {
-            title: 'Security',
-            items: [{ id: 'security_events', label: 'Security Events', icon: ShieldAlert }],
+            title: 'SECURITY',
+            items: [
+              { id: 'security_events', label: 'Security Events', icon: ShieldAlert },
+              { id: 'audit_trail', label: 'Audit Logs', icon: History },
+              { id: 'proctor_dashboard', label: 'Threat Detection', icon: Activity },
+            ],
+          },
+          {
+            title: 'SYSTEM',
+            items: [
+              { id: 'security_settings', label: 'Settings', icon: Settings },
+              { id: 'device_status', label: 'System Health', icon: Cpu },
+            ],
           },
         ];
-
 
       case 'TRANSLATOR':
         return [
           {
-            title: 'Overview',
-            items: [{ id: 'dashboard', label: 'Translator Dashboard & Workbench', icon: LayoutDashboard }],
+            title: 'OVERVIEW',
+            items: [{ id: 'dashboard', label: 'Translation Hub', icon: LayoutDashboard }],
           },
           {
-            title: 'Ledger & Audit',
-            items: [{ id: 'verification_history', label: 'Translation Ledger', icon: History }],
+            title: 'VERIFICATION',
+            items: [
+              { id: 'translation_tasks', label: 'Assigned Papers', icon: FileText },
+              { id: 'verification_history', label: 'Translation Logs', icon: History },
+            ],
           },
         ];
 
       case 'CENTRE_OPERATOR':
         return [
           {
-            title: 'Overview',
-            items: [{ id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard }],
+            title: 'OVERVIEW',
+            items: [{ id: 'dashboard', label: 'Center Dashboard', icon: LayoutDashboard }],
           },
           {
-            title: 'Examination Delivery',
+            title: 'RELEASE & PRINTING',
             items: [
-              { id: 'released_examinations', label: 'Released Examinations', icon: FolderLock },
-              { id: 'secure_viewer', label: 'Secure Viewer', icon: Lock },
+              { id: 'released_examinations', label: 'Released Papers', icon: Lock },
+              { id: 'secure_viewer', label: 'Secure Viewer', icon: FolderLock },
+              { id: 'print_management', label: 'Print Station', icon: Printer },
             ],
           },
           {
-            title: 'Printing',
-            items: [{ id: 'print_management', label: 'Print Management', icon: Printer }],
-          },
-          {
-            title: 'Hardware Terminal',
-            items: [{ id: 'device_status', label: 'Device Status', icon: Laptop }],
+            title: 'HARDWARE',
+            items: [{ id: 'device_status', label: 'Device Attestation', icon: Laptop }],
           },
         ];
 
       case 'AUDITOR':
         return [
           {
-            title: 'Overview',
-            items: [{ id: 'dashboard', label: 'Auditor Dashboard', icon: LayoutDashboard }],
+            title: 'OVERVIEW',
+            items: [{ id: 'dashboard', label: 'Audit Dashboard', icon: LayoutDashboard }],
           },
           {
-            title: 'Audit Logs',
+            title: 'AUDIT LEDGER',
             items: [
-              { id: 'audit_trail', label: 'Immutable Audit Trail', icon: Activity },
-              { id: 'login_history', label: 'Login & Session History', icon: UserCheck },
+              { id: 'audit_trail', label: 'Cryptographic Trail', icon: History },
+              { id: 'login_history', label: 'Authentication Events', icon: Users },
+              { id: 'paper_events', label: 'Paper Lifecycle Logs', icon: FileText },
+              { id: 'printing_events', label: 'Printing Logs', icon: Printer },
             ],
           },
           {
-            title: 'Security & Forensics',
-            items: [
-              { id: 'security_events', label: 'Security & Threat Events', icon: ShieldAlert },
-              { id: 'paper_events', label: 'Paper Lifecycle Events', icon: Layers },
-              { id: 'printing_events', label: 'Printing Copy Logs', icon: Printer },
-              { id: 'regeneration_events', label: 'Regeneration Events', icon: History },
-            ],
-          },
-          {
-            title: 'Leak Surveillance',
-            items: [{ id: 'proctor_dashboard', label: 'Authority Surveillance Audit', icon: ShieldAlert }],
+            title: 'SURVEILLANCE',
+            items: [{ id: 'proctor_dashboard', label: 'Leak Surveillance Audit', icon: ShieldAlert }],
           },
         ];
 
@@ -211,56 +216,51 @@ export const Sidebar: React.FC<SidebarProps> = ({
   const sections = getNavSections();
 
   return (
-    <aside className="w-full lg:w-72 bg-white/70 dark:bg-[#080B11]/50 backdrop-blur-2xl border-r border-slate-200/80 dark:border-white/[0.08] flex flex-col justify-between shrink-0 shadow-[1px_0_12px_rgba(15,23,42,0.03)] dark:shadow-[4px_0_30px_rgba(0,0,0,0.5)] z-20">
+    <aside className="w-full lg:w-[260px] bg-[#081715] border-r border-white/[0.08] flex flex-col justify-between shrink-0 shadow-[4px_0_24px_rgba(0,0,0,0.5)] z-20">
       <div className="p-4 space-y-5 overflow-y-auto">
-        {/* Role Domain Header Banner */}
-        <div className="p-4 bg-gradient-to-br from-[#00cc5f]/12 via-[#00cc5f]/5 to-transparent border border-[#00cc5f]/30 rounded-2xl shadow-xs relative overflow-hidden backdrop-blur-md">
+        {/* Header: ZEROLEAK with System Secure indicator */}
+        <div className="p-3.5 rounded-xl bg-[#0D211E] border border-white/[0.08] relative overflow-hidden">
           <div className="flex items-center justify-between">
-            <span className="text-[10px] uppercase font-black text-slate-500 dark:text-slate-400 tracking-wider">
-              Enclave Boundary
+            <span className="text-[11px] font-mono font-bold tracking-wider text-[#F4F8F7]">
+              ZEROLEAK
             </span>
-            <span className="relative flex h-2.5 w-2.5">
-              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-[#00cc5f] opacity-75"></span>
-              <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-[#00cc5f]"></span>
+            <span className="inline-flex items-center gap-1 text-[9px] font-mono font-semibold text-[#00D68F] bg-[#00D68F]/10 px-2 py-0.5 rounded-full border border-[#00D68F]/20">
+              <span className="w-1.5 h-1.5 rounded-full bg-[#00D68F] animate-pulse" />
+              SYSTEM SECURE
             </span>
           </div>
-          <p className="font-black text-slate-900 dark:text-white text-xs mt-1.5 tracking-tight flex items-center gap-1.5">
-            <ShieldCheck className="w-4 h-4 text-[#00cc5f] shrink-0" />
-            <span>{userRole ? userRole.replace(/_/g, ' ') : 'UNAUTHENTICATED'}</span>
-          </p>
-          <div className="mt-2 pt-2 border-t border-[#00cc5f]/20 dark:border-white/10 flex items-center justify-between text-[10px] text-[#00873d] dark:text-[#00cc5f] font-mono">
-            <span>FIPS-140-2</span>
-            <span className="font-bold text-[#00873d] dark:text-[#00cc5f]">AES-256</span>
+
+          <div className="mt-2 pt-2 border-t border-white/[0.06] flex items-center justify-between text-[10px] text-[#9AAEAA] font-mono">
+            <span className="truncate">{userRole ? userRole.replace(/_/g, ' ') : 'CONTROLLER'}</span>
+            <span className="text-[#00D68F] font-bold">FIPS 140-2</span>
           </div>
         </div>
 
-        {/* Dynamic Section Navigation */}
+        {/* Dynamic Section Navigation Groups */}
         <div className="space-y-4">
           {sections.map(section => (
             <div key={section.title} className="space-y-1">
-              <p className="text-[10px] font-black text-slate-400 dark:text-slate-400 uppercase tracking-widest px-3 py-1">
+              <p className="text-[9.5px] font-mono font-bold text-[#617773] uppercase tracking-wider px-3 py-1">
                 {section.title}
               </p>
-              <div className="space-y-1">
+              <div className="space-y-0.5">
                 {section.items.map(item => {
                   const Icon = item.icon;
                   const isActive = activeSubTab === item.id;
                   return (
                     <button
                       key={item.id}
+                      type="button"
                       onClick={() => onSelectSubTab(item.id)}
-                      className={`w-full flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-xs font-semibold transition-all relative cursor-pointer backdrop-blur-md ${
+                      className={`w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-xs font-semibold transition-all relative cursor-pointer ${
                         isActive
-                          ? 'bg-[#00cc5f]/12 dark:bg-[#00cc5f]/18 text-[#00873d] dark:text-[#00cc5f] font-bold border border-[#00cc5f]/40 dark:border-[#00cc5f]/50 shadow-[0_2px_12px_rgba(0,204,95,0.12)] dark:shadow-[0_0_20px_rgba(0,204,95,0.25)]'
-                          : 'text-slate-600 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-white/[0.04] hover:text-slate-950 dark:hover:text-white border border-transparent hover:translate-x-0.5'
+                          ? 'bg-[#0D211E] text-[#00D68F] font-bold border-l-2 border-[#00D68F] shadow-[inset_0_0_12px_rgba(0,214,143,0.06)]'
+                          : 'text-[#9AAEAA] hover:bg-[#102723]/60 hover:text-[#F4F8F7] border-l-2 border-transparent'
                       }`}
                     >
-                      {isActive && (
-                        <span className="absolute left-1 top-1/2 -translate-y-1/2 w-1.5 h-4.5 rounded-full bg-[#00cc5f] shadow-[0_0_8px_#00cc5f]" />
-                      )}
                       <Icon
                         className={`w-4 h-4 shrink-0 transition-colors ${
-                          isActive ? 'text-[#00cc5f]' : 'text-slate-400'
+                          isActive ? 'text-[#00D68F]' : 'text-[#617773] group-hover:text-[#9AAEAA]'
                         }`}
                       />
                       <span className="truncate">{item.label}</span>
@@ -273,20 +273,22 @@ export const Sidebar: React.FC<SidebarProps> = ({
         </div>
       </div>
 
-      {/* Account & Session Controls */}
-      <div className="p-4 border-t border-slate-200/90 dark:border-white/10 bg-slate-50/70 dark:bg-black/20 backdrop-blur-md space-y-2">
-        <div className="flex items-center justify-between px-2">
-          <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">
-            Terminal Session
+      {/* Terminal Session & Sign Out Footer */}
+      <div className="p-3.5 border-t border-white/[0.08] bg-[#06110F]/80 space-y-2">
+        <div className="flex items-center justify-between px-2 text-[10px] font-mono text-[#617773]">
+          <span>TERMINAL SESSION</span>
+          <span className="inline-flex items-center gap-1 text-[#00D68F]">
+            <span className="w-1.5 h-1.5 rounded-full bg-[#00D68F]" />
+            BOUND
           </span>
-          <span className="inline-block w-1.5 h-1.5 rounded-full bg-emerald-500 shadow-[0_0_6px_#10B981]" />
         </div>
 
         <button
-          onClick={() => onLogout?.()}
-          className="w-full flex items-center justify-center gap-2 px-3 py-2.5 rounded-xl text-xs font-bold text-rose-700 dark:text-rose-400 hover:bg-rose-50 dark:hover:bg-rose-950/30 border border-rose-200/60 dark:border-rose-900/40 hover:border-rose-300 dark:hover:border-rose-700 transition-all cursor-pointer shadow-2xs hover:shadow-xs bg-white/80 dark:bg-white/[0.03] backdrop-blur-md"
+          type="button"
+          onClick={onLogout}
+          className="w-full flex items-center justify-center gap-2 px-3 py-2 rounded-lg text-xs font-semibold text-[#FF5C6C] hover:bg-[#FF5C6C]/10 border border-[#FF5C6C]/20 hover:border-[#FF5C6C]/40 transition-all cursor-pointer"
         >
-          <LogOut className="w-4 h-4" />
+          <LogOut className="w-3.5 h-3.5" />
           <span>Sign Out of Enclave</span>
         </button>
       </div>
