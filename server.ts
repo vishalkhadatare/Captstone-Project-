@@ -12904,6 +12904,21 @@ async function startServer() {
     });
   }
 
+  // Start accepting requests before optional database hydration and demo
+  // seeding. Those operations may take a while when PostgreSQL is offline,
+  // but the local SQLite engine can still serve the application.
+  app.listen(PORT, '0.0.0.0', () => {
+    console.log(`[ZeroLeak Security Engine] Server running on http://0.0.0.0:${PORT}`);
+    try {
+      const discovery = startPrintRelayDiscovery();
+      if (discovery.started) {
+        console.log(`[ZeroLeak Print Relay] LAN discovery beacon active on UDP ${DISCOVERY_BEACON_PORT}`);
+      }
+    } catch (error: any) {
+      console.warn('[ZeroLeak Print Relay] LAN discovery unavailable:', error?.message || error);
+    }
+  });
+
   // Ensure all existing user organizations exist and are verified
   async function ensureAllOrganizationsExist() {
     try {
@@ -12927,30 +12942,25 @@ async function startServer() {
     }
   }
 
-  console.log('[ZeroLeak Startup] 1/6 Ensuring organizations exist...');
-  await ensureAllOrganizationsExist();
-  console.log('[ZeroLeak Startup] 2/6 Creating dev account...');
-  await createDevelopmentTestAccount();
-  console.log('[ZeroLeak Startup] 3/6 Seeding demo data...');
-  await seedAcademicDemoDataInternal();
-  console.log('[ZeroLeak Startup] 4/6 Cleaning legacy questions...');
-  const db = await getDb();
-  cleanLegacyDummyQuestions(db);
-  saveDb();
-  console.log('[ZeroLeak Startup] 5/6 Starting HTTP listener...');
-
-  app.listen(PORT, '0.0.0.0', () => {
-    console.log(`[ZeroLeak Security Engine] Server running on http://0.0.0.0:${PORT}`);
-    // Advertise any open Wi-Fi print relay on the local network. Best-effort: a
-    // network that forbids broadcast must not stop the server from listening.
-    try {
-      const discovery = startPrintRelayDiscovery();
-      if (discovery.started) {
-        console.log(`[ZeroLeak Print Relay] LAN discovery beacon active on UDP ${DISCOVERY_BEACON_PORT}`);
-      }
-    } catch (error: any) {
-      console.warn('[ZeroLeak Print Relay] LAN discovery unavailable:', error?.message || error);
-    }
+  // Yield once after opening the listener so the first browser request can be
+  // handled before the synchronous seed/migration work occupies the event
+  // loop. The routes use the same local SQLite fallback while this completes.
+  setImmediate(() => {
+    void (async () => {
+      console.log('[ZeroLeak Startup] 1/6 Ensuring organizations exist...');
+      await ensureAllOrganizationsExist();
+      console.log('[ZeroLeak Startup] 2/6 Creating dev account...');
+      await createDevelopmentTestAccount();
+      console.log('[ZeroLeak Startup] 3/6 Seeding demo data...');
+      await seedAcademicDemoDataInternal();
+      console.log('[ZeroLeak Startup] 4/6 Cleaning legacy questions...');
+      const db = await getDb();
+      cleanLegacyDummyQuestions(db);
+      saveDb();
+      console.log('[ZeroLeak Startup] 5/6 Database initialization complete.');
+    })().catch(error => {
+      console.error('[ZeroLeak Startup] Database initialization failed:', error);
+    });
   });
 }
 
@@ -12958,4 +12968,3 @@ console.log('[ZeroLeak Startup] Bootstrapping...');
 startServer().catch(err => {
   console.error('Fatal server startup error:', err);
 });
-

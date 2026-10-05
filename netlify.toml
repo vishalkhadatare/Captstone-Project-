@@ -13,6 +13,13 @@
   # SSE streams cannot carry the ngrok skip header, so Prism uses polling here.
   VITE_PRISM_POLLING = "1"
 
+# Reverse-proxy every API call to the backend tunnel. Status 200 = proxy, not redirect.
+[[redirects]]
+  from = "/api/*"
+  to = "https://backed-repeated-aerobics.ngrok-free.dev/api/:splat"
+  status = 200
+  force = true
+
 # SPA fallback so deep links and refreshes resolve to index.html.
 [[redirects]]
   from = "/*"
