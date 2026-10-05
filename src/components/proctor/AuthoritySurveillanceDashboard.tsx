@@ -25,7 +25,7 @@ import {
   Maximize2,
   ExternalLink,
 } from 'lucide-react';
-import { AuthorityProctorSession, AuthorityProctorEvent, AuthoritySurveillanceMetrics, User } from '../../types';
+import { AuthorityProctorSession, AuthorityProctorEvent, AuthoritySurveillanceMetrics, User, VoiceEvidenceItem } from '../../types';
 import { api } from '../../api';
 
 interface AuthoritySurveillanceDashboardProps {
@@ -52,6 +52,7 @@ export const AuthoritySurveillanceDashboard: React.FC<AuthoritySurveillanceDashb
   // Forensic Review Modal State
   const [selectedSession, setSelectedSession] = useState<AuthorityProctorSession | null>(null);
   const [sessionEvents, setSessionEvents] = useState<AuthorityProctorEvent[]>([]);
+  const [sessionEvidence, setSessionEvidence] = useState<VoiceEvidenceItem[]>([]);
   const [loadingReview, setLoadingReview] = useState(false);
 
   // Lockdown Modal State
@@ -97,6 +98,7 @@ export const AuthoritySurveillanceDashboard: React.FC<AuthoritySurveillanceDashb
       const res = await api.authorityProctor.getSessionReview(session.id);
       setSelectedSession(res.session);
       setSessionEvents(res.events || []);
+      setSessionEvidence(res.evidence || []);
     } catch (err: any) {
       console.error('Error fetching review:', err);
     } finally {
@@ -594,6 +596,50 @@ export const AuthoritySurveillanceDashboard: React.FC<AuthoritySurveillanceDashb
                   )}
                 </div>
               </div>
+
+              {/* Voice Recordings Submitted to Auditor */}
+              {sessionEvidence && sessionEvidence.length > 0 && (
+                <div className="p-4 rounded-xl bg-slate-950 border border-indigo-900/60 space-y-3">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                      <span className="w-2.5 h-2.5 rounded-full bg-indigo-500 animate-ping" />
+                      <h4 className="text-xs font-bold uppercase tracking-wider text-indigo-300">
+                        Auditor Voice Evidence Recordings ({sessionEvidence.length})
+                      </h4>
+                    </div>
+                    <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-indigo-950 text-indigo-300 border border-indigo-700">
+                      Chief Vigilance Review Queue
+                    </span>
+                  </div>
+
+                  <div className="space-y-3">
+                    {sessionEvidence.map((ev) => (
+                      <div
+                        key={ev.id}
+                        className="p-3 rounded-lg bg-slate-900 border border-slate-800 space-y-2"
+                      >
+                        <div className="flex items-center justify-between text-xs">
+                          <div className="flex items-center gap-2">
+                            <span className="font-semibold text-slate-200">{ev.submitted_by || ev.user_name}</span>
+                            <span className="text-slate-500">•</span>
+                            <span className="text-slate-400 font-mono text-[11px]">
+                              {new Date(ev.created_at).toLocaleTimeString()} ({ev.duration_seconds}s)
+                            </span>
+                          </div>
+                          <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-amber-950 text-amber-300 border border-amber-800">
+                            {ev.review_status}
+                          </span>
+                        </div>
+                        <audio
+                          controls
+                          src={ev.audio_data_url}
+                          className="w-full h-8 mt-1 accent-indigo-500"
+                        />
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
 
               {/* Event Timeline */}
               <div>

@@ -713,7 +713,7 @@ export interface AuthorityProctorSession {
   workspace_type: string;
   exam_id?: string;
   exam_name?: string;
-  status: 'ACTIVE' | 'LOCKED' | 'TERMINATED' | 'COMPLETED';
+  status: 'ACTIVE' | 'LOCKED' | 'TERMINATED' | 'COMPLETED' | 'FLAGGED_FOR_REVIEW';
   camera_status: 'ACTIVE' | 'DISABLED' | 'ERROR';
   microphone_status: 'ACTIVE' | 'DISABLED' | 'MUTED';
   fullscreen_status: 'ACTIVE' | 'EXITED';
@@ -726,9 +726,29 @@ export interface AuthorityProctorSession {
   emergency_locked: number;
   emergency_lock_reason?: string;
   locked_by?: string;
+  warning_count?: number;
   last_heartbeat_at: string;
   created_at: string;
   updated_at: string;
+}
+
+export interface VoiceEvidenceItem {
+  id: string;
+  session_id: string;
+  exam_id?: string;
+  user_id: string;
+  user_name: string;
+  user_role: string;
+  audio_data_url: string;
+  duration_seconds: number;
+  file_size_bytes?: number;
+  mime_type?: string;
+  event_type?: string;
+  warning_number?: number;
+  submitted_by?: string;
+  recipient?: string;
+  review_status?: string;
+  created_at: string;
 }
 
 export interface AuthorityProctorEvent {

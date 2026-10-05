@@ -956,6 +956,7 @@ function initializeSchema(db: Database) {
       emergency_locked INTEGER DEFAULT 0,
       emergency_lock_reason TEXT,
       locked_by TEXT,
+      warning_count INTEGER DEFAULT 0,
       last_heartbeat_at TEXT NOT NULL,
       created_at TEXT NOT NULL,
       updated_at TEXT NOT NULL
@@ -995,6 +996,26 @@ function initializeSchema(db: Database) {
       repeated_activity_points INTEGER DEFAULT 10,
       max_warnings INTEGER DEFAULT 3,
       updated_at TEXT NOT NULL
+    );
+
+    -- Proctor Voice Evidence (Auditor voice notes & recorded audio submissions)
+    CREATE TABLE IF NOT EXISTS proctor_voice_evidence (
+      id TEXT PRIMARY KEY,
+      session_id TEXT NOT NULL,
+      exam_id TEXT,
+      user_id TEXT NOT NULL,
+      user_name TEXT NOT NULL,
+      user_role TEXT NOT NULL,
+      audio_data_url TEXT NOT NULL,
+      duration_seconds INTEGER DEFAULT 0,
+      file_size_bytes INTEGER DEFAULT 0,
+      mime_type TEXT DEFAULT 'audio/webm',
+      event_type TEXT DEFAULT 'VOICE_RECORDING_EVIDENCE',
+      warning_number INTEGER DEFAULT 0,
+      submitted_by TEXT,
+      recipient TEXT DEFAULT 'Chief Vigilance & Security Auditor',
+      review_status TEXT DEFAULT 'PENDING_AUDIT',
+      created_at TEXT NOT NULL
     );
 
     -- 39. DYNAMIC MULTI-PAPER GENERATOR TABLES
@@ -1144,6 +1165,7 @@ function initializeSchema(db: Database) {
   safeAddColumn('proctor_events', 'user_id TEXT');
   safeAddColumn('proctor_events', 'user_role TEXT');
   safeAddColumn('proctor_events', 'snapshot_thumbnail TEXT');
+  safeAddColumn('authority_proctor_sessions', 'warning_count INTEGER DEFAULT 0');
 
   try {
     const proctorCols = executeQuery(db, 'PRAGMA table_info(proctor_events)', []);
@@ -1400,6 +1422,25 @@ function initializeSchema(db: Database) {
       for (const col of examCols) {
         pgPool.query(`ALTER TABLE examinations ADD COLUMN IF NOT EXISTS ${col} TEXT`).catch(() => {});
       }
+      pgPool.query(`ALTER TABLE authority_proctor_sessions ADD COLUMN IF NOT EXISTS warning_count INTEGER DEFAULT 0`).catch(() => {});
+      pgPool.query(`CREATE TABLE IF NOT EXISTS proctor_voice_evidence (
+        id TEXT PRIMARY KEY,
+        session_id TEXT NOT NULL,
+        exam_id TEXT,
+        user_id TEXT NOT NULL,
+        user_name TEXT NOT NULL,
+        user_role TEXT NOT NULL,
+        audio_data_url TEXT NOT NULL,
+        duration_seconds INTEGER DEFAULT 0,
+        file_size_bytes INTEGER DEFAULT 0,
+        mime_type TEXT DEFAULT 'audio/webm',
+        event_type TEXT DEFAULT 'VOICE_RECORDING_EVIDENCE',
+        warning_number INTEGER DEFAULT 0,
+        submitted_by TEXT,
+        recipient TEXT DEFAULT 'Chief Vigilance & Security Auditor',
+        review_status TEXT DEFAULT 'PENDING_AUDIT',
+        created_at TEXT NOT NULL
+      )`).catch(() => {});
     }
   } catch {}
 }

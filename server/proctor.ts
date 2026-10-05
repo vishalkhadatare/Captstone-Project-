@@ -356,7 +356,7 @@ export interface AuthorityProctorSession {
   org_id: string;
   workspace_type: string;
   exam_id?: string;
-  status: 'ACTIVE' | 'LOCKED' | 'TERMINATED' | 'COMPLETED';
+  status: 'ACTIVE' | 'LOCKED' | 'TERMINATED' | 'COMPLETED' | 'FLAGGED_FOR_REVIEW';
   camera_status: 'ACTIVE' | 'DISABLED' | 'ERROR';
   microphone_status: 'ACTIVE' | 'DISABLED' | 'MUTED';
   fullscreen_status: 'ACTIVE' | 'EXITED';
@@ -369,6 +369,7 @@ export interface AuthorityProctorSession {
   emergency_locked: number;
   emergency_lock_reason?: string;
   locked_by?: string;
+  warning_count?: number;
   last_heartbeat_at: string;
   created_at: string;
   updated_at: string;
@@ -390,9 +391,9 @@ export function startAuthorityEnclaveSession(
       id, user_id, user_name, user_email, user_role, org_id, workspace_type,
       exam_id, status, camera_status, microphone_status, fullscreen_status,
       face_status, faces_detected_count, audio_level_db, leak_risk_score,
-      leak_risk_level, verification_snapshot, emergency_locked, last_heartbeat_at,
+      leak_risk_level, verification_snapshot, emergency_locked, warning_count, last_heartbeat_at,
       created_at, updated_at
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'ACTIVE', 'ACTIVE', 'ACTIVE', 'ACTIVE', 'VERIFIED', 1, -40.0, 0, 'NORMAL', ?, 0, ?, ?, ?)`,
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'ACTIVE', 'ACTIVE', 'ACTIVE', 'ACTIVE', 'VERIFIED', 1, -40.0, 0, 'NORMAL', ?, 0, 0, ?, ?, ?)`,
     [
       sessionId,
       user.id,
@@ -644,5 +645,197 @@ export function getAuthoritySurveillanceDashboard(db: Database, orgId?: string) 
     sessions,
   };
 }
+
+export interface VoiceEvidenceRecord {
+  id: string;
+  session_id: string;
+  exam_id?: string;
+  user_id: string;
+  user_name: string;
+  user_role: string;
+  audio_data_url: string;
+  duration_seconds: number;
+  file_size_bytes?: number;
+  mime_type?: string;
+  event_type?: string;
+  warning_number?: number;
+  submitted_by?: string;
+  recipient?: string;
+  review_status?: string;
+  created_at: string;
+}
+
+export function saveVoiceEvidence(
+  db: Database,
+  params: {
+    session_id: string;
+    exam_id?: string;
+    user_id: string;
+    user_name: string;
+    user_role: string;
+    audio_data_url: string;
+    duration_seconds: number;
+    file_size_bytes?: number;
+    mime_type?: string;
+    warning_number?: number;
+    submitted_by?: string;
+  }
+): VoiceEvidenceRecord {
+  const id = `VOICE-EV-${uuidv4().substring(0, 8).toUpperCase()}`;
+  const now = new Date().toISOString();
+  executeRun(
+    db,
+    `INSERT INTO proctor_voice_evidence (
+      id, session_id, exam_id, user_id, user_name, user_role,
+      audio_data_url, duration_seconds, file_size_bytes, mime_type,
+      event_type, warning_number, submitted_by, recipient, review_status, created_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'VOICE_RECORDING_EVIDENCE', ?, ?, 'Chief Vigilance & Security Auditor', 'PENDING_AUDIT', ?)`,
+    [
+      id,
+      params.session_id,
+      params.exam_id || null,
+      params.user_id,
+      params.user_name,
+      params.user_role,
+      params.audio_data_url,
+      params.duration_seconds || 0,
+      params.file_size_bytes || 0,
+      params.mime_type || 'audio/webm',
+      params.warning_number || 0,
+      params.submitted_by || params.user_name,
+      now,
+    ]
+  );
+
+  // Also log an authority leak event in timeline for the auditor
+  recordAuthorityLeakEvent(db, {
+    session_id: params.session_id,
+    user_id: params.user_id,
+    user_role: params.user_role,
+    exam_id: params.exam_id,
+    event_type: 'VOICE_EVIDENCE_SUBMITTED',
+    severity: 'MEDIUM',
+    metadata: {
+      evidence_id: id,
+      duration_seconds: params.duration_seconds,
+      recipient: 'Chief Vigilance & Security Auditor',
+      audio_format: params.mime_type || 'audio/webm',
+    },
+  });
+
+  return {
+    id,
+    session_id: params.session_id,
+    exam_id: params.exam_id,
+    user_id: params.user_id,
+    user_name: params.user_name,
+    user_role: params.user_role,
+    audio_data_url: params.audio_data_url,
+    duration_seconds: params.duration_seconds || 0,
+    file_size_bytes: params.file_size_bytes || 0,
+    mime_type: params.mime_type || 'audio/webm',
+    event_type: 'VOICE_RECORDING_EVIDENCE',
+    warning_number: params.warning_number || 0,
+    submitted_by: params.submitted_by || params.user_name,
+    recipient: 'Chief Vigilance & Security Auditor',
+    review_status: 'PENDING_AUDIT',
+    created_at: now,
+  };
+}
+
+export function getVoiceEvidenceBySession(db: Database, sessionId: string): VoiceEvidenceRecord[] {
+  return executeQuery(
+    db,
+    'SELECT * FROM proctor_voice_evidence WHERE session_id = ? ORDER BY created_at DESC',
+    [sessionId]
+  ) as VoiceEvidenceRecord[];
+}
+
+export function issueAuthorityWarning(
+  db: Database,
+  sessionId: string,
+  reason: string,
+  details?: Record<string, any>
+): {
+  warning_count: number;
+  max_warnings: number;
+  warnings_remaining: number;
+  status: string;
+  is_locked: boolean;
+  message: string;
+} {
+  const rows = executeQuery(
+    db,
+    'SELECT id, warning_count, status, user_id, user_name, user_role, exam_id FROM authority_proctor_sessions WHERE id = ?',
+    [sessionId]
+  );
+  if (!rows || rows.length === 0) {
+    throw new Error('Authority proctor session not found');
+  }
+
+  const session = rows[0];
+  const currentCount = Number(session.warning_count) || 0;
+  // Strictly capped at 3: Never increment past 3!
+  const newCount = Math.min(3, currentCount + 1);
+  const now = new Date().toISOString();
+
+  let newStatus = session.status || 'ACTIVE';
+  let isLocked = false;
+
+  if (newCount >= 3) {
+    newStatus = 'FLAGGED_FOR_REVIEW';
+    isLocked = true;
+  }
+
+  executeRun(
+    db,
+    `UPDATE authority_proctor_sessions SET
+      warning_count = ?,
+      status = ?,
+      emergency_locked = CASE WHEN ? = 1 THEN 1 ELSE emergency_locked END,
+      emergency_lock_reason = CASE WHEN ? = 1 THEN ? ELSE emergency_lock_reason END,
+      updated_at = ?
+    WHERE id = ?`,
+    [
+      newCount,
+      newStatus,
+      isLocked ? 1 : 0,
+      isLocked ? `3/3 Warnings Exceeded: ${reason}` : null,
+      now,
+      sessionId,
+    ]
+  );
+
+  // Record warning event in proctor_events timeline
+  recordAuthorityLeakEvent(db, {
+    session_id: sessionId,
+    user_id: session.user_id,
+    user_role: session.user_role,
+    exam_id: session.exam_id,
+    event_type: `SECURITY_WARNING_${newCount}`,
+    severity: newCount === 3 ? 'CRITICAL' : newCount === 2 ? 'HIGH' : 'MEDIUM',
+    metadata: {
+      warning_number: newCount,
+      max_warnings: 3,
+      reason,
+      ...details,
+    },
+  });
+
+  return {
+    warning_count: newCount,
+    max_warnings: 3,
+    warnings_remaining: Math.max(0, 3 - newCount),
+    status: newStatus,
+    is_locked: isLocked,
+    message:
+      newCount === 1
+        ? 'Warning 1 of 3: Suspicious activity logged. Please maintain continuous camera presence.'
+        : newCount === 2
+        ? 'Warning 2 of 3: FINAL WARNING. The next infraction will flag your session for immediate auditor review.'
+        : 'Warning 3 of 3: Violation threshold reached. Session flagged for forensic review by Chief Vigilance & Security Auditor.',
+  };
+}
+
 
 

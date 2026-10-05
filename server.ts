@@ -155,6 +155,9 @@ import {
   emergencyLockAuthoritySession,
   endAuthorityEnclaveSession,
   getAuthoritySurveillanceDashboard,
+  saveVoiceEvidence,
+  getVoiceEvidenceBySession,
+  issueAuthorityWarning,
 } from './server/proctor.ts';
 import {
   generateMultiPaperSets,
@@ -11912,8 +11915,8 @@ async function startServer() {
         audio_level_db,
       });
 
-      // Check if session was emergency-locked by admin/auditor
-      const rows = executeQuery(db, 'SELECT status, emergency_locked, emergency_lock_reason FROM authority_proctor_sessions WHERE id = ?', [session_id]);
+      // Check if session was emergency-locked by admin/auditor and get warning count
+      const rows = executeQuery(db, 'SELECT status, emergency_locked, emergency_lock_reason, warning_count FROM authority_proctor_sessions WHERE id = ?', [session_id]);
       const sessionState = rows[0] || {};
 
       return res.json({
@@ -11921,7 +11924,73 @@ async function startServer() {
         status: sessionState.status || 'ACTIVE',
         emergency_locked: Boolean(sessionState.emergency_locked),
         emergency_lock_reason: sessionState.emergency_lock_reason || null,
+        warning_count: Number(sessionState.warning_count) || 0,
       });
+    } catch (e: any) {
+      return res.status(500).json({ error: e.message });
+    }
+  });
+
+  // Voice evidence recording submission to Chief Vigilance & Security Auditor
+  app.post('/api/authority-proctor/voice-evidence', authenticateToken, async (req: Request, res: Response) => {
+    try {
+      const { session_id, exam_id, audio_data_url, duration_seconds, file_size_bytes, mime_type, warning_number } = req.body;
+      if (!session_id || !audio_data_url) {
+        return res.status(400).json({ error: 'session_id and audio_data_url are required' });
+      }
+      const db = await getDb();
+      const evidence = saveVoiceEvidence(db, {
+        session_id,
+        exam_id,
+        user_id: req.user!.id,
+        user_name: req.user!.full_name,
+        user_role: req.user!.role,
+        audio_data_url,
+        duration_seconds: Number(duration_seconds) || 0,
+        file_size_bytes: Number(file_size_bytes) || 0,
+        mime_type: mime_type || 'audio/webm',
+        warning_number: Number(warning_number) || 0,
+        submitted_by: req.user!.full_name,
+      });
+
+      await logAuditEvent({
+        event_type: 'AUTHORITY_VOICE_EVIDENCE_LOGGED',
+        user_id: req.user!.id,
+        org_id: req.user!.org_id,
+        role: req.user!.role,
+        details: { session_id, evidence_id: evidence.id, duration_seconds },
+      });
+
+      return res.json({ success: true, evidence });
+    } catch (e: any) {
+      console.error('Voice evidence submit error:', e);
+      return res.status(500).json({ error: e.message });
+    }
+  });
+
+  // Issue authoritative warning (Strict max 3 warnings: 1 Amber, 2 Orange, 3 Red lock)
+  app.post('/api/authority-proctor/sessions/warning', authenticateToken, async (req: Request, res: Response) => {
+    try {
+      const { session_id, reason, details } = req.body;
+      if (!session_id) {
+        return res.status(400).json({ error: 'session_id is required' });
+      }
+      const db = await getDb();
+      const result = issueAuthorityWarning(db, session_id, reason || 'Violation detected', details);
+      return res.json({ success: true, ...result });
+    } catch (e: any) {
+      console.error('Authority proctor issue warning error:', e);
+      return res.status(500).json({ error: e.message });
+    }
+  });
+
+  // Fetch voice evidence records for session
+  app.get('/api/authority-proctor/sessions/:id/evidence', authenticateToken, async (req: Request, res: Response) => {
+    try {
+      const sessionId = req.params.id;
+      const db = await getDb();
+      const evidence = getVoiceEvidenceBySession(db, sessionId);
+      return res.json({ success: true, evidence });
     } catch (e: any) {
       return res.status(500).json({ error: e.message });
     }
@@ -11997,10 +12066,13 @@ async function startServer() {
         };
       });
 
+      const evidence = getVoiceEvidenceBySession(db, sessionId);
+
       return res.json({
         success: true,
         session: sessionRows[0],
         events: parsedEvents,
+        evidence: evidence || [],
       });
     } catch (e: any) {
       return res.status(500).json({ error: e.message });

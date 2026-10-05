@@ -21,6 +21,7 @@ import {
   AuthorityProctorSession,
   AuthorityProctorEvent,
   AuthoritySurveillanceMetrics,
+  VoiceEvidenceItem,
   AicteUniversity,
   RegistrationVerificationResult,
   MultiPaperSourcePaper,
@@ -1287,10 +1288,38 @@ export const api = {
       faces_detected_count?: number;
       audio_level_db?: number;
     }) =>
-      request<{ success: boolean; status: string; emergency_locked: boolean; emergency_lock_reason?: string | null }>('/api/authority-proctor/heartbeat', {
+      request<{ success: boolean; status: string; emergency_locked: boolean; emergency_lock_reason?: string | null; warning_count?: number }>('/api/authority-proctor/heartbeat', {
         method: 'POST',
         body: JSON.stringify(payload),
       }),
+    submitVoiceEvidence: (payload: {
+      session_id: string;
+      exam_id?: string;
+      audio_data_url: string;
+      duration_seconds: number;
+      file_size_bytes?: number;
+      mime_type?: string;
+      warning_number?: number;
+    }) =>
+      request<{ success: boolean; evidence: VoiceEvidenceItem }>('/api/authority-proctor/voice-evidence', {
+        method: 'POST',
+        body: JSON.stringify(payload),
+      }),
+    issueWarning: (payload: { session_id: string; reason: string; details?: any }) =>
+      request<{
+        success: boolean;
+        warning_count: number;
+        max_warnings: number;
+        warnings_remaining: number;
+        status: string;
+        is_locked: boolean;
+        message: string;
+      }>('/api/authority-proctor/sessions/warning', {
+        method: 'POST',
+        body: JSON.stringify(payload),
+      }),
+    getSessionEvidence: (sessionId: string) =>
+      request<{ success: boolean; evidence: VoiceEvidenceItem[] }>(`/api/authority-proctor/sessions/${sessionId}/evidence`),
     endSession: (sessionId: string) =>
       request<{ success: boolean }>('/api/authority-proctor/sessions/end', {
         method: 'POST',
@@ -1299,7 +1328,7 @@ export const api = {
     getSurveillanceDashboard: () =>
       request<{ success: boolean; metrics: AuthoritySurveillanceMetrics; sessions: AuthorityProctorSession[] }>('/api/authority-proctor/dashboard'),
     getSessionReview: (sessionId: string) =>
-      request<{ success: boolean; session: AuthorityProctorSession; events: AuthorityProctorEvent[] }>(`/api/authority-proctor/sessions/${sessionId}/review`),
+      request<{ success: boolean; session: AuthorityProctorSession; events: AuthorityProctorEvent[]; evidence?: VoiceEvidenceItem[] }>(`/api/authority-proctor/sessions/${sessionId}/review`),
     emergencyLockSession: (sessionId: string, reason: string) =>
       request<{ success: boolean; message: string }>(`/api/authority-proctor/sessions/${sessionId}/emergency-lock`, {
         method: 'POST',
