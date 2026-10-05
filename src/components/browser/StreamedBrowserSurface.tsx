@@ -431,23 +431,11 @@ export const StreamedBrowserSurface: React.FC<StreamedBrowserSurfaceProps> = ({
               <Loader2 className="w-5 h-5 text-emerald-400 mx-auto animate-spin" />
             )}
             <p className="text-sm font-semibold text-slate-100">
-              {status?.state === 'error' ? 'The streamed browser stopped' : 'Starting a real browser...'}
+              {status?.state === 'error' ? 'Failed to connect to Prism' : 'Loading OpenAI Prism...'}
             </p>
-            <p className="text-[11px] text-slate-400">{status?.reason ?? 'Waiting for the server to describe the browser.'}</p>
+            <p className="text-[11px] text-slate-400">{status?.reason ?? 'Connecting to workspace...'}</p>
             {status?.error && <p className="text-[11px] text-rose-300">{status.error}</p>}
           </div>
-        </div>
-      )}
-
-      {/* A canvas cannot show a caret, so the only honest hint is a prompt. */}
-      {ready && !focused && visible && !keyboardOpen && (
-        <div className="absolute bottom-3 left-1/2 -translate-x-1/2 pointer-events-none">
-          <span className="flex items-center gap-1.5 rounded-full border border-slate-700 bg-slate-900/95 px-3 py-1 text-[11px] text-slate-300">
-            <MousePointerClick className="w-3.5 h-3.5 text-emerald-400" />
-            {isTouchDevice
-              ? 'Tap the page to click. Use “Type here” for the keyboard.'
-              : 'Click the page to type into it. This is a real browser, so sign-in works here.'}
-          </span>
         </div>
       )}
 

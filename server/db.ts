@@ -84,8 +84,15 @@ export async function resetDatabase(): Promise<Database> {
   return dbInstance;
 }
 
+let lastPgInitAttempt = 0;
+const PG_RECONNECT_INTERVAL_MS = 30000;
+
 export async function initPostgres(): Promise<boolean> {
   if (pgInitialized) return true;
+  if (Date.now() - lastPgInitAttempt < PG_RECONNECT_INTERVAL_MS) {
+    return false;
+  }
+  lastPgInitAttempt = Date.now();
   const pool = getPostgresPool();
   if (!pool) return false;
 
