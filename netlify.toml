@@ -20,7 +20,7 @@
 # NOTE: if the tunnel URL ever changes, update it in netlify/functions/api.ts.
 [[redirects]]
   from = "/api/*"
-  to = "/.netlify/functions/api?path=:splat"
+  to = "/.netlify/functions/api/:splat"
   status = 200
   force = true
 

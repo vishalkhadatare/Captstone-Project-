@@ -15,7 +15,11 @@ const HOP_BY_HOP_HEADERS = new Set([
 
 export default async (request: Request): Promise<Response> => {
   const incomingUrl = new URL(request.url);
-  const path = incomingUrl.searchParams.get('path');
+  const functionPrefix = '/.netlify/functions/api/';
+  const pathFromUrl = incomingUrl.pathname.startsWith(functionPrefix)
+    ? incomingUrl.pathname.slice(functionPrefix.length)
+    : '';
+  const path = pathFromUrl || incomingUrl.searchParams.get('path');
   if (!path || path.includes('..')) {
     return new Response('Missing API path.', { status: 400 });
   }
