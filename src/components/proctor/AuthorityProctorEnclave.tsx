@@ -31,6 +31,9 @@ import {
   Activity,
   Check,
   Award,
+  Circle,
+  HelpCircle,
+  CheckCircle,
 } from 'lucide-react';
 import { User, AuthorityProctorSession, RiskLevel } from '../../types';
 import { api } from '../../api';
@@ -43,6 +46,26 @@ interface AuthorityProctorEnclaveProps {
   examId?: string;
   children: React.ReactNode;
   title?: string;
+}
+
+// Rigorous Device Permission State Machine
+export type DevicePermissionState =
+  | 'not_requested'
+  | 'checking'
+  | 'prompt'
+  | 'requesting'
+  | 'granted'
+  | 'denied'
+  | 'not_found'
+  | 'busy'
+  | 'unsupported'
+  | 'error';
+
+interface PermissionErrorInfo {
+  type: string;
+  title: string;
+  message: string;
+  actionLabel?: string;
 }
 
 interface TimelineEvent {
@@ -60,23 +83,25 @@ export const AuthorityProctorEnclave: React.FC<AuthorityProctorEnclaveProps> = (
   children,
   title,
 }) => {
-  // Session State
+  // Session Lifecycle State
   const [session, setSession] = useState<AuthorityProctorSession | null>(null);
-  const [sessionActive, setSessionActive] = useState(false);
-  const [gateOpen, setGateOpen] = useState(true);
-  const [initializing, setInitializing] = useState(false);
-  const [errorMsg, setErrorMsg] = useState<string | null>(null);
+  const [enclaveStarted, setEnclaveStarted] = useState(false);
+  const [isStartingEnclave, setIsStartingEnclave] = useState(false);
 
-  // Hardware Streams & Permissions
-  const [stream, setStream] = useState<MediaStream | null>(null);
+  // Independent Hardware Permission States
+  const [cameraState, setCameraState] = useState<DevicePermissionState>('not_requested');
+  const [micState, setMicState] = useState<DevicePermissionState>('not_requested');
+  const [isRequestingPermissions, setIsRequestingPermissions] = useState(false);
+  const [permissionError, setPermissionError] = useState<PermissionErrorInfo | null>(null);
+
+  // Hardware Streams & Telemetry
+  const [mediaStream, setMediaStream] = useState<MediaStream | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
-  const [cameraActive, setCameraActive] = useState(false);
-  const [micActive, setMicActive] = useState(false);
-  const [audioLevel, setAudioLevel] = useState(-42);
-  const [audioVolumePercent, setAudioVolumePercent] = useState(15);
+  const [audioLevelDb, setAudioLevelDb] = useState(-45);
+  const [audioVolumePercent, setAudioVolumePercent] = useState(0);
   const [verificationSnapshot, setVerificationSnapshot] = useState<string | null>(null);
 
-  // Real-time Telemetry & Security Guards
+  // Real-time Facial Telemetry & Anomaly Sensors
   const [faceResult, setFaceResult] = useState<FaceDetectionResult>({ faceCount: 0, status: 'NOT_DETECTED', faces: [] });
   const [isFaceAbsent, setIsFaceAbsent] = useState(false);
   const [isShoulderSurfing, setIsShoulderSurfing] = useState(false);
@@ -84,27 +109,31 @@ export const AuthorityProctorEnclave: React.FC<AuthorityProctorEnclaveProps> = (
   const [emergencyReason, setEmergencyReason] = useState<string | null>(null);
   const [leakRiskScore, setLeakRiskScore] = useState(0);
   const [leakRiskLevel, setLeakRiskLevel] = useState<RiskLevel>('NORMAL');
-  const [recentWarning, setRecentWarning] = useState<string | null>(null);
 
-  // Warnings Engine: Strictly Maximum 3 Warnings (0/3 to 3/3, never 4/3)
+  // Strict 3-Warning Rule Engine (0/3, 1/3, 2/3, 3/3 — NEVER 4/3)
   const [warningCount, setWarningCount] = useState(0);
-  const [warningModalOpen, setWarningModalOpen] = useState(false);
-  const [activeWarningData, setActiveWarningData] = useState<{ number: number; title: string; reason: string } | null>(null);
-  const lastWarningTimestamp = useRef<number>(0);
+  const [activeWarningModal, setActiveWarningModal] = useState<{
+    level: 1 | 2 | 3;
+    title: string;
+    reason: string;
+    timestamp: string;
+  } | null>(null);
+  const lastWarningTimeRef = useRef<number>(0);
 
-  // Focus & Debounced Window Guard
+  // Focus & Visibility Debounced Guard (>2.5s threshold with deduplication)
   const [isWindowBlurred, setIsWindowBlurred] = useState(false);
   const blurTimerRef = useRef<any>(null);
   const blurWarningFiredRef = useRef<boolean>(false);
 
-  // Voice Evidence Recorder State
+  // Voice Evidence Recorder (MediaRecorder API)
   const [isRecordingVoice, setIsRecordingVoice] = useState(false);
   const [recordingSeconds, setRecordingSeconds] = useState(0);
   const [voiceAudioUrl, setVoiceAudioUrl] = useState<string | null>(null);
   const [voiceDataUrl, setVoiceDataUrl] = useState<string | null>(null);
   const [voiceFileSizeBytes, setVoiceFileSizeBytes] = useState(0);
   const [isSubmittingVoice, setIsSubmittingVoice] = useState(false);
-  const [voiceSentSuccess, setVoiceSentSuccess] = useState(false);
+  const [voiceSubmittedSuccess, setVoiceSubmittedSuccess] = useState<{ evidenceId: string } | null>(null);
+  const [voiceSubmissionFailed, setVoiceSubmissionFailed] = useState(false);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const recordIntervalRef = useRef<any>(null);
   const recordedChunksRef = useRef<Blob[]>([]);
@@ -112,23 +141,23 @@ export const AuthorityProctorEnclave: React.FC<AuthorityProctorEnclaveProps> = (
   // Policy Modal
   const [policyModalOpen, setPolicyModalOpen] = useState(false);
 
-  // Live Activity Timeline
+  // Chronological Audit Activity Ledger
   const [timelineEvents, setTimelineEvents] = useState<TimelineEvent[]>([
     {
-      id: 'init-1',
+      id: 'init-0',
       time: new Date().toLocaleTimeString(),
       event_type: 'SYSTEM_BOOT',
       severity: 'LOW',
-      description: 'ZeroLeak Anti-Leak Enclave subsystem initialized',
+      description: 'ZeroLeak Security Monitor initialized in browser sandbox',
     },
   ]);
 
-  // Video & Audio Monitoring Refs
+  // Video & Audio DOM / Context Refs
   const videoRef = useRef<HTMLVideoElement>(null);
   const gateVideoRef = useRef<HTMLVideoElement>(null);
   const audioMonitorRef = useRef<AudioMonitor | null>(null);
   const consecutiveAbsentFrames = useRef(0);
-  const lastStateLogged = useRef<'NORMAL' | 'ABSENT' | 'SHOULDER_SURFING'>('NORMAL');
+  const lastFaceStateLogged = useRef<'NORMAL' | 'ABSENT' | 'SHOULDER_SURFING'>('NORMAL');
 
   // Live Clock
   const [currentTimeStr, setCurrentTimeStr] = useState<string>(new Date().toLocaleTimeString());
@@ -139,22 +168,6 @@ export const AuthorityProctorEnclave: React.FC<AuthorityProctorEnclaveProps> = (
     return () => clearInterval(clockTimer);
   }, []);
 
-  // 1. Initialize Gate Hardware & Permissions on Mount
-  useEffect(() => {
-    startGatePreview();
-    return () => {
-      stopHardware();
-    };
-  }, []);
-
-  // Keep streamRef in sync with state
-  useEffect(() => {
-    streamRef.current = stream;
-    if (!gateOpen && videoRef.current && stream) {
-      videoRef.current.srcObject = stream;
-    }
-  }, [stream, gateOpen]);
-
   const addTimelineEvent = (type: string, severity: 'LOW' | 'MEDIUM' | 'HIGH' | 'CRITICAL', description: string) => {
     setTimelineEvents(prev => [
       {
@@ -164,59 +177,256 @@ export const AuthorityProctorEnclave: React.FC<AuthorityProctorEnclaveProps> = (
         severity,
         description,
       },
-      ...prev.slice(0, 19), // keep latest 20
+      ...prev.slice(0, 24),
     ]);
   };
 
-  const startGatePreview = async () => {
-    setErrorMsg(null);
-    setInitializing(true);
-    try {
-      const media = await navigator.mediaDevices.getUserMedia({
-        video: { width: { ideal: 640 }, height: { ideal: 480 }, facingMode: 'user' },
-        audio: true,
-      });
-      setStream(media);
-      streamRef.current = media;
-      setCameraActive(true);
-      setMicActive(true);
+  // =========================================================================
+  // 1. NON-INTRUSIVE PERMISSION CHECK ON MOUNT (NEVER AUTO-CALL getUserMedia)
+  // =========================================================================
+  useEffect(() => {
+    checkBrowserPermissionStatusNonIntrusive();
+    return () => {
+      cleanupAllHardware();
+    };
+  }, []);
 
+  // Sync stream to video elements whenever mediaStream updates
+  useEffect(() => {
+    streamRef.current = mediaStream;
+    if (mediaStream) {
+      if (videoRef.current) {
+        videoRef.current.srcObject = mediaStream;
+      }
       if (gateVideoRef.current) {
-        gateVideoRef.current.srcObject = media;
+        gateVideoRef.current.srcObject = mediaStream;
       }
+    }
+  }, [mediaStream, enclaveStarted]);
 
-      // Start Audio Monitor
-      const audio = new AudioMonitor({
-        onVolumeChange: (vol) => {
-          setAudioVolumePercent(vol);
-          // Scale percent (0-100) to decibels (-65 to -15)
-          const computedDb = Math.round(-65 + (vol * 0.5));
-          setAudioLevel(computedDb);
-        },
+  const checkBrowserPermissionStatusNonIntrusive = async () => {
+    // Check Secure Context
+    if (typeof window !== 'undefined' && !window.isSecureContext) {
+      setCameraState('unsupported');
+      setMicState('unsupported');
+      setPermissionError({
+        type: 'SECURITY_ERROR',
+        title: 'Secure Context Required',
+        message: 'Camera and microphone sensors require a secure origin (HTTPS or localhost).',
       });
-      const started = audio.start(media);
-      if (started) {
-        audioMonitorRef.current = audio;
+      return;
+    }
+
+    // Check navigator.mediaDevices support
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+      setCameraState('unsupported');
+      setMicState('unsupported');
+      setPermissionError({
+        type: 'UNSUPPORTED',
+        title: 'Browser Media Support Unavailable',
+        message: 'Your current browser does not support HTML5 media recording interfaces.',
+      });
+      return;
+    }
+
+    // Use Permissions API where supported without prompting
+    if (navigator.permissions && navigator.permissions.query) {
+      try {
+        const camQuery = await navigator.permissions.query({ name: 'camera' as any });
+        if (camQuery.state === 'granted') {
+          setCameraState('granted');
+        } else if (camQuery.state === 'denied') {
+          setCameraState('denied');
+        } else {
+          setCameraState('prompt');
+        }
+
+        camQuery.onchange = () => {
+          if (camQuery.state === 'granted') setCameraState('granted');
+          else if (camQuery.state === 'denied') setCameraState('denied');
+          else setCameraState('prompt');
+        };
+      } catch {
+        setCameraState('not_requested');
       }
 
-      addTimelineEvent('HARDWARE_READY', 'LOW', 'Camera and acoustic hardware sensors successfully authenticated');
-    } catch (err: any) {
-      console.warn('Camera/Mic permission warning:', err);
-      setCameraActive(false);
-      setMicActive(false);
-      if (err.name === 'NotAllowedError' || err.name === 'PermissionDeniedError') {
-        setErrorMsg('Camera and Microphone permissions were declined. Please allow camera access in your browser to unlock the confidential workspace.');
-      } else if (err.name === 'NotFoundError' || err.name === 'DevicesNotFoundError') {
-        setErrorMsg('No camera or microphone found. Please attach an authorized webcam/microphone device.');
-      } else {
-        setErrorMsg('Camera & Microphone access is mandatory to access confidential exam materials under proctor protocol.');
+      try {
+        const micQuery = await navigator.permissions.query({ name: 'microphone' as any });
+        if (micQuery.state === 'granted') {
+          setMicState('granted');
+        } else if (micQuery.state === 'denied') {
+          setMicState('denied');
+        } else {
+          setMicState('prompt');
+        }
+
+        micQuery.onchange = () => {
+          if (micQuery.state === 'granted') setMicState('granted');
+          else if (micQuery.state === 'denied') setMicState('denied');
+          else setMicState('prompt');
+        };
+      } catch {
+        setMicState('not_requested');
       }
-    } finally {
-      setInitializing(false);
+    } else {
+      setCameraState('not_requested');
+      setMicState('not_requested');
     }
   };
 
-  const stopHardware = () => {
+  // =========================================================================
+  // 2. EXPLICIT USER ACTION: Request Camera & Microphone Permissions
+  // =========================================================================
+  const handleRequestHardwarePermissions = async () => {
+    setIsRequestingPermissions(true);
+    setPermissionError(null);
+    setCameraState('requesting');
+    setMicState('requesting');
+
+    addTimelineEvent('PERMISSION_REQUEST', 'LOW', 'Official clicked Enable Camera & Microphone');
+
+    let vStream: MediaStream | null = null;
+    let aStream: MediaStream | null = null;
+
+    try {
+      // 1. Try combined request first
+      const combined = await navigator.mediaDevices.getUserMedia({
+        video: { width: { ideal: 640 }, height: { ideal: 480 }, facingMode: 'user' },
+        audio: true,
+      });
+
+      vStream = combined;
+      aStream = combined;
+      setCameraState('granted');
+      setMicState('granted');
+      setMediaStream(combined);
+      streamRef.current = combined;
+
+      // Start Audio Monitor
+      startAudioMonitoring(combined);
+
+      addTimelineEvent('CAMERA_ENABLED', 'LOW', 'Camera video feed authenticated');
+      addTimelineEvent('MIC_ENABLED', 'LOW', 'Microphone acoustic sensor active');
+    } catch (combinedError: any) {
+      console.warn('Combined getUserMedia failed, evaluating camera & mic separately:', combinedError);
+
+      // 2. Evaluate Camera independently
+      try {
+        vStream = await navigator.mediaDevices.getUserMedia({
+          video: { width: { ideal: 640 }, height: { ideal: 480 }, facingMode: 'user' },
+        });
+        setCameraState('granted');
+        addTimelineEvent('CAMERA_ENABLED', 'LOW', 'Camera video feed authenticated');
+      } catch (camErr: any) {
+        mapDeviceError('camera', camErr);
+      }
+
+      // 3. Evaluate Microphone independently
+      try {
+        aStream = await navigator.mediaDevices.getUserMedia({
+          audio: true,
+        });
+        setMicState('granted');
+        addTimelineEvent('MIC_ENABLED', 'LOW', 'Microphone acoustic sensor active');
+      } catch (micErr: any) {
+        mapDeviceError('microphone', micErr);
+      }
+
+      // If at least one succeeded, assemble available stream
+      if (vStream || aStream) {
+        const tracks: MediaStreamTrack[] = [];
+        if (vStream) tracks.push(...vStream.getVideoTracks());
+        if (aStream) tracks.push(...aStream.getAudioTracks());
+        const assembled = new MediaStream(tracks);
+        setMediaStream(assembled);
+        streamRef.current = assembled;
+
+        if (aStream) {
+          startAudioMonitoring(assembled);
+        }
+      }
+    } finally {
+      setIsRequestingPermissions(false);
+    }
+  };
+
+  const mapDeviceError = (device: 'camera' | 'microphone', error: any) => {
+    console.error(`Device error for ${device}:`, error);
+    const devName = device === 'camera' ? 'Camera' : 'Microphone';
+
+    if (error.name === 'NotAllowedError' || error.name === 'PermissionDeniedError') {
+      if (device === 'camera') setCameraState('denied');
+      else setMicState('denied');
+
+      setPermissionError({
+        type: 'PERMISSION_DENIED',
+        title: `${devName} Permission Required`,
+        message: 'Your browser has not granted access to the requested device. Please click the camera/padlock icon in your browser address bar and select Allow.',
+        actionLabel: 'Check Browser Settings',
+      });
+      addTimelineEvent(`${device.toUpperCase()}_DENIED`, 'MEDIUM', `${devName} permission denied by browser or user`);
+    } else if (error.name === 'NotFoundError' || error.name === 'DevicesNotFoundError') {
+      if (device === 'camera') setCameraState('not_found');
+      else setMicState('not_found');
+
+      setPermissionError({
+        type: 'NOT_FOUND',
+        title: `${devName} Device Not Found`,
+        message: `No working ${device} was detected on this workstation. Please attach or enable a compatible device.`,
+        actionLabel: 'Connect Device',
+      });
+    } else if (error.name === 'NotReadableError' || error.name === 'TrackStartError') {
+      if (device === 'camera') setCameraState('busy');
+      else setMicState('busy');
+
+      setPermissionError({
+        type: 'BUSY',
+        title: `${devName} Currently Unavailable`,
+        message: `The ${device} is currently in use by another application (e.g. Teams, Zoom, or another browser tab). Please close other apps and retry.`,
+        actionLabel: 'Retry Hardware',
+      });
+    } else if (error.name === 'SecurityError') {
+      if (device === 'camera') setCameraState('unsupported');
+      else setMicState('unsupported');
+
+      setPermissionError({
+        type: 'SECURITY_ERROR',
+        title: 'Secure Context Required',
+        message: 'Camera and microphone access requires HTTPS or localhost.',
+      });
+    } else {
+      if (device === 'camera') setCameraState('error');
+      else setMicState('error');
+
+      setPermissionError({
+        type: 'UNKNOWN',
+        title: `${devName} Sensor Notice`,
+        message: error.message || `An error occurred while connecting to the ${device}.`,
+        actionLabel: 'Retry',
+      });
+    }
+  };
+
+  const startAudioMonitoring = (stream: MediaStream) => {
+    try {
+      const audio = new AudioMonitor({
+        onVolumeChange: (vol) => {
+          setAudioVolumePercent(vol);
+          // Convert percent (0..100) to decibels (-65dB to -15dB)
+          const db = Math.round(-65 + vol * 0.5);
+          setAudioLevelDb(db);
+        },
+      });
+      const started = audio.start(stream);
+      if (started) {
+        audioMonitorRef.current = audio;
+      }
+    } catch (e) {
+      console.warn('Audio monitor start notice:', e);
+    }
+  };
+
+  const cleanupAllHardware = () => {
     if (audioMonitorRef.current) {
       audioMonitorRef.current.stop();
       audioMonitorRef.current = null;
@@ -225,14 +435,20 @@ export const AuthorityProctorEnclave: React.FC<AuthorityProctorEnclaveProps> = (
       streamRef.current.getTracks().forEach(t => t.stop());
       streamRef.current = null;
     }
-    setStream(null);
-    setCameraActive(false);
-    setMicActive(false);
+    if (mediaRecorderRef.current && isRecordingVoice) {
+      mediaRecorderRef.current.stop();
+    }
+    if (recordIntervalRef.current) {
+      clearInterval(recordIntervalRef.current);
+    }
+    setMediaStream(null);
   };
 
-  // Capture verification snapshot
+  // =========================================================================
+  // 3. START ENCLAVE REVIEW (Active Enclave Session Start)
+  // =========================================================================
   const takeSnapshot = (): string => {
-    const video = gateVideoRef.current || videoRef.current;
+    const video = videoRef.current || gateVideoRef.current;
     if (!video) return '';
     try {
       const canvas = document.createElement('canvas');
@@ -241,7 +457,7 @@ export const AuthorityProctorEnclave: React.FC<AuthorityProctorEnclaveProps> = (
       const ctx = canvas.getContext('2d');
       if (ctx) {
         ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-        const dataUrl = canvas.toDataURL('image/jpeg', 0.75);
+        const dataUrl = canvas.toDataURL('image/jpeg', 0.8);
         setVerificationSnapshot(dataUrl);
         return dataUrl;
       }
@@ -251,297 +467,224 @@ export const AuthorityProctorEnclave: React.FC<AuthorityProctorEnclaveProps> = (
     return '';
   };
 
-  // Enter Enclave Session (Pre-start Gate Action)
-  const handleEnterEnclave = async () => {
-    if (!currentUser) return;
-    if (!cameraActive || !micActive) {
-      await startGatePreview();
+  const handleStartEnclave = async () => {
+    if (cameraState !== 'granted' || micState !== 'granted') {
+      await handleRequestHardwarePermissions();
       return;
     }
 
-    setInitializing(true);
-    setErrorMsg(null);
-
-    const snapshot = takeSnapshot();
+    setIsStartingEnclave(true);
+    const snap = takeSnapshot();
 
     try {
       const res = await api.authorityProctor.startSession({
         workspace_type: workspaceType,
         exam_id: examId,
-        verification_snapshot: snapshot || undefined,
+        verification_snapshot: snap || undefined,
       });
 
       setSession(res.session);
-      setSessionActive(true);
-      setGateOpen(false);
+      setEnclaveStarted(true);
       setWarningCount(Number(res.session.warning_count) || 0);
 
-      addTimelineEvent('ENCLAVE_STARTED', 'LOW', `Secure enclave session ${res.session.id} initiated on-camera`);
-
-      // Attach stream to active camera view
-      setTimeout(() => {
-        if (videoRef.current && streamRef.current) {
-          videoRef.current.srcObject = streamRef.current;
-        }
-      }, 100);
+      addTimelineEvent('PROCTOR_SESSION_STARTED', 'LOW', `Enclave session ${res.session.id} authorized & active`);
     } catch (err: any) {
-      setErrorMsg(err.message || 'Failed to initialize Authority Proctor Enclave.');
+      setPermissionError({
+        type: 'SESSION_ERROR',
+        title: 'Enclave Authorization Failed',
+        message: err.message || 'Unable to establish secure proctor session with server.',
+      });
     } finally {
-      setInitializing(false);
+      setIsStartingEnclave(false);
     }
   };
 
   // =========================================================================
-  // WARNING DISPATCHER: Strictly Capped at 3 Warnings (0/3 to 3/3, never 4/3)
+  // 4. CENTRALIZED WARNING DISPATCHER (Strictly Max 3 Warnings, Never 4/3)
   // =========================================================================
-  const issueWarning = async (reason: string, details?: any) => {
+  const issueProctorWarning = async (reason: string, eventType: string = 'SUSPICIOUS_ACTIVITY') => {
     if (!session) return;
 
-    // Cooldown check: do not fire warnings more frequently than once every 5 seconds
+    // Cooldown check: no duplicate warnings within 4 seconds
     const now = Date.now();
-    if (now - lastWarningTimestamp.current < 5000) {
-      return;
-    }
-    lastWarningTimestamp.current = now;
+    if (now - lastWarningTimeRef.current < 4000) return;
+    lastWarningTimeRef.current = now;
 
     try {
       const res = await api.authorityProctor.issueWarning({
         session_id: session.id,
         reason,
-        details,
+        details: { event_type: eventType },
       });
 
-      const newCount = Math.min(3, res.warning_count);
-      setWarningCount(newCount);
+      const nextCount = Math.min(3, res.warning_count);
+      setWarningCount(nextCount);
 
-      const warningTitle =
-        newCount === 1
-          ? 'Warning 1 of 3: First Security Notice'
-          : newCount === 2
-          ? 'Warning 2 of 3: FINAL WARNING'
-          : 'Warning 3 of 3: Critical Violation — Session Flagged For Review';
+      const titleText =
+        nextCount === 1
+          ? 'First Proctor Warning'
+          : nextCount === 2
+          ? 'Second Proctor Warning'
+          : 'Final Proctor Warning — Session Under Review';
 
-      setActiveWarningData({
-        number: newCount,
-        title: warningTitle,
+      setActiveWarningModal({
+        level: nextCount as 1 | 2 | 3,
+        title: titleText,
         reason,
+        timestamp: new Date().toLocaleTimeString(),
       });
-      setWarningModalOpen(true);
 
-      addTimelineEvent(`WARNING_${newCount}`, newCount === 3 ? 'CRITICAL' : 'HIGH', reason);
+      addTimelineEvent(`WARNING_${nextCount}`, nextCount === 3 ? 'CRITICAL' : 'HIGH', reason);
 
-      if (newCount >= 3 || res.is_locked) {
+      if (nextCount >= 3 || res.is_locked) {
         setIsEmergencyLocked(true);
-        setEmergencyReason(`Violation threshold reached (3/3). Session flagged for review by Chief Vigilance & Security Auditor.`);
+        setEmergencyReason(`Maximum warning threshold reached (3/3). Session flagged for review by Chief Vigilance & Security Auditor.`);
       }
     } catch (err) {
       console.error('Error issuing authority warning:', err);
     }
   };
 
-  // 2. Active Enclave Face Detection Loop (850ms cycle)
+  // =========================================================================
+  // 5. DEBOUNCED FOCUS & WINDOW BLUR MONITOR (>2.5s Delay with Deduplication)
+  // =========================================================================
   useEffect(() => {
-    if (!sessionActive) return;
+    if (!enclaveStarted || !session) return;
 
-    let mounted = true;
+    const onFocusLoss = () => {
+      setIsWindowBlurred(true);
+
+      if (!blurTimerRef.current && !blurWarningFiredRef.current) {
+        blurTimerRef.current = setTimeout(() => {
+          blurWarningFiredRef.current = true;
+          addTimelineEvent('FOCUS_LOST', 'MEDIUM', 'Window focus lost for >2.5 seconds');
+          issueProctorWarning('Focus was lost for >2.5 seconds. Tab and application switching is strictly forbidden.', 'FOCUS_LOST');
+        }, 2500);
+      }
+    };
+
+    const onFocusRestored = () => {
+      setIsWindowBlurred(false);
+      if (blurTimerRef.current) {
+        clearTimeout(blurTimerRef.current);
+        blurTimerRef.current = null;
+      }
+      if (blurWarningFiredRef.current) {
+        addTimelineEvent('FOCUS_RESTORED', 'LOW', 'Official returned focus to examination enclave');
+        blurWarningFiredRef.current = false;
+      }
+    };
+
+    const handleVisibility = () => {
+      if (document.hidden) {
+        onFocusLoss();
+      } else {
+        onFocusRestored();
+      }
+    };
+
+    window.addEventListener('visibilitychange', handleVisibility);
+    window.addEventListener('blur', onFocusLoss);
+    window.addEventListener('focus', onFocusRestored);
+
+    return () => {
+      window.removeEventListener('visibilitychange', handleVisibility);
+      window.removeEventListener('blur', onFocusLoss);
+      window.removeEventListener('focus', onFocusRestored);
+      if (blurTimerRef.current) clearTimeout(blurTimerRef.current);
+    };
+  }, [enclaveStarted, session]);
+
+  // =========================================================================
+  // 6. CONTINUOUS FACE & SHOULDER-SURFING DETECTION (850ms interval)
+  // =========================================================================
+  useEffect(() => {
+    if (!enclaveStarted || !mediaStream) return;
+
+    let active = true;
     const interval = setInterval(async () => {
       const video = videoRef.current;
       if (!video || video.readyState < 2) return;
 
       try {
         const result = await detectFacesInVideo(video);
-        if (!mounted) return;
+        if (!active) return;
         setFaceResult(result);
 
-        // A. Face Absence Check
+        // A. Absence Detection
         if (result.faceCount === 0) {
           consecutiveAbsentFrames.current += 1;
           if (consecutiveAbsentFrames.current >= 3) {
             setIsFaceAbsent(true);
-            if (lastStateLogged.current !== 'ABSENT') {
-              lastStateLogged.current = 'ABSENT';
-              if (session) {
-                api.authorityProctor.recordEvent({
-                  session_id: session.id,
-                  event_type: 'FACE_ABSENT_MASKED',
-                  severity: 'MEDIUM',
-                  metadata: { reason: 'Official absent from camera view for > 2.5s' },
-                }).then(r => {
-                  setLeakRiskScore(r.leak_risk_score);
-                  setLeakRiskLevel(r.leak_risk_level as RiskLevel);
-                });
-                addTimelineEvent('FACE_ABSENT', 'MEDIUM', 'Official absent from camera view — content masked');
-              }
+            if (lastFaceStateLogged.current !== 'ABSENT') {
+              lastFaceStateLogged.current = 'ABSENT';
+              addTimelineEvent('FACE_ABSENT', 'MEDIUM', 'Official absent from camera view');
             }
           }
         } else {
           consecutiveAbsentFrames.current = 0;
           if (isFaceAbsent) {
             setIsFaceAbsent(false);
-            if (lastStateLogged.current === 'ABSENT') {
-              lastStateLogged.current = 'NORMAL';
-              if (session) {
-                api.authorityProctor.recordEvent({
-                  session_id: session.id,
-                  event_type: 'SCREEN_UNMASKED',
-                  severity: 'LOW',
-                  metadata: { action: 'Official re-verified present on camera' },
-                }).then(r => {
-                  setLeakRiskScore(r.leak_risk_score);
-                  setLeakRiskLevel(r.leak_risk_level as RiskLevel);
-                });
-                addTimelineEvent('FACE_RESTORED', 'LOW', 'Official presence re-verified on camera');
-              }
+            if (lastFaceStateLogged.current === 'ABSENT') {
+              lastFaceStateLogged.current = 'NORMAL';
+              addTimelineEvent('FACE_RESTORED', 'LOW', 'Official re-verified present on camera');
             }
           }
         }
 
-        // B. Shoulder Surfing / Multiple Faces Check
+        // B. Shoulder Surfing (2+ Faces)
         if (result.faceCount >= 2) {
           setIsShoulderSurfing(true);
-          if (lastStateLogged.current !== 'SHOULDER_SURFING') {
-            lastStateLogged.current = 'SHOULDER_SURFING';
-            const snapshot = takeSnapshot();
-            if (session) {
-              api.authorityProctor.recordEvent({
-                session_id: session.id,
-                event_type: 'SHOULDER_SURFING_DETECTED',
-                severity: 'HIGH',
-                metadata: {
-                  faces_detected: result.faceCount,
-                  action: 'Confidential paper masked immediately to prevent photography or leak',
-                },
-                snapshot_thumbnail: snapshot || undefined,
-              }).then(r => {
-                setLeakRiskScore(r.leak_risk_score);
-                setLeakRiskLevel(r.leak_risk_level as RiskLevel);
-                setRecentWarning('SECURITY ALERT: Second face detected behind official. Material masked.');
-              });
-              addTimelineEvent('SHOULDER_SURFING', 'HIGH', 'Multiple faces detected in camera frame');
-              issueWarning('Secondary face detected looking at confidential examination screen');
-            }
+          if (lastFaceStateLogged.current !== 'SHOULDER_SURFING') {
+            lastFaceStateLogged.current = 'SHOULDER_SURFING';
+            addTimelineEvent('SHOULDER_SURFING', 'HIGH', 'Multiple faces detected in camera frame');
+            issueProctorWarning('Secondary person detected viewing confidential screen', 'SHOULDER_SURFING');
           }
         } else if (result.faceCount === 1 && isShoulderSurfing) {
           setIsShoulderSurfing(false);
-          lastStateLogged.current = 'NORMAL';
+          lastFaceStateLogged.current = 'NORMAL';
         }
       } catch (err) {
-        console.error('Enclave face loop error:', err);
+        console.error('Face detection notice:', err);
       }
     }, 850);
 
     return () => {
-      mounted = false;
+      active = false;
       clearInterval(interval);
     };
-  }, [sessionActive, session, isFaceAbsent, isShoulderSurfing]);
+  }, [enclaveStarted, mediaStream, isFaceAbsent, isShoulderSurfing]);
 
-  // 3. Tab Visibility & Window Focus Guard with >2.5s Debounce & Deduplication
+  // =========================================================================
+  // 7. KEYBOARD SHORTCUT & SCREENSHOT SHIELD
+  // =========================================================================
   useEffect(() => {
-    if (!sessionActive || !session) return;
-
-    const onBlurOrHidden = () => {
-      setIsWindowBlurred(true);
-
-      // Start 2.5s debounce timer
-      if (!blurTimerRef.current && !blurWarningFiredRef.current) {
-        blurTimerRef.current = setTimeout(() => {
-          blurWarningFiredRef.current = true;
-          api.authorityProctor.recordEvent({
-            session_id: session.id,
-            event_type: 'UNAUTHORIZED_WINDOW_SWITCH',
-            severity: 'MEDIUM',
-            metadata: { action: 'window_unfocused_gt_2500ms' },
-          }).then(r => {
-            setLeakRiskScore(r.leak_risk_score);
-            setLeakRiskLevel(r.leak_risk_level as RiskLevel);
-          });
-          addTimelineEvent('FOCUS_LOST', 'MEDIUM', 'Official unfocused or navigated away from enclave window (>2.5s)');
-          issueWarning('Navigated away or switched windows away from confidential exam enclave for >2.5 seconds');
-        }, 2500);
-      }
-    };
-
-    const onFocusOrVisible = () => {
-      setIsWindowBlurred(false);
-      if (blurTimerRef.current) {
-        clearTimeout(blurTimerRef.current);
-        blurTimerRef.current = null;
-      }
-      // Reset fired ref on returning to focus so a new, future blur is monitored
-      blurWarningFiredRef.current = false;
-    };
-
-    const handleVisibilityChange = () => {
-      if (document.hidden) {
-        onBlurOrHidden();
-      } else {
-        onFocusOrVisible();
-      }
-    };
-
-    window.addEventListener('visibilitychange', handleVisibilityChange);
-    window.addEventListener('blur', onBlurOrHidden);
-    window.addEventListener('focus', onFocusOrVisible);
-
-    return () => {
-      window.removeEventListener('visibilitychange', handleVisibilityChange);
-      window.removeEventListener('blur', onBlurOrHidden);
-      window.removeEventListener('focus', onFocusOrVisible);
-      if (blurTimerRef.current) {
-        clearTimeout(blurTimerRef.current);
-      }
-    };
-  }, [sessionActive, session, warningCount]);
-
-  // 4. Clipboard & Screen Capture Interception
-  useEffect(() => {
-    if (!sessionActive || !session) return;
+    if (!enclaveStarted || !session) return;
 
     const handleContextMenu = (e: MouseEvent) => {
       e.preventDefault();
-      setRecentWarning('Right-click context menu is restricted in Authority Proctor Enclave.');
+      addTimelineEvent('RIGHT_CLICK_BLOCKED', 'LOW', 'Context menu intercepted');
     };
 
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key === 'PrintScreen') {
         e.preventDefault();
-        setRecentWarning('Screenshot attempt intercepted. Incident logged to audit ledger.');
-        api.authorityProctor.recordEvent({
-          session_id: session.id,
-          event_type: 'SCREENSHOT_ATTEMPT_BLOCKED',
-          severity: 'HIGH',
-          metadata: { key: 'PrintScreen' },
-        }).then(r => {
-          setLeakRiskScore(r.leak_risk_score);
-          setLeakRiskLevel(r.leak_risk_level as RiskLevel);
-        });
-        addTimelineEvent('SCREENSHOT_BLOCKED', 'HIGH', 'PrintScreen attempt intercepted & logged');
-        issueWarning('PrintScreen key stroke intercepted by security shield');
+        addTimelineEvent('SCREENSHOT_BLOCKED', 'HIGH', 'PrintScreen key intercepted');
+        issueProctorWarning('Screenshot attempt intercepted by security shield', 'SCREENSHOT_ATTEMPT');
         return;
       }
 
       if (e.ctrlKey || e.metaKey) {
         const k = e.key.toLowerCase();
-        if (k === 'c' || k === 'v' || k === 'x' || k === 's' || k === 'p' || k === 'u') {
+        if (['c', 'v', 'x', 's', 'p', 'u'].includes(k)) {
           e.preventDefault();
-          setRecentWarning(`Unauthorized shortcut '${e.key.toUpperCase()}' intercepted by Enclave.`);
-          api.authorityProctor.recordEvent({
-            session_id: session.id,
-            event_type: 'CLIPBOARD_EXTRACTION_BLOCKED',
-            severity: 'MEDIUM',
-            metadata: { shortcut: e.key },
-          }).then(r => {
-            setLeakRiskScore(r.leak_risk_score);
-            setLeakRiskLevel(r.leak_risk_level as RiskLevel);
-          });
-          addTimelineEvent('CLIPBOARD_BLOCKED', 'MEDIUM', `Clipboard copy/paste shortcut '${e.key.toUpperCase()}' blocked`);
+          addTimelineEvent('CLIPBOARD_BLOCKED', 'MEDIUM', `Shortcut '${e.key.toUpperCase()}' intercepted`);
         }
       }
 
       if (e.key === 'F12') {
         e.preventDefault();
-        setRecentWarning('Developer Inspection Tools are restricted in Authority Enclave.');
+        addTimelineEvent('DEVTOOLS_BLOCKED', 'MEDIUM', 'Developer Tools shortcut intercepted');
       }
     };
 
@@ -552,18 +695,20 @@ export const AuthorityProctorEnclave: React.FC<AuthorityProctorEnclaveProps> = (
       window.removeEventListener('contextmenu', handleContextMenu);
       window.removeEventListener('keydown', handleKeyDown);
     };
-  }, [sessionActive, session, warningCount]);
+  }, [enclaveStarted, session]);
 
-  // 5. Periodic Heartbeat Loop (every 4s)
+  // =========================================================================
+  // 8. PERIODIC HEARTBEAT TELEMETRY (Every 4s)
+  // =========================================================================
   useEffect(() => {
-    if (!sessionActive || !session) return;
+    if (!enclaveStarted || !session) return;
 
     const interval = setInterval(async () => {
       try {
         const hb = await api.authorityProctor.sendHeartbeat({
           session_id: session.id,
-          camera_status: cameraActive ? 'ACTIVE' : 'DISABLED',
-          microphone_status: micActive ? 'ACTIVE' : 'DISABLED',
+          camera_status: cameraState === 'granted' ? 'ACTIVE' : 'DISABLED',
+          microphone_status: micState === 'granted' ? 'ACTIVE' : 'DISABLED',
           fullscreen_status: document.fullscreenElement ? 'ACTIVE' : 'EXITED',
           face_status: isShoulderSurfing
             ? 'SHOULDER_SURFING_DETECTED'
@@ -571,53 +716,39 @@ export const AuthorityProctorEnclave: React.FC<AuthorityProctorEnclaveProps> = (
             ? 'ABSENT'
             : 'VERIFIED',
           faces_detected_count: faceResult.faceCount,
-          audio_level_db: audioLevel,
+          audio_level_db: audioLevelDb,
         });
 
         if (hb.emergency_locked) {
           setIsEmergencyLocked(true);
-          setEmergencyReason(hb.emergency_lock_reason || 'Remote Lockdown by Examination Registrar / Auditor');
+          setEmergencyReason(hb.emergency_lock_reason || 'Administrative Lockdown by Auditor');
         }
 
         if (hb.warning_count !== undefined && hb.warning_count > warningCount) {
           setWarningCount(Math.min(3, hb.warning_count));
         }
       } catch (err) {
-        console.warn('Enclave heartbeat check:', err);
+        console.warn('Heartbeat check notice:', err);
       }
     }, 4000);
 
     return () => clearInterval(interval);
-  }, [sessionActive, session, cameraActive, micActive, isShoulderSurfing, isFaceAbsent, faceResult, audioLevel, warningCount]);
-
-  // Toast warning auto-dismiss
-  useEffect(() => {
-    if (recentWarning) {
-      const timer = setTimeout(() => setRecentWarning(null), 4500);
-      return () => clearTimeout(timer);
-    }
-  }, [recentWarning]);
+  }, [enclaveStarted, session, cameraState, micState, isShoulderSurfing, isFaceAbsent, faceResult, audioLevelDb, warningCount]);
 
   // =========================================================================
-  // VOICE EVIDENCE RECORDER: MediaRecorder API Integration
+  // 9. VOICE EVIDENCE RECORDER (MediaRecorder API)
   // =========================================================================
   const startVoiceRecording = () => {
-    if (!streamRef.current) {
-      setErrorMsg('Microphone stream is not available for recording.');
-      return;
-    }
+    if (!streamRef.current) return;
 
     try {
       recordedChunksRef.current = [];
-      const options = { mimeType: 'audio/webm' };
-      const recorder = new MediaRecorder(
-        streamRef.current,
-        MediaRecorder.isTypeSupported('audio/webm') ? options : undefined
-      );
+      const mime = MediaRecorder.isTypeSupported('audio/webm') ? 'audio/webm' : '';
+      const recorder = new MediaRecorder(streamRef.current, mime ? { mimeType: mime } : undefined);
 
-      recorder.ondataavailable = (event) => {
-        if (event.data && event.data.size > 0) {
-          recordedChunksRef.current.push(event.data);
+      recorder.ondataavailable = (e) => {
+        if (e.data && e.data.size > 0) {
+          recordedChunksRef.current.push(e.data);
         }
       };
 
@@ -627,7 +758,6 @@ export const AuthorityProctorEnclave: React.FC<AuthorityProctorEnclaveProps> = (
         setVoiceAudioUrl(url);
         setVoiceFileSizeBytes(blob.size);
 
-        // Convert blob to Data URL
         const reader = new FileReader();
         reader.onloadend = () => {
           setVoiceDataUrl(reader.result as string);
@@ -639,16 +769,16 @@ export const AuthorityProctorEnclave: React.FC<AuthorityProctorEnclaveProps> = (
       mediaRecorderRef.current = recorder;
       setIsRecordingVoice(true);
       setRecordingSeconds(0);
-      setVoiceSentSuccess(false);
+      setVoiceSubmittedSuccess(null);
+      setVoiceSubmissionFailed(false);
 
       recordIntervalRef.current = setInterval(() => {
         setRecordingSeconds((prev) => prev + 1);
       }, 1000);
 
-      addTimelineEvent('VOICE_RECORDING_STARTED', 'LOW', 'Acoustic evidence recorder started by official');
-    } catch (err: any) {
-      console.error('Error starting MediaRecorder:', err);
-      setErrorMsg('Could not initialize audio recording: ' + err.message);
+      addTimelineEvent('VOICE_RECORDING_STARTED', 'LOW', 'Official started recording voice evidence');
+    } catch (e: any) {
+      console.error('Error starting MediaRecorder:', e);
     }
   };
 
@@ -660,7 +790,7 @@ export const AuthorityProctorEnclave: React.FC<AuthorityProctorEnclaveProps> = (
         clearInterval(recordIntervalRef.current);
         recordIntervalRef.current = null;
       }
-      addTimelineEvent('VOICE_RECORDING_STOPPED', 'LOW', `Audio recording completed (${recordingSeconds}s)`);
+      addTimelineEvent('VOICE_RECORDING_STOPPED', 'LOW', `Audio recording complete (${recordingSeconds}s)`);
     }
   };
 
@@ -669,14 +799,17 @@ export const AuthorityProctorEnclave: React.FC<AuthorityProctorEnclaveProps> = (
     setVoiceDataUrl(null);
     setRecordingSeconds(0);
     recordedChunksRef.current = [];
-    setVoiceSentSuccess(false);
+    setVoiceSubmittedSuccess(null);
+    setVoiceSubmissionFailed(false);
   };
 
   const submitVoiceEvidence = async () => {
     if (!session || !voiceDataUrl) return;
     setIsSubmittingVoice(true);
+    setVoiceSubmissionFailed(false);
+
     try {
-      await api.authorityProctor.submitVoiceEvidence({
+      const res = await api.authorityProctor.submitVoiceEvidence({
         session_id: session.id,
         exam_id: examId,
         audio_data_url: voiceDataUrl,
@@ -686,44 +819,41 @@ export const AuthorityProctorEnclave: React.FC<AuthorityProctorEnclaveProps> = (
         warning_number: warningCount,
       });
 
-      setVoiceSentSuccess(true);
-      addTimelineEvent('VOICE_EVIDENCE_SENT', 'MEDIUM', `Voice note (${recordingSeconds}s) transmitted to Chief Vigilance Auditor`);
-      setRecentWarning('Voice evidence delivered to Chief Vigilance & Security Auditor review queue.');
+      setVoiceSubmittedSuccess({ evidenceId: res.evidence.id });
+      addTimelineEvent('VOICE_EVIDENCE_SENT', 'MEDIUM', `Voice evidence ${res.evidence.id} transmitted to Chief Auditor`);
     } catch (err: any) {
-      console.error('Submit voice evidence error:', err);
-      setErrorMsg('Failed to submit voice evidence: ' + err.message);
+      console.error('Voice submit failed:', err);
+      setVoiceSubmissionFailed(true);
     } finally {
       setIsSubmittingVoice(false);
     }
   };
 
-  // Helper formatting mm:ss
-  const formatTimeSeconds = (sec: number) => {
+  const formatSeconds = (sec: number) => {
     const mins = Math.floor(sec / 60);
     const secs = sec % 60;
     return `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
   };
 
-  // Audio level bars visualizer
-  const renderAudioLevelBars = () => {
-    const barsCount = 8;
-    // Map volume 0-100 to active bars
-    const activeBars = Math.min(barsCount, Math.ceil((audioVolumePercent / 100) * barsCount));
-    const heights = [10, 14, 18, 22, 26, 22, 16, 12];
+  // Render animated equalizer audio level bars
+  const renderEqualizerBars = () => {
+    const totalBars = 7;
+    const activeCount = Math.min(totalBars, Math.ceil((audioVolumePercent / 100) * totalBars));
+    const heights = [8, 12, 18, 22, 18, 12, 8];
 
     return (
-      <div className="flex items-center gap-1 h-7 px-2 py-1 rounded-md bg-[#F0F4F8] border border-[#DCE6EA]">
-        {heights.map((h, i) => {
-          const isActive = i < activeBars;
+      <div className="flex items-center gap-1 h-6 px-2 py-0.5 rounded bg-[#F6FAF9] border border-[#DCE7EA]">
+        {heights.map((h, idx) => {
+          const isActive = idx < activeCount;
           return (
             <div
-              key={i}
+              key={idx}
               style={{ height: `${h}px` }}
               className={`w-1 rounded-full transition-all duration-100 ${
                 isActive
-                  ? i >= 6
+                  ? idx >= 5
                     ? 'bg-[#E84B5F]'
-                    : i >= 4
+                    : idx >= 3
                     ? 'bg-[#F0A11A]'
                     : 'bg-[#00A878]'
                   : 'bg-[#C8D7DE]'
@@ -735,1006 +865,1061 @@ export const AuthorityProctorEnclave: React.FC<AuthorityProctorEnclaveProps> = (
     );
   };
 
-  // =========================================================================
-  // RENDER: 1. Mandatory Pre-Enclave Permission & Camera Gate Screen (LIGHT UI)
-  // =========================================================================
-  if (gateOpen) {
-    const allPermissionsGranted = cameraActive && micActive;
+  const isAllReadyToEnter = cameraState === 'granted' && micState === 'granted';
 
-    return (
-      <div className="min-h-[640px] bg-[#F6F9FA] rounded-2xl border border-[#DCE6EA] p-6 sm:p-10 shadow-sm relative overflow-hidden text-[#0F172A]">
-        {/* Top security emerald accent line */}
-        <div className="absolute top-0 left-0 right-0 h-1 bg-gradient-to-r from-[#00A878] via-[#00B8D9] to-[#2878D8]" />
-
-        <div className="max-w-4xl mx-auto space-y-6">
-          {/* Header Banner */}
-          <div className="text-center space-y-2">
-            <div className="inline-flex items-center gap-2 px-3.5 py-1 rounded-full bg-emerald-50 border border-emerald-200 text-[#00A878] text-xs font-semibold uppercase tracking-wider">
-              <ShieldCheck className="w-4 h-4 text-[#00A878]" />
-              <span>Mandatory On-Camera Authority Enclave</span>
+  // =========================================================================
+  // MAIN RENDER: PURE LIGHT ENTERPRISE PROCTORING CONSOLE
+  // =========================================================================
+  return (
+    <div
+      className="min-h-screen text-[#142B38] space-y-6 pb-12"
+      style={{
+        backgroundColor: '#F6FAF9',
+        backgroundImage: `
+          radial-gradient(circle at 10% 10%, rgba(0,168,120,0.03) 0%, transparent 40%),
+          radial-gradient(circle at 90% 10%, rgba(0,184,217,0.03) 0%, transparent 40%),
+          radial-gradient(circle at 90% 90%, rgba(40,120,216,0.02) 0%, transparent 40%)
+        `,
+      }}
+    >
+      {/* ======================================================== */}
+      {/* PART 3: TOP WHITE HEADER BAR                             */}
+      {/* ======================================================== */}
+      <header className="bg-white border-b border-[#DCE7EA] px-6 py-3.5 shadow-[0_2px_12px_rgba(20,43,56,0.04)] sticky top-0 z-30">
+        <div className="max-w-[1320px] mx-auto flex flex-wrap items-center justify-between gap-4">
+          {/* Brand & Mode Identification */}
+          <div className="flex items-center gap-3">
+            <div className="flex items-center gap-2">
+              <Shield className="w-5 h-5 text-[#00A878]" />
+              <span className="font-extrabold text-base tracking-tight text-[#142B38]">
+                ZEROLEAK
+              </span>
             </div>
-            <h2 className="text-2xl sm:text-3xl font-extrabold text-[#0F172A] tracking-tight">
+            <span className="text-[#C8D7DE]">|</span>
+            <span className="text-xs font-bold uppercase tracking-wider text-[#65777F]">
+              PROCTOR MODE
+            </span>
+          </div>
+
+          {/* Status Pills */}
+          <div className="flex flex-wrap items-center gap-2.5">
+            {/* Enclave Status Pill */}
+            <span className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold border ${
+              enclaveStarted
+                ? 'bg-[#EAF9F3] text-[#008A63] border-[#00A878]/30'
+                : 'bg-[#EEF6FF] text-[#2878D8] border-[#2878D8]/20'
+            }`}>
+              <span className={`w-2 h-2 rounded-full ${enclaveStarted ? 'bg-[#00A878] animate-pulse' : 'bg-[#2878D8]'}`} />
+              {enclaveStarted ? '● ENCLAVE ACTIVE' : '○ ENCLAVE STANDBY'}
+            </span>
+
+            {/* Camera Status Pill */}
+            <span className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold border ${
+              cameraState === 'granted'
+                ? 'bg-[#EAF9F3] text-[#008A63] border-[#00A878]/30'
+                : 'bg-[#F6FAF9] text-[#65777F] border-[#DCE7EA]'
+            }`}>
+              <Camera className="w-3.5 h-3.5" />
+              {cameraState === 'granted' ? 'CAMERA ACTIVE' : 'CAMERA READY'}
+            </span>
+
+            {/* Mic Status Pill */}
+            <span className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold border ${
+              micState === 'granted'
+                ? 'bg-[#EAF9F3] text-[#008A63] border-[#00A878]/30'
+                : 'bg-[#F6FAF9] text-[#65777F] border-[#DCE7EA]'
+            }`}>
+              <Mic className="w-3.5 h-3.5" />
+              {micState === 'granted' ? `MIC ACTIVE (${audioLevelDb} dB)` : 'MIC READY'}
+            </span>
+
+            {/* Security Pill */}
+            <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold bg-[#EDF9FC] text-[#00B8D9] border border-[#00B8D9]/30">
+              <ShieldCheck className="w-3.5 h-3.5 text-[#00B8D9]" />
+              SECURITY ACTIVE
+            </span>
+          </div>
+
+          {/* User Profile & Clock */}
+          <div className="flex items-center gap-3 text-xs text-[#65777F]">
+            <span className="hidden sm:inline font-mono">
+              OFFICIAL: <strong className="text-[#142B38]">{currentUser?.full_name || 'Translator Controller'}</strong>
+            </span>
+            <span className="text-[#C8D7DE] hidden sm:inline">|</span>
+            <span className="flex items-center gap-1 text-[#142B38] font-mono">
+              <Clock className="w-3.5 h-3.5 text-[#65777F]" />
+              {currentTimeStr}
+            </span>
+          </div>
+        </div>
+      </header>
+
+      {/* Main Centered Content Container (max-width 1320px) */}
+      <div className="max-w-[1320px] mx-auto px-4 sm:px-6 space-y-6">
+        {/* ======================================================== */}
+        {/* PART 4: WHITE PAGE HEADER CARD                           */}
+        {/* ======================================================== */}
+        <div className="bg-white rounded-[18px] border border-[#DCE7EA] p-6 sm:p-7 shadow-[0_8px_28px_rgba(30,70,80,0.06)] flex flex-col md:flex-row md:items-center justify-between gap-4">
+          <div className="space-y-1.5">
+            <div className="flex items-center gap-2">
+              <span className="inline-flex items-center gap-1.5 px-3 py-0.5 rounded-full bg-[#EAF9F3] text-[#008A63] border border-[#00A878]/30 text-xs font-bold uppercase tracking-wider">
+                <ShieldCheck className="w-3.5 h-3.5 text-[#00A878]" />
+                PROTECTED PROCTORING ENCLAVE
+              </span>
+              <span className="text-xs font-mono text-[#65777F]">
+                SESSION ID: {session?.id ? session.id.substring(0, 16) : 'ZX-2026-ENCLAVE-8821'}
+              </span>
+            </div>
+
+            <h1 className="text-2xl sm:text-3xl font-extrabold text-[#142B38] tracking-tight">
               {title || 'Translator Confidential Translation Enclave'}
-            </h2>
-            <p className="text-[#475569] text-sm max-w-2xl mx-auto">
-              Under central examination security protocols, all question authoring, translation, and vetting activities are conducted on-camera with continuous acoustic monitoring to guarantee zero leak tolerance.
+            </h1>
+            <p className="text-sm text-[#65777F] max-w-2xl leading-relaxed">
+              Secure examination translation workspace with continuous camera, acoustic monitoring, and debounced focus surveillance to ensure zero question paper leakage.
             </p>
           </div>
 
-          {/* Main Verification Grid */}
-          <div className="grid grid-cols-1 md:grid-cols-12 gap-6 items-stretch">
-            {/* Left: Rectangular Live Camera Viewfinder */}
-            <div className="md:col-span-6 bg-white rounded-2xl border border-[#DCE6EA] p-4 shadow-xs flex flex-col justify-between space-y-3">
-              <div className="flex items-center justify-between pb-2 border-b border-[#F0F4F8]">
-                <div className="flex items-center gap-2">
-                  <div className="w-2.5 h-2.5 rounded-full bg-[#00A878] animate-ping" />
-                  <span className="text-xs font-bold text-[#0F172A] uppercase tracking-wider">
-                    Official Hardware Camera Feed
-                  </span>
-                </div>
-                <span className="text-[11px] font-mono text-[#64748B]">16:9 • 720p HD</span>
+          <div className="flex flex-wrap items-center gap-2.5 shrink-0">
+            <button
+              type="button"
+              onClick={() => setPolicyModalOpen(true)}
+              className="px-4 py-2 rounded-xl bg-[#F6FAF9] hover:bg-[#EEF6FF] border border-[#DCE7EA] text-[#142B38] text-xs font-semibold flex items-center gap-2 transition-all cursor-pointer shadow-2xs"
+            >
+              <FileText className="w-3.5 h-3.5 text-[#2878D8]" />
+              Proctoring Policy
+            </button>
+            <span className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-[#EAF9F3] border border-[#00A878]/30 text-xs font-bold text-[#008A63]">
+              <span className="w-2 h-2 rounded-full bg-[#00A878] animate-ping" />
+              SESSION SECURE
+            </span>
+          </div>
+        </div>
+
+        {/* ======================================================== */}
+        {/* PART 28: ENCLAVE READINESS CHECKLIST CARD                */}
+        {/* ======================================================== */}
+        <div className="bg-white rounded-2xl border border-[#DCE7EA] p-6 shadow-[0_6px_24px_rgba(30,70,80,0.05)] space-y-4">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-[#F0F4F8]">
+            <div className="flex items-center gap-2.5">
+              <div className="p-1.5 rounded-lg bg-[#EAF9F3] text-[#00A878]">
+                <ShieldCheck className="w-5 h-5" />
               </div>
-
-              <div className="relative aspect-video w-full bg-[#0F172A] rounded-xl overflow-hidden border border-[#DCE6EA] shadow-inner flex items-center justify-center">
-                <video
-                  ref={gateVideoRef}
-                  autoPlay
-                  playsInline
-                  muted
-                  className="w-full h-full object-cover -scale-x-100"
-                />
-
-                {!cameraActive && (
-                  <div className="absolute inset-0 flex flex-col items-center justify-center bg-white/95 text-[#475569] p-6 text-center space-y-3">
-                    <div className="w-14 h-14 rounded-2xl bg-rose-50 border border-rose-200 flex items-center justify-center text-[#E84B5F]">
-                      <CameraOff className="w-7 h-7" />
-                    </div>
-                    <div>
-                      <p className="text-sm font-bold text-[#0F172A]">Camera Sensor Offline</p>
-                      <p className="text-xs text-[#64748B] mt-1 max-w-xs">
-                        Camera permission required to authenticate official identity before access is granted.
-                      </p>
-                    </div>
-                    <button
-                      type="button"
-                      onClick={startGatePreview}
-                      disabled={initializing}
-                      className="px-4 py-2 rounded-lg bg-[#00A878] hover:bg-[#008f66] text-white font-semibold text-xs flex items-center gap-2 shadow-xs transition-all cursor-pointer"
-                    >
-                      <Camera className="w-3.5 h-3.5" />
-                      Turn ON Camera & Microphone
-                    </button>
-                  </div>
-                )}
-
-                {cameraActive && (
-                  <div className="absolute bottom-2.5 left-2.5 right-2.5 flex items-center justify-between px-3 py-1.5 rounded-lg bg-black/75 backdrop-blur text-[11px] text-white">
-                    <span className="flex items-center gap-2 text-emerald-400 font-semibold">
-                      <span className="w-2 h-2 rounded-full bg-emerald-400 animate-ping" />
-                      Live Hardware Stream Ready
-                    </span>
-                    <span className="font-mono text-slate-300">{audioLevel} dB</span>
-                  </div>
-                )}
+              <div>
+                <h3 className="text-sm font-bold text-[#142B38] tracking-tight">
+                  ENCLAVE READINESS & VERIFICATION
+                </h3>
+                <p className="text-xs text-[#65777F]">
+                  Required security sensors must be verified before entering the confidential examination workbench.
+                </p>
               </div>
+            </div>
 
-              {/* Official Identity Badge */}
-              <div className="flex items-center justify-between p-3 rounded-xl bg-[#F8FAFC] border border-[#E2E8F0] text-xs">
-                <div className="flex items-center gap-2 truncate">
-                  <div className="w-2 h-2 rounded-full bg-[#00A878]" />
-                  <span className="text-[#64748B]">Authenticated Official:</span>
-                  <span className="font-semibold text-[#0F172A] truncate">
-                    {currentUser?.full_name || 'Assigned Official'}
-                  </span>
-                </div>
-                <span className="px-2 py-0.5 rounded bg-emerald-50 border border-emerald-200 text-[#00A878] font-mono text-[10px] font-bold">
-                  {currentUser?.role || 'TRANSLATOR'}
+            <span className={`px-3 py-1 rounded-full text-xs font-bold font-mono border ${
+              isAllReadyToEnter
+                ? 'bg-[#EAF9F3] text-[#008A63] border-[#00A878]/30'
+                : 'bg-[#FFF7E8] text-[#F0A11A] border-[#F0A11A]/30'
+            }`}>
+              {isAllReadyToEnter ? 'READY TO ENTER' : 'ACTION REQUIRED'}
+            </span>
+          </div>
+
+          {/* 5-Item Checklist Row */}
+          <div className="grid grid-cols-2 sm:grid-cols-5 gap-3 pt-1">
+            {/* Check 1: Authentication */}
+            <div className="p-3 rounded-xl bg-[#F6FAF9] border border-[#DCE7EA] flex items-center gap-2.5">
+              <CheckCircle className="w-4 h-4 text-[#00A878] shrink-0" />
+              <div className="truncate">
+                <span className="text-xs font-bold text-[#142B38] block truncate">Authentication</span>
+                <span className="text-[10px] text-[#008A63] font-medium">Verified Official</span>
+              </div>
+            </div>
+
+            {/* Check 2: Camera */}
+            <div className={`p-3 rounded-xl border flex items-center gap-2.5 ${
+              cameraState === 'granted'
+                ? 'bg-[#EAF9F3] border-[#00A878]/30'
+                : cameraState === 'denied' || cameraState === 'not_found'
+                ? 'bg-[#FFF1F3] border-[#E84B5F]/30'
+                : 'bg-[#F6FAF9] border-[#DCE7EA]'
+            }`}>
+              {cameraState === 'granted' ? (
+                <CheckCircle className="w-4 h-4 text-[#00A878] shrink-0" />
+              ) : cameraState === 'requesting' ? (
+                <RefreshCw className="w-4 h-4 text-[#2878D8] animate-spin shrink-0" />
+              ) : cameraState === 'denied' || cameraState === 'not_found' ? (
+                <XCircle className="w-4 h-4 text-[#E84B5F] shrink-0" />
+              ) : (
+                <Circle className="w-4 h-4 text-[#65777F] shrink-0" />
+              )}
+              <div className="truncate">
+                <span className="text-xs font-bold text-[#142B38] block truncate">Camera</span>
+                <span className={`text-[10px] font-medium ${
+                  cameraState === 'granted'
+                    ? 'text-[#008A63]'
+                    : cameraState === 'denied' || cameraState === 'not_found'
+                    ? 'text-[#E84B5F]'
+                    : 'text-[#65777F]'
+                }`}>
+                  {cameraState === 'granted'
+                    ? 'Active'
+                    : cameraState === 'requesting'
+                    ? 'Requesting...'
+                    : cameraState === 'denied'
+                    ? 'Denied'
+                    : cameraState === 'not_found'
+                    ? 'Not Found'
+                    : 'Permission Required'}
                 </span>
               </div>
             </div>
 
-            {/* Right: Permission Verification Checklist */}
-            <div className="md:col-span-6 space-y-3 flex flex-col justify-between">
-              {/* Check 1: Camera */}
-              <div className={`p-4 rounded-xl border transition-all ${
-                cameraActive ? 'bg-emerald-50/50 border-emerald-200' : 'bg-white border-[#DCE6EA]'
-              }`}>
-                <div className="flex items-start justify-between gap-3">
-                  <div className="flex items-start gap-3">
-                    <div className={`p-2 rounded-lg ${
-                      cameraActive ? 'bg-emerald-100 text-[#00A878]' : 'bg-[#F0F4F8] text-[#64748B]'
-                    }`}>
-                      <Camera className="w-5 h-5" />
-                    </div>
-                    <div>
-                      <h4 className="text-xs font-bold text-[#0F172A]">1. Visual Biometric Surveillance</h4>
-                      <p className="text-[11px] text-[#64748B] mt-0.5">
-                        Continuous facial tracking to verify single authorized official presence and block unauthorized viewers.
-                      </p>
-                    </div>
-                  </div>
-                  <span className={`px-2.5 py-0.5 rounded text-[10px] font-bold shrink-0 ${
-                    cameraActive ? 'bg-emerald-100 text-emerald-800 border border-emerald-300' : 'bg-amber-100 text-amber-800 border border-amber-300'
-                  }`}>
-                    {cameraActive ? 'VERIFIED' : 'REQUIRED'}
-                  </span>
-                </div>
+            {/* Check 3: Microphone */}
+            <div className={`p-3 rounded-xl border flex items-center gap-2.5 ${
+              micState === 'granted'
+                ? 'bg-[#EAF9F3] border-[#00A878]/30'
+                : micState === 'denied' || micState === 'not_found'
+                ? 'bg-[#FFF1F3] border-[#E84B5F]/30'
+                : 'bg-[#F6FAF9] border-[#DCE7EA]'
+            }`}>
+              {micState === 'granted' ? (
+                <CheckCircle className="w-4 h-4 text-[#00A878] shrink-0" />
+              ) : micState === 'requesting' ? (
+                <RefreshCw className="w-4 h-4 text-[#2878D8] animate-spin shrink-0" />
+              ) : micState === 'denied' || micState === 'not_found' ? (
+                <XCircle className="w-4 h-4 text-[#E84B5F] shrink-0" />
+              ) : (
+                <Circle className="w-4 h-4 text-[#65777F] shrink-0" />
+              )}
+              <div className="truncate">
+                <span className="text-xs font-bold text-[#142B38] block truncate">Microphone</span>
+                <span className={`text-[10px] font-medium ${
+                  micState === 'granted'
+                    ? 'text-[#008A63]'
+                    : micState === 'denied' || micState === 'not_found'
+                    ? 'text-[#E84B5F]'
+                    : 'text-[#65777F]'
+                }`}>
+                  {micState === 'granted'
+                    ? 'Active'
+                    : micState === 'requesting'
+                    ? 'Requesting...'
+                    : micState === 'denied'
+                    ? 'Denied'
+                    : micState === 'not_found'
+                    ? 'Not Found'
+                    : 'Permission Required'}
+                </span>
               </div>
+            </div>
 
-              {/* Check 2: Microphone */}
-              <div className={`p-4 rounded-xl border transition-all ${
-                micActive ? 'bg-emerald-50/50 border-emerald-200' : 'bg-white border-[#DCE6EA]'
-              }`}>
-                <div className="flex items-start justify-between gap-3">
-                  <div className="flex items-start gap-3">
-                    <div className={`p-2 rounded-lg ${
-                      micActive ? 'bg-emerald-100 text-[#00A878]' : 'bg-[#F0F4F8] text-[#64748B]'
-                    }`}>
-                      <Mic className="w-5 h-5" />
-                    </div>
-                    <div>
-                      <h4 className="text-xs font-bold text-[#0F172A]">2. Acoustic Monitoring & Voice Evidence</h4>
-                      <p className="text-[11px] text-[#64748B] mt-0.5">
-                        Room noise & voice monitoring with direct voice reporting to the Chief Vigilance & Security Auditor.
-                      </p>
-                    </div>
-                  </div>
-                  <span className={`px-2.5 py-0.5 rounded text-[10px] font-bold shrink-0 ${
-                    micActive ? 'bg-emerald-100 text-emerald-800 border border-emerald-300' : 'bg-amber-100 text-amber-800 border border-amber-300'
-                  }`}>
-                    {micActive ? 'VERIFIED' : 'REQUIRED'}
-                  </span>
-                </div>
+            {/* Check 4: Examination Assignment */}
+            <div className="p-3 rounded-xl bg-[#F6FAF9] border border-[#DCE7EA] flex items-center gap-2.5">
+              <CheckCircle className="w-4 h-4 text-[#00A878] shrink-0" />
+              <div className="truncate">
+                <span className="text-xs font-bold text-[#142B38] block truncate">Assignment</span>
+                <span className="text-[10px] text-[#008A63] font-medium">Paper Bound</span>
               </div>
+            </div>
 
-              {/* Check 3: Focus Guard */}
-              <div className="p-4 rounded-xl border bg-white border-[#DCE6EA]">
-                <div className="flex items-start justify-between gap-3">
-                  <div className="flex items-start gap-3">
-                    <div className="p-2 rounded-lg bg-blue-50 text-[#2878D8]">
-                      <Maximize2 className="w-5 h-5" />
-                    </div>
-                    <div>
-                      <h4 className="text-xs font-bold text-[#0F172A]">3. Focus & Anti-Switching Shield</h4>
-                      <p className="text-[11px] text-[#64748B] mt-0.5">
-                        Strict 3-warning threshold. Switching tabs or windows for &gt;2.5s automatically triggers an audited violation.
-                      </p>
-                    </div>
-                  </div>
-                  <span className="px-2.5 py-0.5 rounded text-[10px] font-bold bg-blue-100 text-blue-800 border border-blue-300 shrink-0">
-                    ARMED
-                  </span>
-                </div>
-              </div>
-
-              {/* Check 4: Anti-Screenshot */}
-              <div className="p-4 rounded-xl border bg-white border-[#DCE6EA]">
-                <div className="flex items-start justify-between gap-3">
-                  <div className="flex items-start gap-3">
-                    <div className="p-2 rounded-lg bg-indigo-50 text-[#6257E8]">
-                      <Lock className="w-5 h-5" />
-                    </div>
-                    <div>
-                      <h4 className="text-xs font-bold text-[#0F172A]">4. Anti-Screenshot & Copy Interception</h4>
-                      <p className="text-[11px] text-[#64748B] mt-0.5">
-                        PrintScreen, Snipping tool, and Ctrl+C clipboard extractions are strictly intercepted and logged.
-                      </p>
-                    </div>
-                  </div>
-                  <span className="px-2.5 py-0.5 rounded text-[10px] font-bold bg-indigo-100 text-indigo-800 border border-indigo-300 shrink-0">
-                    ENFORCED
-                  </span>
-                </div>
+            {/* Check 5: Security Monitor */}
+            <div className="p-3 rounded-xl bg-[#F6FAF9] border border-[#DCE7EA] flex items-center gap-2.5">
+              <CheckCircle className="w-4 h-4 text-[#00A878] shrink-0" />
+              <div className="truncate">
+                <span className="text-xs font-bold text-[#142B38] block truncate">Security Shield</span>
+                <span className="text-[10px] text-[#008A63] font-medium">Armed (0/3 Violations)</span>
               </div>
             </div>
           </div>
 
-          {/* Error Message if Denied */}
-          {errorMsg && (
-            <div className="p-4 rounded-xl bg-rose-50 border border-rose-200 text-rose-800 text-xs flex items-center gap-3">
-              <AlertCircle className="w-5 h-5 shrink-0 text-rose-600" />
-              <span>{errorMsg}</span>
+          {/* Error Banner only when actual failure occurred */}
+          {permissionError && (
+            <div className="p-4 rounded-xl bg-[#FFF1F3] border border-[#E84B5F]/30 text-[#142B38] text-xs flex items-start justify-between gap-3 animate-fade-in">
+              <div className="flex items-start gap-3">
+                <AlertCircle className="w-5 h-5 text-[#E84B5F] shrink-0 mt-0.5" />
+                <div>
+                  <h4 className="font-bold text-[#E84B5F]">{permissionError.title}</h4>
+                  <p className="text-[#65777F] mt-0.5">{permissionError.message}</p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={handleRequestHardwarePermissions}
+                className="px-3 py-1.5 rounded-lg bg-white border border-[#E84B5F]/40 hover:bg-[#FFF1F3] text-[#E84B5F] font-bold text-xs shrink-0 cursor-pointer"
+              >
+                {permissionError.actionLabel || 'Retry Permissions'}
+              </button>
             </div>
           )}
 
-          {/* Action Button Section: 50px tall prominent emerald CTA */}
-          <div className="pt-2 text-center space-y-3">
-            {!allPermissionsGranted ? (
-              <button
-                type="button"
-                onClick={startGatePreview}
-                disabled={initializing}
-                className="h-[50px] px-8 rounded-xl bg-[#00A878] hover:bg-[#008f66] text-white font-bold text-sm shadow-md hover:shadow-lg flex items-center justify-center gap-3 mx-auto transition-all cursor-pointer"
-              >
-                {initializing ? (
-                  <>
-                    <RefreshCw className="w-5 h-5 animate-spin" />
-                    <span>Requesting Camera & Mic Permissions...</span>
-                  </>
-                ) : (
-                  <>
-                    <Camera className="w-5 h-5" />
-                    <span>Step 1: Turn ON Camera & Microphone</span>
-                  </>
-                )}
-              </button>
-            ) : (
-              <button
-                type="button"
-                onClick={handleEnterEnclave}
-                disabled={initializing}
-                className="h-[50px] px-10 rounded-xl bg-[#00A878] hover:bg-[#008f66] text-white font-black text-sm uppercase tracking-wider shadow-lg hover:shadow-xl flex items-center justify-center gap-3 mx-auto transition-all cursor-pointer transform hover:scale-[1.01] active:scale-[0.99]"
-              >
-                {initializing ? (
-                  <>
-                    <RefreshCw className="w-5 h-5 animate-spin" />
-                    <span>Authorizing Enclave Access...</span>
-                  </>
-                ) : (
-                  <>
-                    <ShieldCheck className="w-5 h-5" />
-                    <span>ENTER ENCLAVE & START REVIEW →</span>
-                  </>
-                )}
-              </button>
-            )}
+          {/* Action Row */}
+          {!enclaveStarted && (
+            <div className="pt-2 flex flex-col sm:flex-row items-center justify-between gap-4">
+              <p className="text-xs text-[#65777F]">
+                {isAllReadyToEnter
+                  ? 'All hardware sensors authenticated. Click the button to launch the confidential examination enclave.'
+                  : 'Camera and microphone access is required before entering the confidential examination enclave.'}
+              </p>
 
-            <p className="text-xs text-[#64748B]">
-              {allPermissionsGranted
-                ? 'Hardware sensors verified. Click above to unlock your assigned questions workbench now.'
-                : 'Click "Turn ON Camera & Microphone" and select "Allow" in your browser popup to unlock this workspace.'}
-            </p>
-          </div>
-        </div>
-      </div>
-    );
-  }
-
-  // =========================================================================
-  // RENDER: 2. Active Enclave Mode (PREMIUM LIGHT ENTERPRISE CONSOLE)
-  // =========================================================================
-  return (
-    <div className="space-y-6 text-[#0F172A]">
-      {/* Toast Alert */}
-      {recentWarning && (
-        <div className="fixed top-20 right-6 z-50 max-w-md p-4 rounded-xl bg-white border-2 border-[#F0A11A] text-[#0F172A] shadow-2xl flex items-center gap-3 animate-bounce">
-          <div className="p-2 rounded-lg bg-amber-50 text-[#F0A11A]">
-            <AlertTriangle className="w-5 h-5" />
-          </div>
-          <div className="text-xs font-semibold">{recentWarning}</div>
-        </div>
-      )}
-
-      {/* TOP SECURITY BAR */}
-      <div className="bg-white rounded-xl border border-[#DCE6EA] px-4 py-2.5 flex flex-wrap items-center justify-between gap-3 shadow-xs">
-        <div className="flex flex-wrap items-center gap-2">
-          {/* Camera Pill */}
-          <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-emerald-50 text-[#00A878] border border-emerald-200 text-xs font-semibold">
-            <span className="w-2 h-2 rounded-full bg-[#00A878] animate-pulse" />
-            CAMERA ● ON
-          </span>
-
-          {/* Mic Pill */}
-          <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-cyan-50 text-[#00B8D9] border border-cyan-200 text-xs font-semibold">
-            <span className="w-2 h-2 rounded-full bg-[#00B8D9]" />
-            MIC ● ON ({audioLevel} dB)
-          </span>
-
-          {/* Security Pill */}
-          <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-indigo-50 text-[#6257E8] border border-indigo-200 text-xs font-semibold">
-            <Lock className="w-3.5 h-3.5 text-[#6257E8]" />
-            ENCLAVE ● ARMED
-          </span>
-
-          {/* Security Score Pill */}
-          <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-emerald-50 text-emerald-800 border border-emerald-300 text-xs font-bold font-mono">
-            <ShieldCheck className="w-3.5 h-3.5 text-[#00A878]" />
-            98% SECURE
-          </span>
-        </div>
-
-        <div className="flex items-center gap-4 text-xs font-mono text-[#64748B]">
-          <span className="hidden sm:inline">
-            ENCLAVE SESSION: <strong className="text-[#0F172A]">{session?.id ? session.id.substring(0, 16) : 'ZX-2026-ENCLAVE-8821'}</strong>
-          </span>
-          <span className="flex items-center gap-1 text-[#0F172A]">
-            <Clock className="w-3.5 h-3.5 text-[#64748B]" />
-            {currentTimeStr}
-          </span>
-        </div>
-      </div>
-
-      {/* HEADER SECTION */}
-      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 border-b border-[#DCE6EA] pb-5">
-        <div>
-          <div className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-emerald-50 border border-emerald-200 text-[#00A878] text-[11px] font-bold uppercase tracking-wider mb-1.5">
-            <Shield className="w-3.5 h-3.5 text-[#00A878]" />
-            MANDATORY PROCTORING ENCLAVE
-          </div>
-          <h1 className="text-2xl font-extrabold text-[#0F172A] tracking-tight">
-            {title || 'Translator Confidential Translation Enclave'}
-          </h1>
-          <p className="text-xs text-[#475569] mt-0.5">
-            Continuous visual & acoustic proctoring active to safeguard question paper secrecy before examination release.
-          </p>
-        </div>
-
-        {/* Security Trust Badges */}
-        <div className="flex flex-wrap items-center gap-2">
-          <span className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-white border border-[#DCE6EA] text-xs font-medium text-[#475569] shadow-xs">
-            <CheckCircle2 className="w-3.5 h-3.5 text-[#00A878]" />
-            Biometric Identity Verified
-          </span>
-          <span className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-white border border-[#DCE6EA] text-xs font-medium text-[#475569] shadow-xs">
-            <ShieldCheck className="w-3.5 h-3.5 text-[#2878D8]" />
-            Anti-Leak Shield Active
-          </span>
-          <span className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-white border border-[#DCE6EA] text-xs font-medium text-[#475569] shadow-xs">
-            <Radio className="w-3.5 h-3.5 text-[#6257E8]" />
-            Auditor Surveillance Connected
-          </span>
-        </div>
-      </div>
-
-      {/* CONSENT & PRIVACY NOTICE CARD (LIGHT BLUE CARD) */}
-      <div className="p-4 rounded-xl bg-[#EEF4F6] border border-[#DCE6EA] flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs">
-        <div className="flex items-start gap-3">
-          <div className="p-2 rounded-lg bg-white border border-[#DCE6EA] text-[#2878D8] shrink-0 mt-0.5">
-            <Info className="w-4 h-4 text-[#2878D8]" />
-          </div>
-          <div>
-            <span className="font-bold text-[#0F172A]">Proctoring Notice & Legal Compliance:</span>
-            <p className="text-[#475569] mt-0.5">
-              Live webcam, microphone telemetry, and focus state are monitored exclusively for confidential paper protection. Audio evidence recorded below is routed directly to the Chief Vigilance & Security Auditor.
-            </p>
-          </div>
-        </div>
-        <button
-          type="button"
-          onClick={() => setPolicyModalOpen(true)}
-          className="px-3.5 py-1.5 rounded-lg bg-white hover:bg-slate-50 border border-[#DCE6EA] text-[#0F172A] font-semibold text-xs flex items-center gap-1.5 shrink-0 shadow-xs cursor-pointer"
-        >
-          <FileText className="w-3.5 h-3.5 text-[#2878D8]" />
-          View Proctoring Policy
-        </button>
-      </div>
-
-      {/* TWO-COLUMN PROCTORING DASHBOARD */}
-      <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
-        {/* ======================================================== */}
-        {/* LEFT COLUMN: Live Camera Feed + Voice Evidence Recorder  */}
-        {/* ======================================================== */}
-        <div className="lg:col-span-6 space-y-6">
-          {/* Card 1: Live Camera Panel */}
-          <div className="bg-white rounded-2xl border border-[#DCE6EA] p-5 shadow-xs space-y-4">
-            <div className="flex items-center justify-between pb-3 border-b border-[#F0F4F8]">
-              <div className="flex items-center gap-2">
-                <div className="w-2.5 h-2.5 rounded-full bg-[#00A878] animate-ping" />
-                <h3 className="text-sm font-bold text-[#0F172A] tracking-tight">
-                  LIVE PROCTORING STREAM
-                </h3>
-              </div>
-              <span className="px-2 py-0.5 rounded bg-emerald-50 text-[#00A878] font-bold text-[10px] border border-emerald-200">
-                ACTIVE HD 720p
-              </span>
-            </div>
-
-            {/* 16:9 Video Container */}
-            <div className="relative aspect-video w-full bg-[#0F172A] rounded-xl overflow-hidden border border-[#DCE6EA] shadow-inner">
-              <video
-                ref={videoRef}
-                autoPlay
-                playsInline
-                muted
-                className="w-full h-full object-cover -scale-x-100"
-              />
-
-              {/* Live Face Detection Status Overlay */}
-              <div className="absolute top-2.5 left-2.5 right-2.5 flex items-center justify-between">
-                <span className={`px-2.5 py-1 rounded-full text-xs font-semibold backdrop-blur shadow-sm flex items-center gap-1.5 ${
-                  isShoulderSurfing
-                    ? 'bg-[#E84B5F] text-white animate-pulse'
-                    : isFaceAbsent
-                    ? 'bg-[#F0A11A] text-white'
-                    : 'bg-white/90 text-emerald-800 border border-emerald-200'
-                }`}>
-                  {isShoulderSurfing ? (
+              {!isAllReadyToEnter ? (
+                <button
+                  type="button"
+                  onClick={handleRequestHardwarePermissions}
+                  disabled={isRequestingPermissions}
+                  className="h-[50px] px-8 rounded-xl text-white font-bold text-sm shadow-[0_4px_16px_rgba(0,168,120,0.25)] hover:shadow-[0_6px_20px_rgba(0,168,120,0.35)] flex items-center justify-center gap-2.5 transition-all cursor-pointer shrink-0 disabled:opacity-75"
+                  style={{
+                    background: 'linear-gradient(135deg, #00A878, #00C98B)',
+                  }}
+                >
+                  {isRequestingPermissions ? (
                     <>
-                      <Users className="w-3.5 h-3.5" />
-                      <span>2+ Faces (Shoulder Surfing Alert!)</span>
-                    </>
-                  ) : isFaceAbsent ? (
-                    <>
-                      <EyeOff className="w-3.5 h-3.5" />
-                      <span>No Face Detected</span>
+                      <RefreshCw className="w-4 h-4 animate-spin text-white" />
+                      <span>REQUESTING ACCESS...</span>
                     </>
                   ) : (
                     <>
-                      <Eye className="w-3.5 h-3.5 text-[#00A878]" />
-                      <span>Official Verified (1 Face)</span>
+                      <Camera className="w-4 h-4 text-white" />
+                      <span>Enable Camera & Microphone</span>
                     </>
                   )}
-                </span>
-
-                <span className="px-2 py-0.5 rounded-md bg-black/60 text-white font-mono text-[10px]">
-                  FPS: 30 • FaceTrack
-                </span>
-              </div>
-
-              {/* Bottom Decibel & Volume Visualizer Overlay */}
-              <div className="absolute bottom-2.5 left-2.5 right-2.5 flex items-center justify-between px-3 py-1.5 rounded-lg bg-black/75 backdrop-blur text-xs text-white">
-                <div className="flex items-center gap-2">
-                  <Mic className="w-3.5 h-3.5 text-[#00B8D9]" />
-                  <span className="font-mono">{audioLevel} dB</span>
-                </div>
-                <div className="flex items-center gap-2">
-                  <span className="text-[10px] text-slate-300">Room Acoustic Level:</span>
-                  {renderAudioLevelBars()}
-                </div>
-              </div>
-            </div>
-
-            {/* Bottom Stream Controls & Metadata */}
-            <div className="flex items-center justify-between text-xs pt-1">
-              <div className="flex items-center gap-2 text-[#475569]">
-                <div className="w-2 h-2 rounded-full bg-[#00A878]" />
-                <span>Device: Authorized Internal Webcam</span>
-              </div>
-              <button
-                type="button"
-                onClick={startGatePreview}
-                className="px-2.5 py-1 rounded-lg border border-[#DCE6EA] hover:bg-[#F0F4F8] text-[#0F172A] font-semibold text-[11px] flex items-center gap-1.5 cursor-pointer"
-              >
-                <RefreshCw className="w-3 h-3 text-[#64748B]" />
-                Reconnect Camera
-              </button>
-            </div>
-          </div>
-
-          {/* Card 2: Voice Evidence Recording / Voice Note */}
-          <div className="bg-white rounded-2xl border border-[#DCE6EA] p-5 shadow-xs space-y-4">
-            <div className="flex items-center justify-between pb-3 border-b border-[#F0F4F8]">
-              <div className="flex items-center gap-2">
-                <div className="p-1.5 rounded-lg bg-indigo-50 text-[#6257E8]">
-                  <Mic className="w-4 h-4" />
-                </div>
-                <div>
-                  <h3 className="text-sm font-bold text-[#0F172A] tracking-tight">
-                    Auditor Voice Evidence Recorder
-                  </h3>
-                  <p className="text-[11px] text-[#64748B]">
-                    Record official remarks or incident notes directly for the Chief Vigilance Auditor.
-                  </p>
-                </div>
-              </div>
-              <span className="px-2 py-0.5 rounded bg-indigo-50 text-[#6257E8] font-mono text-[10px] font-bold border border-indigo-200">
-                AUDITOR DIRECT
-              </span>
-            </div>
-
-            {/* Recording Controls Area */}
-            <div className="p-4 rounded-xl bg-[#F8FAFC] border border-[#E2E8F0] space-y-3">
-              <div className="flex flex-col sm:flex-row items-center justify-between gap-4">
-                <div className="flex items-center gap-3">
-                  {/* Status Indicator */}
-                  {isRecordingVoice ? (
-                    <div className="w-10 h-10 rounded-full bg-rose-100 border border-rose-300 flex items-center justify-center text-[#E84B5F] animate-pulse">
-                      <Radio className="w-5 h-5 text-[#E84B5F]" />
-                    </div>
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  onClick={handleStartEnclave}
+                  disabled={isStartingEnclave}
+                  className="h-[50px] px-10 rounded-xl text-white font-black text-sm uppercase tracking-wider shadow-[0_4px_16px_rgba(0,168,120,0.3)] hover:shadow-[0_6px_24px_rgba(0,168,120,0.4)] flex items-center justify-center gap-2.5 transition-all cursor-pointer shrink-0 transform hover:scale-[1.01]"
+                  style={{
+                    background: 'linear-gradient(135deg, #00A878, #00C98B)',
+                  }}
+                >
+                  {isStartingEnclave ? (
+                    <>
+                      <RefreshCw className="w-4 h-4 animate-spin text-white" />
+                      <span>INITIALIZING ENCLAVE...</span>
+                    </>
                   ) : (
-                    <div className="w-10 h-10 rounded-full bg-indigo-100 border border-indigo-200 flex items-center justify-center text-[#6257E8]">
-                      <Mic className="w-5 h-5 text-[#6257E8]" />
-                    </div>
+                    <>
+                      <ShieldCheck className="w-5 h-5 text-white" />
+                      <span>Enter Enclave & Start Review →</span>
+                    </>
                   )}
+                </button>
+              )}
+            </div>
+          )}
+        </div>
 
+        {/* ======================================================== */}
+        {/* TWO-COLUMN PROCTORING WORKSPACE (LIGHT UI)                */}
+        {/* ======================================================== */}
+        <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
+          {/* ======================================================== */}
+          {/* LEFT COLUMN: Live Camera Card + Microphone & Voice Note */}
+          {/* ======================================================== */}
+          <div className="lg:col-span-6 space-y-6">
+            {/* PART 11 & 12: LIVE CAMERA CARD (WHITE BACKGROUND) */}
+            <div className="bg-white rounded-2xl border border-[#DCE7EA] p-6 shadow-[0_6px_24px_rgba(30,70,80,0.05)] space-y-4">
+              <div className="flex items-center justify-between pb-3 border-b border-[#F0F4F8]">
+                <div className="flex items-center gap-2.5">
+                  <div className="p-1.5 rounded-lg bg-[#EAF9F3] text-[#00A878]">
+                    <Camera className="w-4 h-4" />
+                  </div>
                   <div>
-                    <div className="flex items-center gap-2">
-                      <span className={`text-xs font-bold ${isRecordingVoice ? 'text-[#E84B5F]' : 'text-[#0F172A]'}`}>
-                        {isRecordingVoice ? 'RECORDING VOICE EVIDENCE...' : voiceAudioUrl ? 'EVIDENCE AUDIO READY' : 'IDLE — READY TO RECORD'}
-                      </span>
-                    </div>
-                    <div className="text-xs font-mono text-[#64748B] mt-0.5">
-                      Elapsed Time: <strong className="text-[#0F172A]">{formatTimeSeconds(recordingSeconds)}</strong>
-                      {voiceFileSizeBytes > 0 && ` • (${Math.round(voiceFileSizeBytes / 1024)} KB)`}
-                    </div>
+                    <h3 className="text-sm font-bold text-[#142B38] tracking-tight">
+                      LIVE CAMERA
+                    </h3>
+                    <p className="text-xs text-[#65777F]">
+                      High-definition continuous visual biometric surveillance feed.
+                    </p>
                   </div>
                 </div>
 
-                {/* Primary Action Button */}
-                {!isRecordingVoice ? (
-                  <button
-                    type="button"
-                    onClick={startVoiceRecording}
-                    className="w-full sm:w-auto px-4 py-2.5 rounded-xl bg-[#00A878] hover:bg-[#008f66] text-white font-bold text-xs flex items-center justify-center gap-2 shadow-xs cursor-pointer transition-all"
-                  >
-                    <Radio className="w-4 h-4" />
-                    <span>Start Voice Recording</span>
-                  </button>
-                ) : (
-                  <button
-                    type="button"
-                    onClick={stopVoiceRecording}
-                    className="w-full sm:w-auto px-4 py-2.5 rounded-xl bg-[#E84B5F] hover:bg-[#d63b4f] text-white font-bold text-xs flex items-center justify-center gap-2 shadow-xs cursor-pointer transition-all animate-pulse"
-                  >
-                    <Square className="w-4 h-4 fill-white" />
-                    <span>Stop Recording</span>
-                  </button>
-                )}
+                <span className={`px-2.5 py-0.5 rounded text-xs font-bold border ${
+                  cameraState === 'granted'
+                    ? 'bg-[#EAF9F3] text-[#008A63] border-[#00A878]/30'
+                    : 'bg-[#F6FAF9] text-[#65777F] border-[#DCE7EA]'
+                }`}>
+                  {cameraState === 'granted' ? '● CAMERA ACTIVE' : '○ CAMERA NOT ENABLED'}
+                </span>
               </div>
 
-              {/* Playback Controls (if recorded) */}
-              {voiceAudioUrl && (
-                <div className="pt-3 border-t border-[#E2E8F0] space-y-3">
-                  <div className="text-[11px] font-semibold text-[#475569] flex items-center justify-between">
-                    <span>Review Recorded Voice Evidence:</span>
+              {/* Video Preview Container — LIGHT BACKGROUND #F4F8F9 (NEVER BLACK) */}
+              <div className="relative aspect-video w-full bg-[#F4F8F9] rounded-[14px] overflow-hidden border border-[#DCE7EA] shadow-inner flex items-center justify-center">
+                <video
+                  ref={videoRef}
+                  autoPlay
+                  playsInline
+                  muted
+                  className={`w-full h-full object-cover -scale-x-100 ${
+                    cameraState === 'granted' ? 'block' : 'hidden'
+                  }`}
+                />
+
+                {/* Camera Inactive Placeholder (LIGHT/WHITE, NOT BLACK) */}
+                {cameraState !== 'granted' && (
+                  <div className="absolute inset-0 flex flex-col items-center justify-center bg-[#F8FBFB] p-6 text-center space-y-3">
+                    <div className="w-14 h-14 rounded-2xl bg-[#FFF1F3] border border-[#E84B5F]/20 flex items-center justify-center text-[#E84B5F]">
+                      <CameraOff className="w-7 h-7" />
+                    </div>
+                    <div>
+                      <p className="text-sm font-bold text-[#142B38]">CAMERA OFFLINE</p>
+                      <p className="text-xs text-[#65777F] mt-1 max-w-xs">
+                        Camera access is required before entering the confidential examination enclave.
+                      </p>
+                    </div>
                     <button
                       type="button"
-                      onClick={deleteVoiceRecording}
-                      className="text-[#E84B5F] hover:text-[#d63b4f] flex items-center gap-1 font-semibold text-[11px] cursor-pointer"
+                      onClick={handleRequestHardwarePermissions}
+                      disabled={isRequestingPermissions}
+                      className="px-4 py-2 rounded-xl text-white font-bold text-xs flex items-center gap-2 shadow-xs cursor-pointer"
+                      style={{ background: 'linear-gradient(135deg, #00A878, #00C98B)' }}
                     >
-                      <Trash2 className="w-3.5 h-3.5" />
-                      Discard Recording
+                      <Camera className="w-3.5 h-3.5" />
+                      <span>Enable Camera</span>
                     </button>
                   </div>
+                )}
 
-                  <audio
-                    controls
-                    src={voiceAudioUrl}
-                    className="w-full h-9 rounded-lg accent-[#6257E8]"
-                  />
+                {/* Subtile Translucent WHITE Overlay when Active */}
+                {cameraState === 'granted' && (
+                  <>
+                    <div className="absolute top-2.5 left-2.5">
+                      <span className="px-2.5 py-1 rounded-full bg-white/90 backdrop-blur-xs text-[#008A63] border border-[#DCE7EA] text-[11px] font-bold shadow-xs flex items-center gap-1.5">
+                        <span className="w-2 h-2 rounded-full bg-[#00A878] animate-pulse" />
+                        LIVE
+                      </span>
+                    </div>
 
-                  {/* Submit to Auditor Button */}
-                  <div className="flex flex-col sm:flex-row items-center justify-between gap-3 pt-1">
-                    <p className="text-[11px] text-[#64748B]">
-                      Submits encrypted evidence into the Chief Auditor's surveillance ledger.
+                    <div className="absolute bottom-2.5 left-2.5 right-2.5 flex items-center justify-between px-3 py-1.5 rounded-xl bg-white/90 backdrop-blur-xs border border-[#DCE7EA] text-xs shadow-xs">
+                      <span className="flex items-center gap-1.5 text-[#142B38] font-medium">
+                        <span className="w-2 h-2 rounded-full bg-[#00A878]" />
+                        Camera verified • Live
+                      </span>
+                      <span className="font-mono text-[#65777F] text-[11px]">
+                        {faceResult.faceCount === 1 ? '1 Face Verified' : `${faceResult.faceCount} Faces`}
+                      </span>
+                    </div>
+                  </>
+                )}
+              </div>
+
+              {/* Status Footer */}
+              <div className="flex items-center justify-between text-xs pt-1">
+                <span className="text-[#65777F]">
+                  Stream: {cameraState === 'granted' ? '720p HD @ 30 FPS' : 'Inactive'}
+                </span>
+                {cameraState === 'granted' && (
+                  <button
+                    type="button"
+                    onClick={handleRequestHardwarePermissions}
+                    className="text-[#2878D8] hover:text-[#1d5fb0] font-semibold flex items-center gap-1 cursor-pointer"
+                  >
+                    <RefreshCw className="w-3 h-3" />
+                    Refresh Camera Stream
+                  </button>
+                )}
+              </div>
+            </div>
+
+            {/* PART 13: MICROPHONE CARD (WHITE BACKGROUND) */}
+            <div className="bg-white rounded-2xl border border-[#DCE7EA] p-6 shadow-[0_6px_24px_rgba(30,70,80,0.05)] space-y-4">
+              <div className="flex items-center justify-between pb-3 border-b border-[#F0F4F8]">
+                <div className="flex items-center gap-2.5">
+                  <div className="p-1.5 rounded-lg bg-[#EDF9FC] text-[#00B8D9]">
+                    <Mic className="w-4 h-4" />
+                  </div>
+                  <div>
+                    <h3 className="text-sm font-bold text-[#142B38] tracking-tight">
+                      MICROPHONE
+                    </h3>
+                    <p className="text-xs text-[#65777F]">
+                      Acoustic telemetry and decibel anomaly monitoring.
                     </p>
+                  </div>
+                </div>
+
+                <span className={`px-2.5 py-0.5 rounded text-xs font-bold border ${
+                  micState === 'granted'
+                    ? 'bg-[#EAF9F3] text-[#008A63] border-[#00A878]/30'
+                    : 'bg-[#F6FAF9] text-[#65777F] border-[#DCE7EA]'
+                }`}>
+                  {micState === 'granted' ? '● ACTIVE' : '○ NOT ENABLED'}
+                </span>
+              </div>
+
+              <div className="p-4 rounded-xl bg-[#F6FAF9] border border-[#DCE7EA] flex flex-col sm:flex-row items-center justify-between gap-3">
+                <div className="flex items-center gap-3">
+                  <div className="p-2.5 rounded-full bg-white border border-[#DCE7EA] text-[#00B8D9]">
+                    <Volume2 className="w-5 h-5 text-[#00B8D9]" />
+                  </div>
+                  <div>
+                    <span className="text-xs font-bold text-[#142B38] block">Acoustic Level Meter</span>
+                    <span className="text-xs font-mono text-[#65777F]">
+                      {micState === 'granted' ? `Audio Intensity: ${audioLevelDb} dB` : 'Sensor Disconnected'}
+                    </span>
+                  </div>
+                </div>
+
+                {micState === 'granted' ? (
+                  <div className="flex items-center gap-2">
+                    <span className="text-xs font-mono text-[#65777F]">Level:</span>
+                    {renderEqualizerBars()}
+                  </div>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={handleRequestHardwarePermissions}
+                    className="px-3.5 py-1.5 rounded-xl bg-white border border-[#DCE7EA] hover:bg-[#EEF6FF] text-[#2878D8] font-bold text-xs cursor-pointer shadow-2xs"
+                  >
+                    Enable Microphone
+                  </button>
+                )}
+              </div>
+            </div>
+
+            {/* PART 22, 23, 24: VOICE EVIDENCE RECORDER CARD (WHITE BACKGROUND) */}
+            <div className="bg-white rounded-2xl border border-[#DCE7EA] p-6 shadow-[0_6px_24px_rgba(30,70,80,0.05)] space-y-4">
+              <div className="flex items-center justify-between pb-3 border-b border-[#F0F4F8]">
+                <div className="flex items-center gap-2.5">
+                  <div className="p-1.5 rounded-lg bg-[#EEF6FF] text-[#2878D8]">
+                    <Radio className="w-4 h-4" />
+                  </div>
+                  <div>
+                    <h3 className="text-sm font-bold text-[#142B38] tracking-tight">
+                      VOICE EVIDENCE RECORDING
+                    </h3>
+                    <p className="text-xs text-[#65777F]">
+                      Record official remarks or incident notes and route directly to the Chief Vigilance Auditor.
+                    </p>
+                  </div>
+                </div>
+
+                <span className="px-2.5 py-0.5 rounded bg-[#EEF6FF] text-[#2878D8] text-[10px] font-bold font-mono border border-[#2878D8]/20">
+                  AUDITOR PIPELINE
+                </span>
+              </div>
+
+              {/* Recording Area */}
+              <div className="p-4 rounded-xl bg-[#F6FAF9] border border-[#DCE7EA] space-y-3">
+                <div className="flex flex-col sm:flex-row items-center justify-between gap-3">
+                  <div className="flex items-center gap-3">
+                    {isRecordingVoice ? (
+                      <div className="w-10 h-10 rounded-full bg-[#FFF1F3] border border-[#E84B5F]/30 flex items-center justify-center text-[#E84B5F] animate-pulse">
+                        <Radio className="w-5 h-5 text-[#E84B5F]" />
+                      </div>
+                    ) : (
+                      <div className="w-10 h-10 rounded-full bg-white border border-[#DCE7EA] flex items-center justify-center text-[#2878D8]">
+                        <Mic className="w-5 h-5 text-[#2878D8]" />
+                      </div>
+                    )}
+
+                    <div>
+                      <span className={`text-xs font-bold block ${isRecordingVoice ? 'text-[#E84B5F]' : 'text-[#142B38]'}`}>
+                        {isRecordingVoice
+                          ? '🔴 VOICE RECORDING ACTIVE'
+                          : voiceAudioUrl
+                          ? 'VOICE EVIDENCE READY'
+                          : 'STANDBY — READY TO RECORD'}
+                      </span>
+                      <span className="text-xs font-mono text-[#65777F]">
+                        Duration: <strong className="text-[#142B38]">{formatSeconds(recordingSeconds)}</strong>
+                        {voiceFileSizeBytes > 0 && ` • (${Math.round(voiceFileSizeBytes / 1024)} KB)`}
+                      </span>
+                    </div>
+                  </div>
+
+                  {/* Start / Stop Button */}
+                  {!isRecordingVoice ? (
+                    <button
+                      type="button"
+                      onClick={startVoiceRecording}
+                      disabled={micState !== 'granted'}
+                      className="px-4 py-2 rounded-xl text-white font-bold text-xs shadow-xs hover:shadow-md transition-all cursor-pointer disabled:opacity-50"
+                      style={{ background: 'linear-gradient(135deg, #00A878, #00C98B)' }}
+                    >
+                      Start Voice Evidence
+                    </button>
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={stopVoiceRecording}
+                      className="px-4 py-2 rounded-xl bg-[#E84B5F] hover:bg-[#d63b4f] text-white font-bold text-xs shadow-xs cursor-pointer flex items-center gap-1.5 animate-pulse"
+                    >
+                      <Square className="w-3.5 h-3.5 fill-white" />
+                      Stop Recording
+                    </button>
+                  )}
+                </div>
+
+                {/* Audio Player and Submit Controls */}
+                {voiceAudioUrl && (
+                  <div className="pt-3 border-t border-[#DCE7EA] space-y-3">
+                    <div className="flex items-center justify-between text-xs">
+                      <span className="font-semibold text-[#142B38]">Recorded Audio Preview:</span>
+                      <button
+                        type="button"
+                        onClick={deleteVoiceRecording}
+                        className="text-[#E84B5F] hover:text-[#d63b4f] font-semibold text-xs flex items-center gap-1 cursor-pointer"
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                        Delete
+                      </button>
+                    </div>
+
+                    <audio controls src={voiceAudioUrl} className="w-full h-8 accent-[#00A878]" />
+
+                    {/* Submit Button */}
+                    <div className="flex flex-col sm:flex-row items-center justify-between gap-3 pt-1">
+                      <p className="text-[11px] text-[#65777F]">
+                        Transmits authenticated voice remarks to the Chief Vigilance Auditor.
+                      </p>
+                      <button
+                        type="button"
+                        onClick={submitVoiceEvidence}
+                        disabled={isSubmittingVoice || Boolean(voiceSubmittedSuccess)}
+                        className="px-5 py-2.5 rounded-xl bg-[#2878D8] hover:bg-[#1d5fb0] disabled:bg-emerald-600 text-white font-bold text-xs flex items-center gap-2 cursor-pointer shadow-xs"
+                      >
+                        {isSubmittingVoice ? (
+                          <>
+                            <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                            <span>Encrypting & Sending...</span>
+                          </>
+                        ) : voiceSubmittedSuccess ? (
+                          <>
+                            <CheckCircle2 className="w-3.5 h-3.5 text-white" />
+                            <span>Submitted to Auditor ✓</span>
+                          </>
+                        ) : (
+                          <>
+                            <Send className="w-3.5 h-3.5" />
+                            <span>SUBMIT TO CHIEF VIGILANCE & SECURITY AUDITOR</span>
+                          </>
+                        )}
+                      </button>
+                    </div>
+                  </div>
+                )}
+
+                {/* Success Verification Banner */}
+                {voiceSubmittedSuccess && (
+                  <div className="p-3 rounded-xl bg-[#EAF9F3] border border-[#00A878]/30 text-[#008A63] text-xs space-y-1">
+                    <div className="font-bold flex items-center gap-1.5">
+                      <CheckCircle2 className="w-4 h-4 text-[#00A878]" />
+                      VOICE EVIDENCE SUBMITTED
+                    </div>
+                    <div className="font-mono text-[11px] text-[#142B38]">
+                      Evidence ID: <strong>{voiceSubmittedSuccess.evidenceId}</strong> • Recipient: Chief Vigilance & Security Auditor • Status: ✓ PENDING REVIEW
+                    </div>
+                  </div>
+                )}
+
+                {/* Failure Banner with Retry */}
+                {voiceSubmissionFailed && (
+                  <div className="p-3 rounded-xl bg-[#FFF1F3] border border-[#E84B5F]/30 text-[#E84B5F] text-xs flex items-center justify-between gap-2">
+                    <span>VOICE EVIDENCE SUBMISSION FAILED</span>
                     <button
                       type="button"
                       onClick={submitVoiceEvidence}
-                      disabled={isSubmittingVoice || voiceSentSuccess}
-                      className="w-full sm:w-auto px-5 py-2.5 rounded-xl bg-[#6257E8] hover:bg-[#5246db] disabled:bg-emerald-600 text-white font-bold text-xs flex items-center justify-center gap-2 shadow-xs transition-all cursor-pointer disabled:cursor-default"
+                      className="px-3 py-1 rounded-lg bg-white border border-[#E84B5F]/40 text-[#E84B5F] font-bold text-xs cursor-pointer"
                     >
-                      {isSubmittingVoice ? (
-                        <>
-                          <RefreshCw className="w-3.5 h-3.5 animate-spin" />
-                          <span>Encrypting & Sending...</span>
-                        </>
-                      ) : voiceSentSuccess ? (
-                        <>
-                          <CheckCircle2 className="w-3.5 h-3.5 text-white" />
-                          <span>Delivered to Chief Auditor ✓</span>
-                        </>
-                      ) : (
-                        <>
-                          <Send className="w-3.5 h-3.5" />
-                          <span>Send to Chief Vigilance & Security Auditor</span>
-                        </>
-                      )}
+                      Retry
                     </button>
                   </div>
-                </div>
-              )}
-
-              {/* Confirmation Alert */}
-              {voiceSentSuccess && (
-                <div className="p-3 rounded-lg bg-emerald-50 border border-emerald-200 text-emerald-800 text-xs flex items-center gap-2 font-medium">
-                  <CheckCircle2 className="w-4 h-4 text-[#00A878] shrink-0" />
-                  <span>Voice evidence recording logged and routed to Chief Vigilance & Security Auditor review queue.</span>
-                </div>
-              )}
-            </div>
-          </div>
-        </div>
-
-        {/* ======================================================== */}
-        {/* RIGHT COLUMN: Proctor Security Status + Warning Counter  */}
-        {/* ======================================================== */}
-        <div className="lg:col-span-6 space-y-6">
-          {/* Card 1: Proctor Security Status & Telemetry */}
-          <div className="bg-white rounded-2xl border border-[#DCE6EA] p-5 shadow-xs space-y-4">
-            <div className="flex items-center justify-between pb-3 border-b border-[#F0F4F8]">
-              <div className="flex items-center gap-2">
-                <div className="p-1.5 rounded-lg bg-blue-50 text-[#2878D8]">
-                  <Activity className="w-4 h-4" />
-                </div>
-                <h3 className="text-sm font-bold text-[#0F172A] tracking-tight">
-                  Proctor Security Status & Telemetry
-                </h3>
-              </div>
-              <span className="px-2 py-0.5 rounded bg-blue-50 text-[#2878D8] font-bold text-[10px] border border-blue-200">
-                ACTIVE MONITOR
-              </span>
-            </div>
-
-            {/* Hardware & System Checklist */}
-            <div className="space-y-2.5">
-              {/* Item 1 */}
-              <div className="flex items-center justify-between p-2.5 rounded-xl bg-[#F8FAFC] border border-[#E2E8F0] text-xs">
-                <div className="flex items-center gap-2.5">
-                  <div className="w-5 h-5 rounded-full bg-emerald-100 flex items-center justify-center text-[#00A878]">
-                    <Check className="w-3 h-3" />
-                  </div>
-                  <div>
-                    <span className="font-semibold text-[#0F172A]">Camera Stream Telemetry</span>
-                    <p className="text-[10px] text-[#64748B]">Continuous visual biometric verification</p>
-                  </div>
-                </div>
-                <span className="font-mono text-[11px] font-bold text-[#00A878]">VERIFIED (1 FACE)</span>
-              </div>
-
-              {/* Item 2 */}
-              <div className="flex items-center justify-between p-2.5 rounded-xl bg-[#F8FAFC] border border-[#E2E8F0] text-xs">
-                <div className="flex items-center gap-2.5">
-                  <div className="w-5 h-5 rounded-full bg-emerald-100 flex items-center justify-center text-[#00A878]">
-                    <Check className="w-3 h-3" />
-                  </div>
-                  <div>
-                    <span className="font-semibold text-[#0F172A]">Microphone Acoustic Sensor</span>
-                    <p className="text-[10px] text-[#64748B]">Decibel level & acoustic anomaly detection</p>
-                  </div>
-                </div>
-                <span className="font-mono text-[11px] font-bold text-[#00A878]">ACTIVE ({audioLevel} dB)</span>
-              </div>
-
-              {/* Item 3 */}
-              <div className="flex items-center justify-between p-2.5 rounded-xl bg-[#F8FAFC] border border-[#E2E8F0] text-xs">
-                <div className="flex items-center gap-2.5">
-                  <div className="w-5 h-5 rounded-full bg-blue-100 flex items-center justify-center text-[#2878D8]">
-                    <Check className="w-3 h-3" />
-                  </div>
-                  <div>
-                    <span className="font-semibold text-[#0F172A]">Window Focus & Switching Guard</span>
-                    <p className="text-[10px] text-[#64748B]">Debounced &gt;2.5s focus loss threshold</p>
-                  </div>
-                </div>
-                <span className="font-mono text-[11px] font-bold text-[#2878D8]">ARMED</span>
-              </div>
-
-              {/* Item 4 */}
-              <div className="flex items-center justify-between p-2.5 rounded-xl bg-[#F8FAFC] border border-[#E2E8F0] text-xs">
-                <div className="flex items-center gap-2.5">
-                  <div className="w-5 h-5 rounded-full bg-indigo-100 flex items-center justify-center text-[#6257E8]">
-                    <Check className="w-3 h-3" />
-                  </div>
-                  <div>
-                    <span className="font-semibold text-[#0F172A]">Fullscreen Enclave Protocol</span>
-                    <p className="text-[10px] text-[#64748B]">Application sandboxing shield</p>
-                  </div>
-                </div>
-                <span className="font-mono text-[11px] font-bold text-[#6257E8]">ENFORCED</span>
-              </div>
-
-              {/* Item 5 */}
-              <div className="flex items-center justify-between p-2.5 rounded-xl bg-[#F8FAFC] border border-[#E2E8F0] text-xs">
-                <div className="flex items-center gap-2.5">
-                  <div className="w-5 h-5 rounded-full bg-indigo-100 flex items-center justify-center text-[#6257E8]">
-                    <Check className="w-3 h-3" />
-                  </div>
-                  <div>
-                    <span className="font-semibold text-[#0F172A]">Screenshot & Clipboard Shield</span>
-                    <p className="text-[10px] text-[#64748B]">PrintScreen & Ctrl+C interception</p>
-                  </div>
-                </div>
-                <span className="font-mono text-[11px] font-bold text-[#6257E8]">BLOCKED</span>
-              </div>
-            </div>
-
-            {/* Security Score Gauge */}
-            <div className="p-4 rounded-xl bg-gradient-to-r from-emerald-50 via-teal-50 to-cyan-50 border border-emerald-200 flex items-center justify-between">
-              <div>
-                <span className="text-[10px] font-bold uppercase tracking-wider text-[#00A878]">
-                  ZeroLeak Security Index
-                </span>
-                <h4 className="text-xl font-extrabold text-[#0F172A] tracking-tight">
-                  98% Optimal Enclave Integrity
-                </h4>
-                <p className="text-xs text-[#475569] mt-0.5">
-                  All biometric & environmental telemetry sensors within secure parameters.
-                </p>
-              </div>
-              <div className="w-14 h-14 rounded-2xl bg-white border border-emerald-300 flex flex-col items-center justify-center shadow-xs shrink-0">
-                <span className="text-base font-extrabold font-mono text-[#00A878]">98%</span>
-                <span className="text-[8px] font-bold uppercase text-[#64748B]">SECURE</span>
+                )}
               </div>
             </div>
           </div>
 
-          {/* Card 2: Warning Counter & Violation Threshold Card */}
-          <div className="bg-white rounded-2xl border border-[#DCE6EA] p-5 shadow-xs space-y-4">
-            <div className="flex items-center justify-between pb-3 border-b border-[#F0F4F8]">
-              <div className="flex items-center gap-2">
-                <div className="p-1.5 rounded-lg bg-amber-50 text-[#F0A11A]">
-                  <AlertTriangle className="w-4 h-4" />
+          {/* ======================================================== */}
+          {/* RIGHT COLUMN: Proctor Security Status + Warnings Card    */}
+          {/* ======================================================== */}
+          <div className="lg:col-span-6 space-y-6">
+            {/* PART 14: PROCTOR SECURITY STATUS (WHITE CARD) */}
+            <div className="bg-white rounded-2xl border border-[#DCE7EA] p-6 shadow-[0_6px_24px_rgba(30,70,80,0.05)] space-y-4">
+              <div className="flex items-center justify-between pb-3 border-b border-[#F0F4F8]">
+                <div className="flex items-center gap-2.5">
+                  <div className="p-1.5 rounded-lg bg-[#EAF9F3] text-[#00A878]">
+                    <ShieldCheck className="w-4 h-4" />
+                  </div>
+                  <div>
+                    <h3 className="text-sm font-bold text-[#142B38] tracking-tight">
+                      PROCTOR SECURITY STATUS
+                    </h3>
+                    <p className="text-xs text-[#65777F]">
+                      Real-time cryptographic and hardware monitoring ledger.
+                    </p>
+                  </div>
                 </div>
-                <div>
-                  <h3 className="text-sm font-bold text-[#0F172A] tracking-tight">
-                    Violation Warning Threshold
-                  </h3>
-                  <p className="text-[11px] text-[#64748B]">
-                    Strict maximum 3 warnings. Third violation flags session for auditor review.
-                  </p>
-                </div>
-              </div>
-              <span className={`px-2.5 py-0.5 rounded font-mono text-xs font-bold border ${
-                warningCount === 0
-                  ? 'bg-emerald-50 text-[#00A878] border-emerald-200'
-                  : warningCount === 1
-                  ? 'bg-amber-50 text-[#F0A11A] border-amber-200'
-                  : warningCount === 2
-                  ? 'bg-orange-50 text-orange-600 border-orange-200'
-                  : 'bg-rose-50 text-[#E84B5F] border-rose-200'
-              }`}>
-                {warningCount} / 3 VIOLATIONS
-              </span>
-            </div>
 
-            {/* Visual 3 Indicator Circles */}
-            <div className="p-4 rounded-xl bg-[#F8FAFC] border border-[#E2E8F0] space-y-3">
-              <div className="flex items-center justify-between">
-                <span className="text-xs font-semibold text-[#475569]">Violation Level Progress:</span>
-                <span className="text-xs font-mono text-[#64748B]">
-                  {3 - warningCount} warnings remaining
+                <span className="px-2.5 py-0.5 rounded bg-[#EAF9F3] text-[#008A63] text-xs font-bold border border-[#00A878]/30">
+                  SYSTEM ACTIVE
                 </span>
               </div>
 
-              {/* 3 Step Indicator Dots */}
-              <div className="grid grid-cols-3 gap-3">
-                {/* Dot 1 */}
-                <div className={`p-3 rounded-xl border flex flex-col items-center text-center space-y-1 transition-all ${
-                  warningCount >= 1
-                    ? 'bg-amber-50 border-[#F0A11A] text-amber-900 shadow-xs'
-                    : 'bg-white border-[#DCE6EA] text-[#64748B]'
-                }`}>
-                  <div className={`w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold ${
-                    warningCount >= 1 ? 'bg-[#F0A11A] text-white' : 'bg-[#E2E8F0] text-[#64748B]'
-                  }`}>
-                    1
-                  </div>
-                  <span className="text-xs font-bold">Warning 1</span>
-                  <span className="text-[10px]">First Notice (Amber)</span>
+              {/* Rows */}
+              <div className="space-y-2.5 text-xs">
+                <div className="flex items-center justify-between p-3 rounded-xl bg-[#F6FAF9] border border-[#DCE7EA]">
+                  <span className="font-semibold text-[#142B38]">Camera Stream</span>
+                  <span className={`font-mono font-bold ${cameraState === 'granted' ? 'text-[#008A63]' : 'text-[#65777F]'}`}>
+                    {cameraState === 'granted' ? '● Active' : '○ Standby'}
+                  </span>
                 </div>
 
-                {/* Dot 2 */}
-                <div className={`p-3 rounded-xl border flex flex-col items-center text-center space-y-1 transition-all ${
-                  warningCount >= 2
-                    ? 'bg-orange-50 border-orange-500 text-orange-900 shadow-xs'
-                    : 'bg-white border-[#DCE6EA] text-[#64748B]'
-                }`}>
-                  <div className={`w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold ${
-                    warningCount >= 2 ? 'bg-orange-500 text-white' : 'bg-[#E2E8F0] text-[#64748B]'
-                  }`}>
-                    2
-                  </div>
-                  <span className="text-xs font-bold">Warning 2</span>
-                  <span className="text-[10px]">Final Warning (Orange)</span>
+                <div className="flex items-center justify-between p-3 rounded-xl bg-[#F6FAF9] border border-[#DCE7EA]">
+                  <span className="font-semibold text-[#142B38]">Microphone Sensor</span>
+                  <span className={`font-mono font-bold ${micState === 'granted' ? 'text-[#008A63]' : 'text-[#65777F]'}`}>
+                    {micState === 'granted' ? '● Active' : '○ Standby'}
+                  </span>
                 </div>
 
-                {/* Dot 3 */}
-                <div className={`p-3 rounded-xl border flex flex-col items-center text-center space-y-1 transition-all ${
-                  warningCount >= 3
-                    ? 'bg-rose-50 border-[#E84B5F] text-rose-900 shadow-xs'
-                    : 'bg-white border-[#DCE6EA] text-[#64748B]'
-                }`}>
-                  <div className={`w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold ${
-                    warningCount >= 3 ? 'bg-[#E84B5F] text-white' : 'bg-[#E2E8F0] text-[#64748B]'
-                  }`}>
-                    3
-                  </div>
-                  <span className="text-xs font-bold">Warning 3</span>
-                  <span className="text-[10px]">Auditor Review (Red)</span>
+                <div className="flex items-center justify-between p-3 rounded-xl bg-[#F6FAF9] border border-[#DCE7EA]">
+                  <span className="font-semibold text-[#142B38]">Focus Monitor</span>
+                  <span className="font-mono font-bold text-[#2878D8]">
+                    ● Monitoring (Debounced &gt;2.5s)
+                  </span>
+                </div>
+
+                <div className="flex items-center justify-between p-3 rounded-xl bg-[#F6FAF9] border border-[#DCE7EA]">
+                  <span className="font-semibold text-[#142B38]">Fullscreen Protection</span>
+                  <span className="font-mono font-bold text-[#6257E8]">
+                    ● Active
+                  </span>
+                </div>
+
+                <div className="flex items-center justify-between p-3 rounded-xl bg-[#F6FAF9] border border-[#DCE7EA]">
+                  <span className="font-semibold text-[#142B38]">Clipboard Protection</span>
+                  <span className="font-mono font-bold text-[#00B8D9]">
+                    ● Active (Intercepted)
+                  </span>
+                </div>
+
+                <div className="flex items-center justify-between p-3 rounded-xl bg-[#F6FAF9] border border-[#DCE7EA]">
+                  <span className="font-semibold text-[#142B38]">Warning Count</span>
+                  <span className="font-mono font-bold text-[#142B38]">
+                    {warningCount} / 3
+                  </span>
                 </div>
               </div>
+            </div>
 
-              {/* Warning Policy Statement */}
-              <div className="text-[11px] text-[#64748B] pt-2 border-t border-[#E2E8F0] space-y-1">
-                <p>
-                  <strong>Enforcement Policy:</strong> If a third warning is recorded, your session is immediately locked and flagged for forensic review by the Chief Vigilance & Security Auditor. The warning counter is persistent and never exceeds 3.
+            {/* PART 15 & 16: PROCTOR WARNINGS CARD (WHITE BACKGROUND) */}
+            <div className="bg-white rounded-2xl border border-[#DCE7EA] p-6 shadow-[0_6px_24px_rgba(30,70,80,0.05)] space-y-4">
+              <div className="flex items-center justify-between pb-3 border-b border-[#F0F4F8]">
+                <div className="flex items-center gap-2.5">
+                  <div className="p-1.5 rounded-lg bg-[#FFF7E8] text-[#F0A11A]">
+                    <AlertTriangle className="w-4 h-4" />
+                  </div>
+                  <div>
+                    <h3 className="text-sm font-bold text-[#142B38] tracking-tight">
+                      PROCTOR WARNINGS
+                    </h3>
+                    <p className="text-xs text-[#65777F]">
+                      Threshold capped at 3 warnings. Third violation flags session for auditor review.
+                    </p>
+                  </div>
+                </div>
+
+                <span className={`px-3 py-1 rounded-full text-xs font-mono font-black border ${
+                  warningCount === 0
+                    ? 'bg-[#EAF9F3] text-[#008A63] border-[#00A878]/30'
+                    : warningCount === 1
+                    ? 'bg-[#FFF7E8] text-[#F0A11A] border-[#F0A11A]/30'
+                    : warningCount === 2
+                    ? 'bg-orange-50 text-orange-600 border-orange-200'
+                    : 'bg-[#FFF1F3] text-[#E84B5F] border-[#E84B5F]/30'
+                }`}>
+                  {warningCount} / 3
+                </span>
+              </div>
+
+              {/* Visual 3 Indicator Circles */}
+              <div className="p-4 rounded-xl bg-[#F6FAF9] border border-[#DCE7EA] space-y-3">
+                <div className="flex items-center justify-between text-xs">
+                  <span className="font-semibold text-[#142B38]">Violation Progression:</span>
+                  <span className="font-mono text-[#65777F]">{3 - warningCount} warnings remaining</span>
+                </div>
+
+                <div className="grid grid-cols-3 gap-3">
+                  {/* Circle 1 */}
+                  <div className={`p-3 rounded-xl border flex flex-col items-center text-center space-y-1 ${
+                    warningCount >= 1
+                      ? 'bg-[#FFF7E8] border-[#F0A11A] text-amber-900 shadow-2xs'
+                      : 'bg-white border-[#DCE7EA] text-[#65777F]'
+                  }`}>
+                    <div className={`w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold ${
+                      warningCount >= 1 ? 'bg-[#F0A11A] text-white' : 'bg-[#E1E9EB] text-[#65777F]'
+                    }`}>
+                      1
+                    </div>
+                    <span className="text-xs font-bold">Warning 1</span>
+                    <span className="text-[10px]">Amber Alert</span>
+                  </div>
+
+                  {/* Circle 2 */}
+                  <div className={`p-3 rounded-xl border flex flex-col items-center text-center space-y-1 ${
+                    warningCount >= 2
+                      ? 'bg-orange-50 border-orange-500 text-orange-900 shadow-2xs'
+                      : 'bg-white border-[#DCE7EA] text-[#65777F]'
+                  }`}>
+                    <div className={`w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold ${
+                      warningCount >= 2 ? 'bg-orange-500 text-white' : 'bg-[#E1E9EB] text-[#65777F]'
+                    }`}>
+                      2
+                    </div>
+                    <span className="text-xs font-bold">Warning 2</span>
+                    <span className="text-[10px]">Orange Notice</span>
+                  </div>
+
+                  {/* Circle 3 */}
+                  <div className={`p-3 rounded-xl border flex flex-col items-center text-center space-y-1 ${
+                    warningCount >= 3
+                      ? 'bg-[#FFF1F3] border-[#E84B5F] text-rose-900 shadow-2xs'
+                      : 'bg-white border-[#DCE7EA] text-[#65777F]'
+                  }`}>
+                    <div className={`w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold ${
+                      warningCount >= 3 ? 'bg-[#E84B5F] text-white' : 'bg-[#E1E9EB] text-[#65777F]'
+                    }`}>
+                      3
+                    </div>
+                    <span className="text-xs font-bold">Warning 3</span>
+                    <span className="text-[10px]">Red Escalation</span>
+                  </div>
+                </div>
+
+                <p className="text-[11px] text-[#65777F] pt-2 border-t border-[#DCE7EA] leading-relaxed">
+                  <strong>Policy Enforcement:</strong> At 3 warnings, access is flagged for review by the Chief Vigilance & Security Auditor. The warning counter is strictly capped and will never display 4/3.
                 </p>
               </div>
             </div>
           </div>
         </div>
-      </div>
 
-      {/* ======================================================== */}
-      {/* CONFIDENTIAL QUESTION TRANSLATION WORKSPACE WRAPPER      */}
-      {/* ======================================================== */}
-      <div className="bg-white rounded-2xl border border-[#DCE6EA] shadow-xs overflow-hidden">
-        {/* Top Authorized Banner */}
-        <div className="px-5 py-3 bg-[#EEF4F6] border-b border-[#DCE6EA] flex flex-wrap items-center justify-between gap-3 text-xs">
-          <div className="flex items-center gap-2">
-            <span className="w-2.5 h-2.5 rounded-full bg-[#00A878]" />
-            <span className="font-bold text-[#0F172A] uppercase tracking-wider">
-              AUTHORIZED TRANSLATION WORKBENCH • PROTECTED UNDER ENCLAVE PROTOCOL
+        {/* ======================================================== */}
+        {/* PART 26: ASSIGNED QUESTIONS WORKBENCH (WHITE CONTAINER)  */}
+        {/* ======================================================== */}
+        <div className="bg-white rounded-2xl border border-[#DCE7EA] shadow-[0_6px_24px_rgba(30,70,80,0.05)] overflow-hidden">
+          <div className="px-6 py-4 bg-[#F6FAF9] border-b border-[#DCE7EA] flex flex-wrap items-center justify-between gap-3 text-xs">
+            <div className="flex items-center gap-2">
+              <span className="w-2.5 h-2.5 rounded-full bg-[#00A878]" />
+              <span className="font-bold text-[#142B38] uppercase tracking-wider">
+                ASSIGNED QUESTIONS WORKBENCH
+              </span>
+            </div>
+            <span className="text-xs font-mono text-[#008A63] font-bold">
+              PROTECTED UNDER ENCLAVE PROTOCOL
             </span>
           </div>
-          <div className="flex items-center gap-2 text-[#64748B] font-mono text-[11px]">
-            <span>OFFICIAL ID: {currentUser?.id?.substring(0, 8) || 'AUTH-OFFICIAL'}</span>
-            <span>•</span>
-            <span className="text-[#00A878] font-bold">LEAK SHIELD ACTIVE</span>
+
+          <div className="p-6">
+            {enclaveStarted ? (
+              <div>{children}</div>
+            ) : (
+              <div className="py-12 text-center space-y-3">
+                <div className="w-12 h-12 rounded-2xl bg-[#EEF6FF] border border-[#2878D8]/20 text-[#2878D8] flex items-center justify-center mx-auto">
+                  <Lock className="w-6 h-6" />
+                </div>
+                <h4 className="text-base font-bold text-[#142B38]">
+                  Assigned Questions Locked
+                </h4>
+                <p className="text-xs text-[#65777F] max-w-md mx-auto">
+                  To protect confidential question paper materials, questions are only decrypted after camera and microphone sensors are verified.
+                </p>
+                <button
+                  type="button"
+                  onClick={handleRequestHardwarePermissions}
+                  className="px-5 py-2.5 rounded-xl text-white font-bold text-xs shadow-xs hover:shadow-md cursor-pointer"
+                  style={{ background: 'linear-gradient(135deg, #00A878, #00C98B)' }}
+                >
+                  Complete Readiness Check to Unlock
+                </button>
+              </div>
+            )}
           </div>
         </div>
 
-        {/* Underlying Children Workspace */}
-        <div className="p-4 sm:p-6 select-none relative">
-          {children}
-        </div>
-      </div>
+        {/* ======================================================== */}
+        {/* PART 25: LIVE SECURITY ACTIVITY (WHITE CARD)             */}
+        {/* ======================================================== */}
+        <div className="bg-white rounded-2xl border border-[#DCE7EA] p-6 shadow-[0_6px_24px_rgba(30,70,80,0.05)] space-y-4">
+          <div className="flex items-center justify-between pb-3 border-b border-[#F0F4F8]">
+            <div className="flex items-center gap-2.5">
+              <div className="p-1.5 rounded-lg bg-[#EEF6FF] text-[#2878D8]">
+                <Activity className="w-4 h-4" />
+              </div>
+              <div>
+                <h3 className="text-sm font-bold text-[#142B38] tracking-tight">
+                  LIVE SECURITY ACTIVITY
+                </h3>
+                <p className="text-xs text-[#65777F]">
+                  Real-time cryptographic audit log of sensor and focus events.
+                </p>
+              </div>
+            </div>
 
-      {/* ======================================================== */}
-      {/* LIVE SECURITY ACTIVITY TIMELINE                          */}
-      {/* ======================================================== */}
-      <div className="bg-white rounded-2xl border border-[#DCE6EA] p-5 shadow-xs space-y-4">
-        <div className="flex items-center justify-between pb-3 border-b border-[#F0F4F8]">
-          <div className="flex items-center gap-2">
-            <Activity className="w-4 h-4 text-[#2878D8]" />
-            <h3 className="text-sm font-bold text-[#0F172A] tracking-tight">
-              Live Security Activity Timeline
-            </h3>
+            <span className="text-xs font-mono text-[#65777F]">
+              {timelineEvents.length} events logged
+            </span>
           </div>
-          <span className="text-xs text-[#64748B] font-mono">
-            {timelineEvents.length} events logged in session
-          </span>
-        </div>
 
-        <div className="space-y-2 max-h-56 overflow-y-auto pr-1">
-          {timelineEvents.map((ev) => (
-            <div
-              key={ev.id}
-              className="p-2.5 rounded-xl bg-[#F8FAFC] border border-[#E2E8F0] flex items-center justify-between gap-3 text-xs"
-            >
-              <div className="flex items-center gap-2.5 truncate">
-                <span className={`px-2 py-0.5 rounded text-[10px] font-bold uppercase shrink-0 ${
-                  ev.severity === 'CRITICAL'
-                    ? 'bg-rose-100 text-rose-800 border border-rose-300'
-                    : ev.severity === 'HIGH'
-                    ? 'bg-orange-100 text-orange-800 border border-orange-300'
-                    : ev.severity === 'MEDIUM'
-                    ? 'bg-amber-100 text-amber-800 border border-amber-300'
-                    : 'bg-emerald-100 text-emerald-800 border border-emerald-300'
-                }`}>
-                  {ev.event_type}
-                </span>
-                <span className="text-[#0F172A] font-medium truncate">
-                  {ev.description}
+          <div className="space-y-2 max-h-56 overflow-y-auto pr-1">
+            {timelineEvents.map((ev) => (
+              <div
+                key={ev.id}
+                className="p-3 rounded-xl bg-[#F6FAF9] border border-[#DCE7EA] flex items-center justify-between gap-3 text-xs"
+              >
+                <div className="flex items-center gap-2.5 truncate">
+                  <span className={`px-2 py-0.5 rounded text-[10px] font-bold uppercase shrink-0 ${
+                    ev.severity === 'CRITICAL'
+                      ? 'bg-[#FFF1F3] text-[#E84B5F] border border-[#E84B5F]/30'
+                      : ev.severity === 'HIGH'
+                      ? 'bg-orange-50 text-orange-700 border border-orange-200'
+                      : ev.severity === 'MEDIUM'
+                      ? 'bg-[#FFF7E8] text-[#F0A11A] border border-[#F0A11A]/30'
+                      : 'bg-[#EAF9F3] text-[#008A63] border border-[#00A878]/30'
+                  }`}>
+                    {ev.event_type}
+                  </span>
+                  <span className="text-[#142B38] font-medium truncate">
+                    {ev.description}
+                  </span>
+                </div>
+                <span className="font-mono text-[11px] text-[#65777F] shrink-0">
+                  {ev.time}
                 </span>
               </div>
-              <span className="font-mono text-[11px] text-[#64748B] shrink-0">
-                {ev.time}
-              </span>
-            </div>
-          ))}
+            ))}
+          </div>
         </div>
       </div>
 
       {/* ======================================================== */}
-      {/* MODAL 1: WARNING NOTIFICATION MODAL (1, 2, 3)            */}
+      {/* PART 18, 19, 20: WHITE PROCTOR WARNING MODALS            */}
       {/* ======================================================== */}
-      {warningModalOpen && activeWarningData && (
-        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-center justify-center p-4">
-          <div className="bg-white rounded-2xl border-2 border-[#DCE6EA] w-full max-w-lg p-6 shadow-2xl space-y-4 animate-in fade-in zoom-in-95">
+      {activeWarningModal && (
+        <div className="fixed inset-0 z-50 bg-black/40 backdrop-blur-xs flex items-center justify-center p-4">
+          <div className={`bg-white rounded-2xl border-t-4 w-full max-w-lg p-6 shadow-2xl space-y-4 animate-in fade-in zoom-in-95 ${
+            activeWarningModal.level === 3
+              ? 'border-t-[#E84B5F]'
+              : activeWarningModal.level === 2
+              ? 'border-t-orange-500'
+              : 'border-t-[#F0A11A]'
+          }`}>
             <div className="flex items-center gap-3">
               <div className={`p-3 rounded-2xl ${
-                activeWarningData.number === 3
-                  ? 'bg-rose-100 text-[#E84B5F]'
-                  : activeWarningData.number === 2
-                  ? 'bg-orange-100 text-orange-600'
-                  : 'bg-amber-100 text-[#F0A11A]'
+                activeWarningModal.level === 3
+                  ? 'bg-[#FFF1F3] text-[#E84B5F]'
+                  : activeWarningModal.level === 2
+                  ? 'bg-orange-50 text-orange-600'
+                  : 'bg-[#FFF7E8] text-[#F0A11A]'
               }`}>
                 <AlertTriangle className="w-7 h-7" />
               </div>
               <div>
-                <span className={`text-[10px] font-bold uppercase tracking-wider ${
-                  activeWarningData.number === 3
-                    ? 'text-[#E84B5F]'
-                    : activeWarningData.number === 2
-                    ? 'text-orange-600'
-                    : 'text-[#F0A11A]'
-                }`}>
-                  Proctor Violation Detected
+                <span className="text-[10px] font-bold uppercase tracking-wider text-[#65777F]">
+                  Proctor Warning #{activeWarningModal.level} of 3
                 </span>
-                <h3 className="text-lg font-bold text-[#0F172A]">
-                  {activeWarningData.title}
+                <h3 className="text-lg font-bold text-[#142B38]">
+                  {activeWarningModal.title}
                 </h3>
               </div>
             </div>
 
-            <div className="p-3.5 rounded-xl bg-[#F8FAFC] border border-[#E2E8F0] space-y-1 text-xs">
-              <span className="text-[#64748B] font-semibold">Violation Reason:</span>
-              <p className="text-[#0F172A] font-medium">{activeWarningData.reason}</p>
+            <div className="p-3.5 rounded-xl bg-[#F6FAF9] border border-[#DCE7EA] text-xs space-y-1">
+              <span className="text-[#65777F] font-semibold">Incident Details:</span>
+              <p className="text-[#142B38] font-medium">{activeWarningModal.reason}</p>
             </div>
 
-            <p className="text-xs text-[#475569]">
-              {activeWarningData.number === 3
-                ? 'Your access has been suspended and flagged for review. A report with audio and photographic verification has been transmitted to the Chief Vigilance & Security Auditor.'
-                : activeWarningData.number === 2
-                ? 'You have reached 2 of 3 allowed warnings. A subsequent infraction will trigger an immediate emergency lockdown of this workspace.'
-                : 'Please maintain continuous focus on this window and keep your face visible in the camera frame.'}
+            <p className="text-xs text-[#65777F] leading-relaxed">
+              {activeWarningModal.level === 3
+                ? 'Maximum warning threshold reached. This examination session has been flagged for forensic review by the Chief Vigilance & Security Auditor.'
+                : activeWarningModal.level === 2
+                ? 'Repeated focus changes detected. One additional violation will flag the session for security review.'
+                : 'Please maintain continuous focus on this window and ensure your camera remains unobstructed.'}
             </p>
 
-            <div className="pt-2 flex justify-end">
-              <button
-                type="button"
-                onClick={() => setWarningModalOpen(false)}
-                className={`px-5 py-2.5 rounded-xl text-white font-bold text-xs shadow-xs cursor-pointer ${
-                  activeWarningData.number === 3
-                    ? 'bg-[#E84B5F] hover:bg-[#d63b4f]'
-                    : activeWarningData.number === 2
-                    ? 'bg-orange-600 hover:bg-orange-500'
-                    : 'bg-[#F0A11A] hover:bg-[#d97706]'
-                }`}
-              >
-                {activeWarningData.number === 3 ? 'Acknowledge Lockdown' : 'I Acknowledge & Return to Workbench'}
-              </button>
+            <div className="pt-2 flex justify-end gap-2">
+              {activeWarningModal.level === 3 ? (
+                <>
+                  <button
+                    type="button"
+                    onClick={() => setActiveWarningModal(null)}
+                    className="px-4 py-2 rounded-xl bg-[#E84B5F] hover:bg-[#d63b4f] text-white font-bold text-xs cursor-pointer"
+                  >
+                    Continue Under Review
+                  </button>
+                </>
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => setActiveWarningModal(null)}
+                  className="px-5 py-2.5 rounded-xl text-white font-bold text-xs cursor-pointer shadow-xs"
+                  style={{
+                    background: activeWarningModal.level === 2 ? '#EA580C' : '#F0A11A',
+                  }}
+                >
+                  I Understand
+                </button>
+              )}
             </div>
           </div>
         </div>
       )}
 
       {/* ======================================================== */}
-      {/* MODAL 2: PROCTORING POLICY & PRIVACY MODAL               */}
+      {/* PROCTORING POLICY MODAL (LIGHT)                          */}
       {/* ======================================================== */}
       {policyModalOpen && (
-        <div className="fixed inset-0 z-50 bg-black/50 backdrop-blur-xs flex items-center justify-center p-4">
-          <div className="bg-white rounded-2xl border border-[#DCE6EA] w-full max-w-xl max-h-[85vh] flex flex-col shadow-2xl overflow-hidden">
-            {/* Modal Header */}
-            <div className="px-6 py-4 border-b border-[#DCE6EA] flex items-center justify-between">
+        <div className="fixed inset-0 z-50 bg-black/40 backdrop-blur-xs flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl border border-[#DCE7EA] w-full max-w-xl max-h-[85vh] flex flex-col shadow-2xl overflow-hidden">
+            <div className="px-6 py-4 border-b border-[#DCE7EA] flex items-center justify-between">
               <div className="flex items-center gap-2.5">
                 <ShieldCheck className="w-5 h-5 text-[#00A878]" />
-                <h3 className="text-base font-bold text-[#0F172A]">
+                <h3 className="text-base font-bold text-[#142B38]">
                   ZeroLeak Examination Proctoring Policy
                 </h3>
               </div>
               <button
                 type="button"
                 onClick={() => setPolicyModalOpen(false)}
-                className="p-1 rounded-lg text-[#64748B] hover:text-[#0F172A] hover:bg-[#F0F4F8] cursor-pointer"
+                className="p-1 rounded-lg text-[#65777F] hover:text-[#142B38] hover:bg-[#F6FAF9] cursor-pointer"
               >
                 <XCircle className="w-5 h-5" />
               </button>
             </div>
 
-            {/* Modal Body */}
-            <div className="p-6 overflow-y-auto space-y-4 text-xs text-[#475569] leading-relaxed">
-              <div className="p-3.5 rounded-xl bg-emerald-50 border border-emerald-200 text-emerald-900">
+            <div className="p-6 overflow-y-auto space-y-4 text-xs text-[#65777F] leading-relaxed">
+              <div className="p-3.5 rounded-xl bg-[#EAF9F3] border border-[#00A878]/30 text-[#008A63]">
                 <strong>Zero Leak Commitment:</strong> This examination environment enforces rigorous visual and acoustic tracking under national examination standards to safeguard question paper secrecy.
               </div>
 
               <div>
-                <h4 className="font-bold text-[#0F172A] text-sm mb-1">1. Visual Surveillance & Face Verification</h4>
+                <h4 className="font-bold text-[#142B38] text-sm mb-1">1. Visual Biometric Surveillance</h4>
                 <p>
-                  Your webcam stream is analyzed strictly within your browser for face detection and presence verification. Only suspicious events (such as shoulder surfing or extended absence) generate encrypted evidentiary snapshots for the Chief Vigilance Auditor.
+                  Webcam stream is analyzed in-browser for single authorized presence. In the event of shoulder surfing or extended absence, an evidentiary snapshot is securely cataloged.
                 </p>
               </div>
 
               <div>
-                <h4 className="font-bold text-[#0F172A] text-sm mb-1">2. Acoustic Telemetry & Voice Evidence</h4>
+                <h4 className="font-bold text-[#142B38] text-sm mb-1">2. Acoustic Telemetry & Voice Evidence</h4>
                 <p>
-                  Microphone input is monitored for excessive noise and room communication. Officials may also voluntarily or per protocol record voice evidence for audit escalation.
+                  Microphone input tracks ambient noise levels. Officials may record voice evidence notes directly for the Chief Vigilance Auditor.
                 </p>
               </div>
 
               <div>
-                <h4 className="font-bold text-[#0F172A] text-sm mb-1">3. Tab Switching & Window Focus</h4>
+                <h4 className="font-bold text-[#142B38] text-sm mb-1">3. Tab Switching & Focus Shield</h4>
                 <p>
-                  Navigating away from the confidential window for longer than 2.5 seconds triggers an automatic warning. Three warnings result in session termination and auditor escalation.
-                </p>
-              </div>
-
-              <div>
-                <h4 className="font-bold text-[#0F172A] text-sm mb-1">4. Anti-Capture Shields</h4>
-                <p>
-                  Screenshots, clipboard copy-pasting, developer inspection consoles, and right-click context menus are intercepted and forbidden under zero leak regulations.
+                  Leaving the enclave window for &gt;2.5 seconds triggers an automatic warning. A strict maximum of 3 warnings is enforced.
                 </p>
               </div>
             </div>
 
-            {/* Modal Footer */}
-            <div className="px-6 py-3.5 bg-[#F8FAFC] border-t border-[#DCE6EA] flex justify-end">
+            <div className="px-6 py-3.5 bg-[#F6FAF9] border-t border-[#DCE7EA] flex justify-end">
               <button
                 type="button"
                 onClick={() => setPolicyModalOpen(false)}
-                className="px-4 py-2 rounded-xl bg-[#00A878] hover:bg-[#008f66] text-white font-bold text-xs cursor-pointer"
+                className="px-4 py-2 rounded-xl text-white font-bold text-xs cursor-pointer"
+                style={{ background: 'linear-gradient(135deg, #00A878, #00C98B)' }}
               >
                 Close Policy
               </button>
@@ -1744,44 +1929,41 @@ export const AuthorityProctorEnclave: React.FC<AuthorityProctorEnclaveProps> = (
       )}
 
       {/* ======================================================== */}
-      {/* SECURITY SHIELD 1: FACE ABSENT LIGHT MASK                */}
+      {/* LIGHT ANOMALY MASKS (NO BLACK/DARK MASKS)                */}
       {/* ======================================================== */}
       {isFaceAbsent && (
-        <div className="fixed inset-0 z-50 bg-[#F6F9FA]/95 backdrop-blur-md flex flex-col items-center justify-center p-8 text-center text-[#0F172A] animate-fade-in select-none">
-          <div className="p-4 rounded-3xl bg-amber-50 border-2 border-[#F0A11A] text-[#F0A11A] mb-4 shadow-xl">
+        <div className="fixed inset-0 z-50 bg-white/95 backdrop-blur-md flex flex-col items-center justify-center p-8 text-center text-[#142B38] animate-fade-in select-none">
+          <div className="p-4 rounded-3xl bg-[#FFF7E8] border-2 border-[#F0A11A] text-[#F0A11A] mb-4 shadow-xl">
             <EyeOff className="w-12 h-12" />
           </div>
-          <h2 className="text-2xl font-bold text-[#0F172A] tracking-tight">
+          <h2 className="text-2xl font-bold text-[#142B38] tracking-tight">
             Confidential Examination Material Masked
           </h2>
-          <p className="text-amber-700 text-sm font-semibold mt-1">
+          <p className="text-amber-800 text-sm font-semibold mt-1">
             Authorized Official Absent From Camera View
           </p>
-          <p className="text-[#64748B] text-xs max-w-md mt-2">
+          <p className="text-[#65777F] text-xs max-w-md mt-2">
             To prevent question paper leaks to unauthorized persons or passers-by, all confidential examination questions are temporarily masked. Return to your camera to resume work.
           </p>
-          <div className="mt-5 inline-flex items-center gap-2 px-4 py-2 rounded-full bg-white border border-[#DCE6EA] text-xs font-mono text-[#0F172A] shadow-xs">
+          <div className="mt-5 inline-flex items-center gap-2 px-4 py-2 rounded-full bg-[#F6FAF9] border border-[#DCE7EA] text-xs font-mono text-[#142B38] shadow-xs">
             <span className="w-2 h-2 rounded-full bg-[#F0A11A] animate-ping" />
             Monitoring Camera for Official's Return...
           </div>
         </div>
       )}
 
-      {/* ======================================================== */}
-      {/* SECURITY SHIELD 2: SHOULDER SURFING LIGHT MASK           */}
-      {/* ======================================================== */}
       {isShoulderSurfing && (
-        <div className="fixed inset-0 z-50 bg-rose-50/95 backdrop-blur-md flex flex-col items-center justify-center p-8 text-center text-[#0F172A] animate-fade-in select-none">
+        <div className="fixed inset-0 z-50 bg-[#FFF1F3]/95 backdrop-blur-md flex flex-col items-center justify-center p-8 text-center text-[#142B38] animate-fade-in select-none">
           <div className="p-4 rounded-3xl bg-rose-100 border-2 border-[#E84B5F] text-[#E84B5F] mb-4 shadow-xl animate-bounce">
             <Users className="w-14 h-14" />
           </div>
-          <h2 className="text-2xl font-extrabold text-[#0F172A] tracking-tight">
+          <h2 className="text-2xl font-extrabold text-[#142B38] tracking-tight">
             LEAK PREVENTION ALERT: SECONDARY FACE DETECTED
           </h2>
           <p className="text-rose-700 text-sm font-bold mt-1">
             Shoulder Surfing / Unauthorized Person in Camera View
           </p>
-          <p className="text-[#475569] text-xs max-w-lg mt-2 bg-white p-3.5 rounded-xl border border-rose-200">
+          <p className="text-[#65777F] text-xs max-w-lg mt-2 bg-white p-3.5 rounded-xl border border-rose-200">
             A secondary person was detected looking at your screen. The question paper has been immediately masked and watermarked. A high-resolution audit snapshot has been logged to the Chief Vigilance Auditor.
           </p>
           <div className="mt-5 inline-flex items-center gap-2 px-4 py-2 rounded-full bg-white border border-rose-300 text-xs font-mono text-rose-700 shadow-xs">
@@ -1791,41 +1973,35 @@ export const AuthorityProctorEnclave: React.FC<AuthorityProctorEnclaveProps> = (
         </div>
       )}
 
-      {/* ======================================================== */}
-      {/* SECURITY SHIELD 3: WINDOW BLURRED / UNFOCUS MASK         */}
-      {/* ======================================================== */}
       {isWindowBlurred && !isFaceAbsent && !isShoulderSurfing && (
-        <div className="fixed inset-0 z-40 bg-[#F6F9FA]/90 backdrop-blur-sm flex flex-col items-center justify-center p-8 text-center text-[#0F172A] animate-fade-in select-none">
-          <div className="p-3 rounded-2xl bg-white border border-[#DCE6EA] text-[#F0A11A] mb-3 shadow-md">
+        <div className="fixed inset-0 z-40 bg-[#F6FAF9]/90 backdrop-blur-xs flex flex-col items-center justify-center p-8 text-center text-[#142B38] animate-fade-in select-none">
+          <div className="p-3 rounded-2xl bg-white border border-[#DCE7EA] text-[#F0A11A] mb-3 shadow-md">
             <ShieldAlert className="w-10 h-10 text-[#F0A11A]" />
           </div>
-          <h3 className="text-xl font-bold text-[#0F172A]">
+          <h3 className="text-xl font-bold text-[#142B38]">
             Enclave Window Unfocused
           </h3>
-          <p className="text-[#64748B] text-xs max-w-sm mt-1">
+          <p className="text-[#65777F] text-xs max-w-sm mt-1">
             You navigated away from the secure examination window. External screen capture and application switching are restricted. Click anywhere on this screen to refocus.
           </p>
         </div>
       )}
 
-      {/* ======================================================== */}
-      {/* SECURITY SHIELD 4: EMERGENCY REMOTE LOCKDOWN BY ADMIN    */}
-      {/* ======================================================== */}
       {isEmergencyLocked && (
-        <div className="fixed inset-0 z-50 bg-[#F6F9FA]/98 backdrop-blur-md flex flex-col items-center justify-center p-8 text-center text-[#0F172A] animate-fade-in select-none">
-          <div className="p-5 rounded-3xl bg-rose-100 border-2 border-[#E84B5F] text-[#E84B5F] mb-4 shadow-xl">
+        <div className="fixed inset-0 z-50 bg-[#F6FAF9]/98 backdrop-blur-md flex flex-col items-center justify-center p-8 text-center text-[#142B38] animate-fade-in select-none">
+          <div className="p-5 rounded-3xl bg-[#FFF1F3] border-2 border-[#E84B5F] text-[#E84B5F] mb-4 shadow-xl">
             <Lock className="w-14 h-14" />
           </div>
-          <h2 className="text-2xl font-extrabold text-[#0F172A] uppercase tracking-wider">
+          <h2 className="text-2xl font-extrabold text-[#142B38] uppercase tracking-wider">
             TERMINAL EMERGENCY LOCKDOWN
           </h2>
           <p className="text-rose-700 text-sm font-semibold mt-1">
             Session Flagged for Review by Examination Registrar / Auditor
           </p>
-          <div className="text-[#475569] text-xs max-w-md mt-3 bg-white p-4 rounded-xl border border-rose-200">
+          <div className="text-[#65777F] text-xs max-w-md mt-3 bg-white p-4 rounded-xl border border-rose-200">
             <strong>Reason:</strong> {emergencyReason || 'Maximum proctoring violation threshold reached (3/3).'}
           </div>
-          <p className="text-[#64748B] text-xs mt-4">
+          <p className="text-[#65777F] text-xs mt-4">
             Contact the Central Examination Authority to conduct a forensic audit review.
           </p>
         </div>
