@@ -1044,11 +1044,11 @@ export const ExamManagerWorkspace: React.FC<ExamManagerWorkspaceProps> = ({
             isOrgVerified={org?.status === 'VERIFIED'}
           />
 
-          {/* 6. System Health & Security Activity */}
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
-            <SecurityActivity />
-            <SystemHealth />
-          </div>
+          {/* 6. Security Activity (Dark Navy) */}
+          <SecurityActivity />
+
+          {/* 7. Protection Layers & System Health (White) */}
+          <SystemHealth />
 
           {/* 7. Quick Operations Pathways */}
           <QuickActions
