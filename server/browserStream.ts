@@ -536,6 +536,10 @@ export const planHostSpawn = (options: {
         // roughly in half without touching the frame rate, which is what keeps
         // a remote panel feeling live instead of a slideshow.
         ZEROLEAK_HOST_ADAPTIVE_QUALITY: '1',
+        // Open Prism directly on startup using the persisted session.
+        // The partition 'persist:zeroleak-streamed' keeps cookies across restarts,
+        // so if the user signed in before, no login page appears.
+        ZEROLEAK_HOST_START_URL: 'https://prism.openai.com/',
       },
     },
   };

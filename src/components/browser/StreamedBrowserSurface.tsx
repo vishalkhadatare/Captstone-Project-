@@ -138,17 +138,35 @@ export const StreamedBrowserSurface: React.FC<StreamedBrowserSurfaceProps> = ({
    * tab's URL did not change, so nothing announces it. That left a restarted
    * browser showing a blank page while the panel still said Prism - which is how
    * a crash used to look like the feature breaking rather than restarting.
+   *
+   * IMPORTANT: Skip the navigate if the browser is already on the same host as
+   * the requested URL. This lets the persistent session (persist:zeroleak-streamed)
+   * resume its authenticated Prism session without a forced reload that would
+   * redirect back to the login page.
    */
   const wasReadyRef = useRef(false);
   useEffect(() => {
     const ready = status?.state === 'ready';
     const liveUrl = status?.url ?? '';
-    if (ready && !wasReadyRef.current && url && url !== NEW_TAB_URL && liveUrl !== url) {
-      requestedRef.current = url;
-      void sendBrowserCommand({ type: 'navigate', url }).catch(() => undefined);
+    if (ready && !wasReadyRef.current && url && url !== NEW_TAB_URL) {
+      // Only navigate if the live URL is blank or a completely different host.
+      // If the browser is already on the same domain (e.g. prism.openai.com),
+      // let it keep its page — forcing a reload would throw away the login session.
+      const isSameHost = (() => {
+        try {
+          return new URL(liveUrl).host === new URL(url).host;
+        } catch {
+          return false;
+        }
+      })();
+      if (!isSameHost && liveUrl !== url) {
+        requestedRef.current = url;
+        void sendBrowserCommand({ type: 'navigate', url }).catch(() => undefined);
+      }
     }
     wasReadyRef.current = ready;
   }, [status?.state, status?.url, url]);
+
 
   // An explicit reload from the tab strip.
   useEffect(() => {
