@@ -19,7 +19,16 @@ export default async (request: Request): Promise<Response> => {
   const pathFromUrl = incomingUrl.pathname.startsWith(functionPrefix)
     ? incomingUrl.pathname.slice(functionPrefix.length)
     : '';
-  const path = pathFromUrl || incomingUrl.searchParams.get('path');
+  const originalPath = [
+    incomingUrl.searchParams.get('path'),
+    incomingUrl.searchParams.get('splat'),
+    incomingUrl.searchParams.get('redirected-from'),
+    incomingUrl.searchParams.get('x-nf-original-path'),
+    request.headers.get('x-nf-original-path'),
+    request.headers.get('x-original-url'),
+    request.headers.get('x-forwarded-uri'),
+  ].find(value => value && value.length > 0) || '';
+  const path = pathFromUrl || originalPath.replace(/^https?:\/\/[^/]+/i, '').replace(/^\/api\//, '');
   if (!path || path.includes('..')) {
     return new Response('Missing API path.', { status: 400 });
   }
