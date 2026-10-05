@@ -52,20 +52,20 @@ export const ExaminationTable: React.FC<ExaminationTableProps> = ({
   });
 
   return (
-    <div className="rounded-xl bg-white border border-[#E4ECE9] shadow-[0_2px_10px_rgba(30,60,50,0.04)] overflow-hidden">
+    <div className="rounded-[18px] bg-white border border-[#DCE5E9] shadow-[0_4px_18px_rgba(20,50,65,0.05)] overflow-hidden">
       {/* Table Header & Controls Bar */}
-      <div className="p-4 sm:p-5 border-b border-[#E5ECE9] flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-[#F8FAFA]">
-        <div className="flex items-center gap-2.5">
-          <div className="p-2 rounded-lg bg-[#ECFBF5] text-[#008A63] border border-[#B8EBD6]">
+      <div className="p-5 sm:p-6 border-b border-[#E5ECE9] flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-white">
+        <div className="flex items-center gap-3">
+          <div className="w-10 h-10 rounded-xl bg-[#E8F8F2] text-[#00A878] border border-[#B8EBD6] flex items-center justify-center shrink-0">
             {activeFilter === 'ALL' ? (
-              <FolderLock className="w-4 h-4" />
+              <FolderLock className="w-5 h-5 stroke-[2]" />
             ) : (
-              <FileText className="w-4 h-4" />
+              <FileText className="w-5 h-5 stroke-[2]" />
             )}
           </div>
           <div>
-            <div className="flex items-center gap-2">
-              <h2 className="text-xs sm:text-sm font-bold text-[#172A35] uppercase tracking-wider font-mono">
+            <div className="flex items-center gap-2.5 flex-wrap">
+              <h2 className="text-sm sm:text-base font-extrabold text-[#102A38] uppercase tracking-wider font-mono">
                 {activeFilter === 'ALL'
                   ? 'ACTIVE EXAMINATION CONFIGURATIONS'
                   : activeFilter === 'VERIFIED'
@@ -74,13 +74,13 @@ export const ExaminationTable: React.FC<ExaminationTableProps> = ({
                   ? 'QUARANTINED & FLAGGED QUESTIONS'
                   : 'VAULT QUESTION REPOSITORY'}
               </h2>
-              <span className="px-2 py-0.5 rounded-full text-[10px] font-mono font-bold bg-white text-[#5F7074] border border-[#CBD8D5]">
+              <span className="px-2.5 py-0.5 rounded-full text-[11px] font-mono font-bold bg-[#E8F8F2] text-[#008A63] border border-[#B8EBD6]">
                 {activeFilter === 'ALL'
-                  ? `${filteredExams.length} Configurations`
-                  : `${filteredQuestions.length} Questions`}
+                  ? `${filteredExams.length} ACTIVE CONFIGURATIONS`
+                  : `${filteredQuestions.length} QUESTIONS`}
               </span>
             </div>
-            <p className="text-[11px] text-[#5F7074] mt-0.5">
+            <p className="text-xs text-[#61747E] mt-0.5">
               {activeFilter === 'ALL'
                 ? 'Monitored cryptographic exam enclaves with hardware verification and time locks'
                 : 'Isolated question items verified by AI semantic fusion and SME peer authority'}
@@ -88,15 +88,15 @@ export const ExaminationTable: React.FC<ExaminationTableProps> = ({
           </div>
         </div>
 
-        {/* Search & Governance Filter Controls */}
-        <div className="flex items-center gap-2 flex-wrap">
+        {/* Search, Filter & Sort Controls */}
+        <div className="flex items-center gap-2.5 flex-wrap">
           {activeFilter === 'ALL' && (
-            <div className="flex items-center rounded-lg bg-white border border-[#CBD8D5] p-0.5 text-[10px] font-mono shadow-2xs">
+            <div className="flex items-center rounded-xl bg-[#F5F8FA] border border-[#CBD8D5] p-1 text-[11px] font-mono shadow-2xs">
               <button
                 type="button"
                 onClick={() => setGovernanceFilter('ALL')}
-                className={`px-2 py-1 rounded-md transition-colors cursor-pointer ${
-                  governanceFilter === 'ALL' ? 'bg-[#087F5B] text-white font-bold' : 'text-[#5F7074] hover:text-[#172A35]'
+                className={`px-3 py-1 rounded-lg transition-colors cursor-pointer ${
+                  governanceFilter === 'ALL' ? 'bg-[#008F68] text-white font-bold' : 'text-[#61747E] hover:text-[#102A38]'
                 }`}
               >
                 ALL
@@ -104,8 +104,8 @@ export const ExaminationTable: React.FC<ExaminationTableProps> = ({
               <button
                 type="button"
                 onClick={() => setGovernanceFilter('UNIVERSITY')}
-                className={`px-2 py-1 rounded-md transition-colors cursor-pointer ${
-                  governanceFilter === 'UNIVERSITY' ? 'bg-[#087F5B] text-white font-bold' : 'text-[#5F7074] hover:text-[#172A35]'
+                className={`px-3 py-1 rounded-lg transition-colors cursor-pointer ${
+                  governanceFilter === 'UNIVERSITY' ? 'bg-[#008F68] text-white font-bold' : 'text-[#61747E] hover:text-[#102A38]'
                 }`}
               >
                 UNIVERSITY
@@ -113,8 +113,8 @@ export const ExaminationTable: React.FC<ExaminationTableProps> = ({
               <button
                 type="button"
                 onClick={() => setGovernanceFilter('COMPETITIVE')}
-                className={`px-2 py-1 rounded-md transition-colors cursor-pointer ${
-                  governanceFilter === 'COMPETITIVE' ? 'bg-[#087F5B] text-white font-bold' : 'text-[#5F7074] hover:text-[#172A35]'
+                className={`px-3 py-1 rounded-lg transition-colors cursor-pointer ${
+                  governanceFilter === 'COMPETITIVE' ? 'bg-[#008F68] text-white font-bold' : 'text-[#61747E] hover:text-[#102A38]'
                 }`}
               >
                 COMPETITIVE
@@ -126,20 +126,21 @@ export const ExaminationTable: React.FC<ExaminationTableProps> = ({
             <button
               type="button"
               onClick={() => onFilterChange('ALL')}
-              className="px-2.5 py-1 rounded-lg text-[10px] font-mono bg-white hover:bg-[#F8FAFA] text-[#5F7074] hover:text-[#172A35] border border-[#CBD8D5] transition-colors cursor-pointer shadow-2xs"
+              className="px-3 py-1.5 rounded-xl text-xs font-mono bg-[#F5F8FA] hover:bg-white text-[#61747E] hover:text-[#102A38] border border-[#CBD8D5] transition-colors cursor-pointer shadow-2xs"
             >
               ← Back to All Exams
             </button>
           )}
 
+          {/* Search Box */}
           <div className="relative">
-            <Search className="w-3.5 h-3.5 text-[#879598] absolute left-2.5 top-1/2 -translate-y-1/2 pointer-events-none" />
+            <Search className="w-4 h-4 text-[#879598] absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
             <input
               type="text"
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
-              placeholder="Search..."
-              className="pl-8 pr-3 py-1 rounded-lg bg-white border border-[#CBD8D5] text-xs text-[#172A35] placeholder-[#879598] focus:border-[#008A63] outline-none w-36 sm:w-44 transition-all shadow-2xs"
+              placeholder="Search examinations..."
+              className="pl-9 pr-3 py-1.5 rounded-xl bg-[#F5F8FA] border border-[#CBD8D5] text-xs text-[#102A38] placeholder-[#879598] focus:border-[#008A63] focus:bg-white outline-none w-44 sm:w-52 transition-all shadow-2xs"
             />
           </div>
         </div>

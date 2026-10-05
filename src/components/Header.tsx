@@ -90,33 +90,33 @@ export const Header: React.FC<HeaderProps> = ({
   };
 
   return (
-    <header className="sticky top-0 z-40 w-full h-[68px] bg-white/95 backdrop-blur-xl border-b border-[#E6ECEA] text-[#172A35] px-4 sm:px-6 flex items-center justify-between transition-all shadow-[0_1px_4px_rgba(0,0,0,0.03)]">
+    <header className="sticky top-0 z-40 w-full h-[72px] bg-white border-b border-[#E2E8EC] text-[#102A38] px-5 sm:px-7 flex items-center justify-between transition-all shadow-[0_1px_4px_rgba(20,40,50,0.03)]">
       {/* Left: Professional Shield Logo & Wordmark */}
       <div className="flex items-center gap-3">
-        <div className="flex items-center gap-2.5 group cursor-pointer" onClick={() => onNavigateTab?.('dashboard')}>
-          <div className="w-8 h-8 rounded-lg bg-[#008A63] flex items-center justify-center shadow-xs group-hover:bg-[#007050] transition-colors">
-            <Shield className="w-4 h-4 text-white" />
+        <div className="flex items-center gap-3 group cursor-pointer" onClick={() => onNavigateTab?.('dashboard')}>
+          <div className="w-9 h-9 rounded-xl bg-[#008A63] flex items-center justify-center shadow-xs group-hover:bg-[#007050] transition-colors">
+            <Shield className="w-4.5 h-4.5 text-white" />
           </div>
 
           <div>
-            <div className="flex items-center gap-1.5">
-              <span className="font-mono font-black text-sm tracking-wider text-[#172A35]">
+            <div className="flex items-center gap-2">
+              <span className="font-extrabold text-[17px] tracking-wider text-[#102A38]">
                 ZEROLEAK
               </span>
-              <span className="px-1.5 py-0.2 rounded text-[9px] font-mono font-bold bg-[#ECFBF5] text-[#008A63] border border-[#B8EBD6]">
+              <span className="px-2 py-0.5 rounded-md text-[10px] font-mono font-bold bg-[#E8F8F2] text-[#008A63] border border-[#B8EBD6]">
                 PRO
               </span>
             </div>
-            <span className="text-[8.5px] font-mono tracking-widest text-[#66777A] uppercase font-semibold block leading-none">
+            <span className="text-[9px] font-mono tracking-widest text-[#647681] uppercase font-semibold block leading-none">
               SECURE EXAMINATION INFRASTRUCTURE
             </span>
           </div>
         </div>
       </div>
 
-      {/* Center: Compact Security Status Pills */}
-      <div className="hidden lg:flex items-center gap-2">
-        <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-[#ECFBF5] border border-[#B8EBD6] text-[#008A63] text-[10px] font-mono font-bold shadow-2xs">
+      {/* Center: Light Security Status Pills */}
+      <div className="hidden lg:flex items-center gap-2.5">
+        <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-[#E8F8F2] border border-[#B8EBD6] text-[#008A63] text-[11px] font-mono font-bold shadow-2xs">
           <span className="relative flex h-2 w-2">
             <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-[#008A63] opacity-75"></span>
             <span className="relative inline-flex rounded-full h-2 w-2 bg-[#008A63]"></span>
@@ -124,14 +124,19 @@ export const Header: React.FC<HeaderProps> = ({
           <span>ENCLAVE ACTIVE</span>
         </div>
 
-        <div className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-[#F5F8FA] border border-[#DCE5E8] text-[#52636B] text-[10px] font-mono">
-          <ShieldCheck className="w-3.5 h-3.5 text-[#008A63]" />
+        <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-[#EEF5FF] border border-[#C5DCFA] text-[#2672B8] text-[11px] font-mono font-bold">
+          <ShieldCheck className="w-3.5 h-3.5 text-[#2672B8]" />
           <span>FIPS 140-2</span>
         </div>
 
-        <div className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-[#F5F8FA] border border-[#DCE5E8] text-[#52636B] text-[10px] font-mono font-bold">
-          <Lock className="w-3 h-3 text-[#2474A6]" />
+        <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-[#EFFBFD] border border-[#BEE7F0] text-[#008AA3] text-[11px] font-mono font-bold">
+          <Lock className="w-3 h-3 text-[#008AA3]" />
           <span>AES-256</span>
+        </div>
+
+        <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-[#F2F5F7] border border-[#D5DFE4] text-[#243B47] text-[11px] font-mono font-bold">
+          <span className="w-2 h-2 rounded-full bg-[#008A63]" />
+          <span>SYSTEM SECURE</span>
         </div>
       </div>
 
@@ -139,15 +144,9 @@ export const Header: React.FC<HeaderProps> = ({
       {currentUser && (
         <div className="flex items-center gap-2.5 sm:gap-3 text-xs">
           {/* Terminal ID */}
-          <div className="hidden xl:inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-[#F5F8FA] text-[#52636B] border border-[#DCE5E8] text-[10px] font-mono">
-            <Laptop className="w-3 h-3 text-[#008A63]" />
-            <span className="truncate max-w-[85px]">{deviceFp || 'TERM-01'}</span>
-          </div>
-
-          {/* System status pill */}
-          <div className="hidden md:inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-[#ECFBF5] border border-[#B8EBD6] text-[#008A63] text-[10px] font-mono font-bold">
-            <span className="w-1.5 h-1.5 rounded-full bg-[#008A63]" />
-            <span>SYSTEM SECURE</span>
+          <div className="hidden xl:inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-[#F5F8FA] text-[#52636B] border border-[#DCE5E8] text-[10.5px] font-mono font-medium">
+            <Laptop className="w-3.5 h-3.5 text-[#008A63]" />
+            <span className="truncate max-w-[95px]">{deviceFp || 'TERM-01'}</span>
           </div>
 
           {/* Theme Switcher Button */}

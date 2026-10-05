@@ -59,30 +59,30 @@ export const QuickActions: React.FC<QuickActionsProps> = ({ onNavigateTab }) => 
   ];
 
   return (
-    <div className="rounded-xl bg-white border border-[#E4ECE9] p-5 shadow-[0_2px_10px_rgba(30,60,50,0.04)] space-y-4">
+    <div className="rounded-[18px] bg-white border border-[#DCE5E9] p-6 lg:p-7 shadow-[0_4px_20px_rgba(20,50,65,0.06)] space-y-5">
       {/* Header */}
-      <div className="flex items-center justify-between pb-3 border-b border-[#EEF3F1]">
-        <div className="flex items-center gap-2">
-          <div className="p-1.5 rounded-lg bg-[#ECFBF5] text-[#008A63] border border-[#B8EBD6]">
-            <Zap className="w-4 h-4" />
+      <div className="flex items-center justify-between pb-3.5 border-b border-[#EEF3F1]">
+        <div className="flex items-center gap-3">
+          <div className="w-10 h-10 rounded-xl bg-[#E8F8F2] text-[#00A878] border border-[#B8EBD6] flex items-center justify-center shadow-xs">
+            <Zap className="w-5 h-5 stroke-[2]" />
           </div>
           <div>
-            <h3 className="text-xs font-mono font-bold uppercase tracking-wider text-[#172A35]">
+            <h3 className="text-base sm:text-lg font-bold text-[#102A38] uppercase tracking-wider font-mono">
               OPERATIONAL SHORTCUTS
             </h3>
-            <p className="text-[11px] text-[#5F7074]">
+            <p className="text-xs sm:text-[13px] text-[#61747E]">
               Fast execution pathways for controller operations
             </p>
           </div>
         </div>
 
-        <span className="text-[10px] font-mono text-[#879598] uppercase">
-          6 Actions
+        <span className="text-[11px] font-mono font-bold text-[#61747E] bg-[#F5F8FA] px-3 py-1 rounded-full border border-[#DCE5E8]">
+          6 ACTIONS
         </span>
       </div>
 
       {/* Grid */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2.5">
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
         {actions.map((act, index) => {
           const Icon = act.icon;
           return (
@@ -90,25 +90,25 @@ export const QuickActions: React.FC<QuickActionsProps> = ({ onNavigateTab }) => 
               key={`${act.id}-${index}`}
               type="button"
               onClick={() => onNavigateTab(act.id)}
-              className="p-3.5 rounded-lg bg-[#F8FAFA] border border-[#EDF2F0] hover:bg-[#F0F5F3] hover:border-[#CBD8D5] transition-all flex items-start justify-between text-left group cursor-pointer hover:-translate-y-0.5 shadow-2xs"
+              className="p-4 rounded-2xl bg-[#F8FAFC] border border-[#E2E8EC] hover:bg-white hover:border-[#CBD8D5] transition-all flex items-start justify-between text-left group cursor-pointer hover:-translate-y-0.5 shadow-2xs"
             >
               <div className="space-y-1 min-w-0">
-                <div className="flex items-center gap-2">
-                  <Icon className={`w-4 h-4 ${act.color} shrink-0`} />
-                  <span className="text-xs font-bold text-[#172A35] group-hover:text-[#008A63] transition-colors truncate">
+                <div className="flex items-center gap-2.5">
+                  <Icon className={`w-4.5 h-4.5 ${act.color} shrink-0`} />
+                  <span className="text-xs sm:text-[13px] font-bold text-[#102A38] group-hover:text-[#008A63] transition-colors truncate">
                     {act.label}
                   </span>
                 </div>
-                <p className="text-[11px] text-[#5F7074] line-clamp-1">
+                <p className="text-xs text-[#61747E] line-clamp-1">
                   {act.description}
                 </p>
               </div>
 
-              <div className="flex items-center gap-1 shrink-0 ml-2">
-                <span className="text-[9px] font-mono font-semibold px-1.5 py-0.5 rounded bg-white text-[#5F7074] group-hover:text-[#172A35] border border-[#E5ECE9]">
+              <div className="flex items-center gap-1.5 shrink-0 ml-2">
+                <span className="text-[9.5px] font-mono font-bold px-2 py-0.5 rounded-md bg-white text-[#61747E] group-hover:text-[#102A38] border border-[#E5ECE9]">
                   {act.badge}
                 </span>
-                <ChevronRight className="w-3.5 h-3.5 text-[#879598] group-hover:text-[#008A63] group-hover:translate-x-0.5 transition-all" />
+                <ChevronRight className="w-4 h-4 text-[#879598] group-hover:text-[#008A63] group-hover:translate-x-0.5 transition-all" />
               </div>
             </button>
           );

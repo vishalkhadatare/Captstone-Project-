@@ -243,24 +243,23 @@ export function App() {
   // Logged-in User Dashboard Workspace
   return (
     <div
-      className="min-h-screen text-[#172A35] flex flex-col font-['Figtree',sans-serif] selection:bg-[#00D68F] selection:text-[#06110F] relative overflow-x-hidden transition-colors duration-300"
-      style={{
-        background: 'linear-gradient(135deg, #F7FBFA 0%, #F0F8F5 50%, #F7FAFC 100%)',
-      }}
+      className="min-h-screen text-[#102A38] flex flex-col font-['Figtree',sans-serif] selection:bg-[#00A878] selection:text-white relative overflow-x-hidden bg-[#F5F8FA] transition-colors duration-300"
     >
-      {/* Subtle Enterprise Ambient Tint & Micro Grid */}
+      {/* Subtle Enterprise Ambient Tint & Neutral Technical Grid */}
       <div className="fixed inset-0 pointer-events-none z-0">
+        {/* Subtle Blue/Emerald Radial Highlight */}
         <div
-          className="absolute top-0 left-1/2 -translate-x-1/2 w-[1200px] h-[450px] opacity-40 blur-[140px]"
+          className="absolute top-0 left-1/2 -translate-x-1/2 w-[1400px] h-[480px] opacity-60 blur-[150px]"
           style={{
-            background: 'radial-gradient(ellipse at 50% 0%, rgba(0, 214, 143, 0.08) 0%, rgba(24, 200, 178, 0.03) 50%, transparent 80%)',
+            background: 'radial-gradient(ellipse at 50% 0%, rgba(0, 168, 120, 0.04) 0%, rgba(38, 114, 184, 0.03) 50%, transparent 80%)',
           }}
         />
+        {/* Barely visible technical dot grid */}
         <div
-          className="absolute inset-0 opacity-[0.025]"
+          className="absolute inset-0 opacity-[0.03]"
           style={{
-            backgroundImage: 'linear-gradient(#008A63 1px, transparent 1px), linear-gradient(90deg, #008A63 1px, transparent 1px)',
-            backgroundSize: '32px 32px',
+            backgroundImage: 'radial-gradient(#78909C 1.2px, transparent 1.2px)',
+            backgroundSize: '24px 24px',
           }}
         />
       </div>
@@ -292,9 +291,9 @@ export function App() {
           onLogout={handleLogout}
         />
 
-        {/* Dynamic Operational Content View */}
-        <main className="flex-1 p-5 sm:p-6 lg:p-7 overflow-y-auto">
-          <div className="max-w-7xl mx-auto space-y-6">
+        {/* Dynamic Operational Content View (Scale Increased: 1400px max-width, 28-36px padding) */}
+        <main className="flex-1 p-7 sm:p-8 lg:p-9 overflow-y-auto">
+          <div className="max-w-[1400px] mx-auto space-y-6">
             <ErrorBoundary fallbackTitle="Workspace Interface Interrupted">
               {/* User Profile & Security Settings */}
               {(activeSubTab === 'profile' || activeSubTab === 'security_settings') ? (
