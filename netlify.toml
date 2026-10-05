@@ -14,13 +14,18 @@
   # polling transports in this build (same-origin desktop builds keep SSE).
   VITE_PRISM_POLLING = "1"
 
-# Reverse-proxy every API call to the tunnel. Status 200 = proxy, not redirect.
-# NOTE: if the tunnel URL ever changes, update it here and redeploy.
+# Route API calls through a Netlify Function so it can forward ngrok's required
+# skip header. Netlify rewrites do not reliably forward custom request headers,
+# which otherwise exposes ngrok's browser-warning HTML to the SPA.
+# NOTE: if the tunnel URL ever changes, update it in netlify/functions/api.ts.
 [[redirects]]
   from = "/api/*"
-  to = "https://backed-repeated-aerobics.ngrok-free.dev/api/:splat"
+  to = "/.netlify/functions/api?path=:splat"
   status = 200
   force = true
+
+[functions]
+  directory = "netlify/functions"
 
 # SPA fallback so deep links and refreshes resolve to index.html.
 [[redirects]]
