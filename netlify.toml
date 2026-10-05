@@ -1,9 +1,7 @@
 # Netlify static hosting for the ZeroLeak SPA (Vite build output in dist/).
-# The Express server (dist/server.cjs) is not run by Netlify: /api/* calls are
-# made same-origin and proxied at Netlify's edge to the laptop's backend
-# through its ngrok tunnel. Proxying (instead of the browser calling the tunnel
-# directly) removes browser-side CORS, ngrok's interstitial page, and flaky
-# mobile-to-tunnel connections from the equation.
+# The Express server (dist/server.cjs) is not run by Netlify. The SPA calls the
+# configured backend tunnel directly; the frontend supplies the ngrok bypass
+# header and the backend allows the Netlify origin via CORS.
 [build]
   command = "npm run build"
   publish = "dist"
