@@ -449,7 +449,7 @@ export const StreamedBrowserSurface: React.FC<StreamedBrowserSurfaceProps> = ({
               <Loader2 className="w-5 h-5 text-emerald-400 mx-auto animate-spin" />
             )}
             <p className="text-sm font-semibold text-slate-100">
-              {status?.state === 'error' ? 'Failed to connect to Prism' : 'Loading OpenAI Prism...'}
+              {status?.state === 'error' ? 'Failed to connect to ZeroLeak AI' : 'Loading ZeroLeak AI...'}
             </p>
             <p className="text-[11px] text-slate-400">{status?.reason ?? 'Connecting to workspace...'}</p>
             {status?.error && <p className="text-[11px] text-rose-300">{status.error}</p>}

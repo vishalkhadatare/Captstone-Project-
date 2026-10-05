@@ -20,6 +20,7 @@ import {
   type BrowserBookmark,
   type BrowserPolicy,
 } from './browser/ChromeLikeBrowser';
+import { ZeroLeakLogo } from './ZeroLeakLogo';
 import { useStreamedBrowser } from './browser/useStreamedBrowser';
 import {
   AUTH_PHASE_LABEL,
@@ -62,7 +63,7 @@ interface OpenAIPrismBrowserModalProps {
 const MAX_AUTO_STARTS = 3;
 
 const FALLBACK_BOOKMARKS: BrowserBookmark[] = [
-  { id: 'prism', name: 'OpenAI Prism', url: PRISM_SIGN_IN_URL, icon: '✨', group: 'core' },
+  { id: 'prism', name: 'ZeroLeak AI', url: PRISM_SIGN_IN_URL, icon: '🛡️', group: 'core' },
 ];
 
 /** What `GET /api/browser/config` answers with, inferred from the client. */
@@ -647,8 +648,8 @@ export const OpenAIPrismBrowserModal: React.FC<OpenAIPrismBrowserModalProps> = (
              * is left says which page this is.
              */}
             <div className="flex items-center gap-2 text-white font-bold text-xs sm:text-sm pl-2 border-l border-slate-800">
-              <Sparkles className="w-4 h-4 text-emerald-400" />
-              <span>Prism</span>
+              <ZeroLeakLogo variant="icon" imgHeightClass="h-5 w-auto" />
+              <span>ZeroLeak AI</span>
             </div>
           </div>
 

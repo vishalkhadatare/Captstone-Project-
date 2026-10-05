@@ -44,7 +44,16 @@ if (process.env.ELECTRON_RUN_AS_NODE) {
 const http = require('node:http');
 const crypto = require('node:crypto');
 const fs = require('node:fs');
-const { app, BrowserWindow, session, screen } = require('electron');
+const path = require('node:path');
+const { app, BrowserWindow, dialog, session, screen } = require('electron');
+
+let ZEROLEAK_LOGO_DATA_URI = '';
+try {
+  const logoPath = path.join(__dirname, '../src/assets/logo-icon.png');
+  if (fs.existsSync(logoPath)) {
+    ZEROLEAK_LOGO_DATA_URI = `data:image/png;base64,${fs.readFileSync(logoPath).toString('base64')}`;
+  }
+} catch (_) {}
 const { uniqueDownloadPath } = require('./downloadPaths.cjs');
 const { textFromKeyCode } = require('./hostKeys.cjs');
 
@@ -180,11 +189,90 @@ const PAGE_TRACE_SCRIPT = `(() => {
     const nativeClick = HTMLInputElement.prototype.click;
     HTMLInputElement.prototype.click = function (...args) {
       if (String(this.type).toLowerCase() === 'file') {
+        window.__zeroleakFileInput = this;
         tell('the page clicked a file input' + (this.webkitdirectory ? ' (directory)' : ''));
       }
       return nativeClick.apply(this, args);
     };
   } catch (_) { /* as above */ }
+})();`;
+
+/**
+ * Brand injection script: replaces OpenAI / Prism logos and brand text with
+ * ZeroLeak AI and the official ZeroLeak logo inside the streamed page.
+ */
+const ZEROLEAK_BRANDING_SCRIPT = `(() => {
+  const LOGO_DATA = ${JSON.stringify(ZEROLEAK_LOGO_DATA_URI)};
+
+  function applyZeroLeakBranding() {
+    try {
+      // 1. Update page title
+      if (document.title && /Prism/i.test(document.title)) {
+        document.title = document.title.replace(/OpenAI\\s*Prism/gi, 'ZeroLeak AI').replace(/Prism/gi, 'ZeroLeak AI');
+      }
+
+      // 2. Replace top-left logo / icon with ZeroLeak logo
+      if (LOGO_DATA) {
+        const svgs = document.querySelectorAll('svg');
+        for (const svg of svgs) {
+          if (svg.dataset.zeroleakHandled) continue;
+          const rect = svg.getBoundingClientRect();
+          // Check if this SVG is in the top-left area (sidebar header or top header)
+          const isTopLeft = (rect.width > 0 && rect.height > 0 && rect.left >= 0 && rect.left <= 90 && rect.top >= 0 && rect.top <= 90);
+          const parentBrand = svg.closest('a[href="/"], [aria-label*="OpenAI" i], [aria-label*="Prism" i], [aria-label*="Home" i]');
+
+          if (isTopLeft || parentBrand) {
+            svg.dataset.zeroleakHandled = 'true';
+            svg.style.display = 'none';
+
+            const parent = svg.parentElement;
+            if (parent && !parent.querySelector('.zeroleak-brand-logo')) {
+              const img = document.createElement('img');
+              img.className = 'zeroleak-brand-logo';
+              img.src = LOGO_DATA;
+              img.alt = 'ZeroLeak AI';
+              const size = Math.max(22, Math.min(32, Math.max(rect.width, rect.height)));
+              img.style.width = size + 'px';
+              img.style.height = size + 'px';
+              img.style.objectFit = 'contain';
+              img.style.display = 'inline-block';
+              img.style.verticalAlign = 'middle';
+              parent.insertBefore(img, svg);
+            }
+          }
+        }
+      }
+
+      // 3. Replace standalone brand text "Prism" / "OpenAI Prism" in headings/sidebar
+      const walker = document.createTreeWalker(document.body || document.documentElement, NodeFilter.SHOW_TEXT);
+      let node;
+      while ((node = walker.nextNode())) {
+        const text = node.nodeValue;
+        if (!text) continue;
+        if (/OpenAI\\s*Prism/i.test(text)) {
+          node.nodeValue = text.replace(/OpenAI\\s*Prism/gi, 'ZeroLeak AI');
+        } else if (/\\bPrism\\b/i.test(text)) {
+          const parent = node.parentElement;
+          if (!parent) continue;
+          if (parent.closest('textarea, input, pre, code, .monaco-editor, [contenteditable="true"]')) continue;
+          if (text.trim() === 'Prism' || text.trim() === 'OpenAI Prism') {
+            node.nodeValue = text.replace(/\\bPrism\\b/gi, 'ZeroLeak AI');
+          }
+        }
+      }
+    } catch (_) {}
+  }
+
+  applyZeroLeakBranding();
+  if (document.body && !window.__zeroleakObserverAttached) {
+    window.__zeroleakObserverAttached = true;
+    const observer = new MutationObserver(() => applyZeroLeakBranding());
+    observer.observe(document.body, { childList: true, subtree: true, characterData: true });
+  }
+  if (!window.__zeroleakIntervalAttached) {
+    window.__zeroleakIntervalAttached = true;
+    setInterval(applyZeroLeakBranding, 600);
+  }
 })();`;
 
 /**
@@ -196,7 +284,47 @@ const PAGE_TRACE_SCRIPT = `(() => {
  * object, older ones pass (event, level, message, line, source) - so both shapes
  * are read rather than assumed.
  */
-const reportPageConsole = (contents) => {
+const installSelectedFiles = async (contents, files) => {
+  const payload = JSON.stringify(files);
+  const script = `(() => {
+    const input = window.__zeroleakFileInput;
+    if (!input || String(input.type).toLowerCase() !== 'file') return false;
+    const transfer = new DataTransfer();
+    for (const item of ${payload}) {
+      const binary = atob(item.base64);
+      const bytes = Uint8Array.from(binary, character => character.charCodeAt(0));
+      transfer.items.add(new File([bytes], item.name, { type: item.type, lastModified: item.lastModified }));
+    }
+    input.files = transfer.files;
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+    input.dispatchEvent(new Event('change', { bubbles: true }));
+    return true;
+  })()`;
+  try {
+    const installed = await contents.executeJavaScript(script, true);
+    log(installed ? `installed ${files.length} selected file(s) in the page` : 'the file input was gone before selection completed');
+  } catch (err) {
+    log(`could not install selected files: ${err.message}`);
+  }
+};
+
+const handleFileInputRequest = async (win, contents, directory) => {
+  if (!win || win.isDestroyed() || !contents || contents.isDestroyed()) return;
+  const result = await dialog.showOpenDialog(win, {
+    title: directory ? 'Select a folder to import' : 'Select a file to import',
+    properties: directory ? ['openDirectory'] : ['openFile', 'multiSelections'],
+  });
+  if (result.canceled || result.filePaths.length === 0) return;
+  const files = result.filePaths.map(filePath => ({
+    name: require('node:path').basename(filePath),
+    type: 'application/octet-stream',
+    base64: fs.readFileSync(filePath).toString('base64'),
+    lastModified: fs.statSync(filePath).mtimeMs,
+  }));
+  await installSelectedFiles(contents, files);
+};
+
+const reportPageConsole = (contents, win) => {
   contents.on('console-message', (...args) => {
     const first = args[0];
     const detail =
@@ -205,6 +333,9 @@ const reportPageConsole = (contents) => {
         : { level: args[1], message: args[2], lineNumber: args[3], sourceId: args[4] };
     const text = String(detail.message == null ? '' : detail.message);
     if (!text) return;
+    if (text.startsWith('[browser-host] the page clicked a file input')) {
+      void handleFileInputRequest(win, contents, text.includes('(directory)'));
+    }
     const level = String(detail.level == null ? '' : detail.level);
     const notable =
       text.includes('[browser-host]') ||
@@ -502,10 +633,13 @@ const attachView = (win, contents, { primary = false } = {}) => {
 
   // What the page says, and when it asks for a file. Both are invisible from
   // here otherwise, and both are what a "nothing happens" report is made of.
-  reportPageConsole(contents);
-  contents.on('did-finish-load', () => {
+  reportPageConsole(contents, win);
+  const injectScripts = () => {
     contents.executeJavaScript(PAGE_TRACE_SCRIPT).catch(() => undefined);
-  });
+    contents.executeJavaScript(ZEROLEAK_BRANDING_SCRIPT).catch(() => undefined);
+  };
+  contents.on('did-finish-load', injectScripts);
+  contents.on('dom-ready', injectScripts);
 
   contents.on('paint', (_event, _dirty, image) => {
     // Newest wins: an older frame that is still queued is worthless, and
@@ -770,6 +904,9 @@ const applyCommand = (command) => {
     }
     case 'input':
       sendInput(contents, command.event);
+      return;
+    case 'upload-files':
+      void installSelectedFiles(contents, command.files || []);
       return;
     case 'ping':
       void report(null);

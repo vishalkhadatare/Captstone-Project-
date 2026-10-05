@@ -26,6 +26,7 @@ import {
   type StreamedBrowserStatus,
 } from '../../api';
 import { StreamedBrowserSurface } from './StreamedBrowserSurface';
+import { ZeroLeakLogo } from '../ZeroLeakLogo';
 import { PANE_PARTITION, PANE_SANDBOX_FLAGS } from '../../utils/prismAuth';
 import {
   MAX_TABS,
@@ -924,7 +925,7 @@ export const ChromeLikeBrowser: React.FC<ChromeLikeBrowserProps> = ({
           />
         ))}
 
-        {/* Minimal new-tab page: just one button to open Prism */}
+        {/* Minimal new-tab page: just one button to open ZeroLeak AI */}
         {isBlank && (
           <div className="absolute inset-0 flex items-center justify-center bg-slate-950">
             <button
@@ -932,8 +933,8 @@ export const ChromeLikeBrowser: React.FC<ChromeLikeBrowserProps> = ({
               onClick={() => go('https://prism.openai.com/')}
               className="flex items-center gap-3 px-8 py-4 rounded-2xl bg-emerald-600 hover:bg-emerald-500 active:bg-emerald-700 text-white font-semibold text-base shadow-lg shadow-emerald-900/40 transition-all cursor-pointer"
             >
-              <Sparkles className="w-5 h-5" />
-              Open Prism
+              <ZeroLeakLogo variant="icon" imgHeightClass="h-5 w-auto" />
+              Open ZeroLeak AI
             </button>
           </div>
         )}

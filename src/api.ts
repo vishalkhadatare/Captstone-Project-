@@ -1629,7 +1629,11 @@ export type BrowserLiveEvent =
 export type StreamedBrowserCommand =
   | { type: 'navigate'; url: string }
   | { type: 'back' | 'forward' | 'reload' | 'stop' }
-  | { type: 'resize'; viewport: { width: number; height: number } };
+  | { type: 'resize'; viewport: { width: number; height: number } }
+  | {
+      type: 'upload-files';
+      files: Array<{ name: string; type: string; base64: string; lastModified: number }>;
+    };
 
 /** Is a streamed browser running, and what is it showing? */
 export const getBrowserHostStatus = () =>

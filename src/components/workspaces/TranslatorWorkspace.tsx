@@ -466,10 +466,10 @@ export const TranslatorWorkspace: React.FC<TranslatorWorkspaceProps> = ({
                   type="button"
                   onClick={() => setShowPrismBrowser(true)}
                   className="px-3 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1.5 bg-gradient-to-r from-purple-700 to-indigo-700 hover:from-purple-600 hover:to-indigo-600 text-white shadow-xs border border-purple-400/30 transition-all cursor-pointer shrink-0"
-                  title="Open Prism, the LaTeX editor, in this screen"
+                  title="Open ZeroLeak AI in this screen"
                 >
-                  <Globe className="w-3.5 h-3.5 text-purple-200" />
-                  <span>🌐 Prism</span>
+                  <Sparkles className="w-3.5 h-3.5 text-purple-200" />
+                  <span>ZeroLeak AI</span>
                 </button>
               </div>
             </div>
@@ -1052,10 +1052,10 @@ export const TranslatorWorkspace: React.FC<TranslatorWorkspaceProps> = ({
                 type="button"
                 onClick={() => setShowPrismBrowser(true)}
                 className="px-3 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1.5 bg-gradient-to-r from-purple-700 to-indigo-700 hover:from-purple-600 hover:to-indigo-600 text-white shadow-xs border border-purple-400/30 transition-all cursor-pointer shrink-0"
-                title="Open Prism, the LaTeX editor, in this screen"
+                title="Open ZeroLeak AI in this screen"
               >
-                <Globe className="w-3.5 h-3.5 text-purple-200" />
-                <span>🌐 Prism</span>
+                <Sparkles className="w-3.5 h-3.5 text-purple-200" />
+                <span>ZeroLeak AI</span>
               </button>
             </div>
           </div>

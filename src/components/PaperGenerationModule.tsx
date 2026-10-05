@@ -368,10 +368,10 @@ export const PaperGenerationModule: React.FC<PaperGenProps> = ({ currentUser, on
           type="button"
           onClick={() => setShowPrismBrowser(true)}
           className="px-4 py-2.5 rounded-xl text-xs font-bold flex items-center gap-2 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white shadow-md shadow-emerald-950/40 border border-emerald-400/30 transition-all cursor-pointer shrink-0"
-          title="Open Prism, the LaTeX editor, in this screen"
+          title="Open ZeroLeak AI in this screen"
         >
-          <Globe className="w-4 h-4 text-emerald-200" />
-          <span>🌐 Prism</span>
+          <Sparkles className="w-4 h-4 text-emerald-200" />
+          <span>ZeroLeak AI</span>
         </button>
       </div>
 

@@ -158,6 +158,22 @@ test('a navigate with no usable address is refused rather than guessed', () => {
   assert.equal(normalizeCommand({ type: 'navigate', url: 'not a url' }, DEFAULT_VIEWPORT).ok, false);
 });
 
+test('an upload-files command preserves the selected file payload', () => {
+  const result = normalizeCommand({
+    type: 'upload-files',
+    files: [{ name: 'paper.pdf', type: 'application/pdf', base64: 'JVBERi0=', lastModified: 123 }],
+  }, DEFAULT_VIEWPORT);
+  assert.equal(result.ok, true);
+  if (result.ok && result.command.type === 'upload-files') {
+    assert.deepEqual(result.command.files, [{
+      name: 'paper.pdf',
+      type: 'application/pdf',
+      base64: 'JVBERi0=',
+      lastModified: 123,
+    }]);
+  }
+});
+
 test('an unknown or host-only command type never reaches the browser', () => {
   for (const type of ['ping', 'input', 'evaluate', 'devtools', '']) {
     const refused = normalizeCommand({ type }, DEFAULT_VIEWPORT);
