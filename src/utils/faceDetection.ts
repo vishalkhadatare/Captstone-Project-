@@ -99,7 +99,7 @@ function detectFacesUsingCanvas(video: HTMLVideoElement): FaceDetectionResult {
   const H = 120;
   const helper = getSampleContext(W, H);
   if (!helper) {
-    return { faceCount: 1, status: 'NORMAL', lookingDirection: 'FORWARD', confidence: 0.8 };
+    return { faceCount: 1, status: 'NORMAL', lookingDirection: 'FORWARD', confidence: 0.85 };
   }
 
   const { ctx } = helper;
@@ -108,19 +108,25 @@ function detectFacesUsingCanvas(video: HTMLVideoElement): FaceDetectionResult {
     const imgData = ctx.getImageData(0, 0, W, H);
     const data = imgData.data;
 
-    // Skin chromaticity and luminance detection (Kovac / Normalized RGB skin model)
-    // Grid sampling (step size 4 for high performance)
     const step = 4;
     const gridW = Math.floor(W / step);
     const gridH = Math.floor(H / step);
-    const skinGrid = new Uint8Array(gridW * gridH);
+    const totalCells = gridW * gridH;
+    const skinGrid = new Uint8Array(totalCells);
 
     let totalSkinPixels = 0;
     let sumX = 0;
     let sumY = 0;
+    let totalLuminance = 0;
+    let luminanceVarianceSum = 0;
+    let edgeEnergy = 0;
+
+    // First pass: Calculate luminance, variance, skin pixels
+    const luminances = new Float32Array(totalCells);
 
     for (let gy = 0; gy < gridH; gy++) {
       for (let gx = 0; gx < gridW; gx++) {
+        const cellIdx = gy * gridW + gx;
         const px = gx * step;
         const py = gy * step;
         const idx = (py * W + px) * 4;
@@ -129,22 +135,39 @@ function detectFacesUsingCanvas(video: HTMLVideoElement): FaceDetectionResult {
         const g = data[idx + 1];
         const b = data[idx + 2];
 
-        // Robust multi-spectrum skin model (ISO/IEC YCbCr + Normalized RGB)
+        // Standard Luminance
         const Y = 0.299 * r + 0.587 * g + 0.114 * b;
+        luminances[cellIdx] = Y;
+        totalLuminance += Y;
+
+        // Chromaticities
         const Cb = 128 - 0.168736 * r - 0.331264 * g + 0.5 * b;
         const Cr = 128 + 0.5 * r - 0.418688 * g - 0.081312 * b;
 
-        const isYCbCrSkin = Y > 25 && Cb >= 75 && Cb <= 140 && Cr >= 125 && Cr <= 185;
+        // HSV calculation
+        const max = Math.max(r, g, b);
+        const min = Math.min(r, g, b);
+        const delta = max - min;
+        let h = 0;
+        if (delta > 0) {
+          if (max === r) h = ((g - b) / delta) % 6;
+          else if (max === g) h = (b - r) / delta + 2;
+          else h = (r - g) / delta + 4;
+          h = Math.round(h * 60);
+          if (h < 0) h += 360;
+        }
+        const s = max === 0 ? 0 : delta / max;
+        const v = max / 255;
 
-        const sum = r + g + b;
-        const nr = sum > 0 ? r / sum : 0;
-        const ng = sum > 0 ? g / sum : 0;
-        const isRgbSkin = sum > 50 && nr > 0.32 && nr < 0.62 && ng > 0.22 && ng < 0.42 && r >= g && (r - b) >= 0;
+        // Broad inclusive multi-ethnic skin check (covering all tones + various lighting)
+        const isYCbCrSkin = Y > 15 && Cb >= 60 && Cb <= 155 && Cr >= 115 && Cr <= 200;
+        const isHsvSkin = (h <= 55 || h >= 320) && s >= 0.08 && s <= 0.88 && v >= 0.12 && v <= 0.98;
+        const isRgbSkin = r > 30 && g > 20 && b > 15 && (r + g + b) > 70 && (r >= g - 20) && (r - b >= -20);
 
-        const isSkin = isYCbCrSkin || isRgbSkin;
+        const isSkin = isYCbCrSkin || isHsvSkin || isRgbSkin;
 
         if (isSkin) {
-          skinGrid[gy * gridW + gx] = 1;
+          skinGrid[cellIdx] = 1;
           totalSkinPixels++;
           sumX += gx;
           sumY += gy;
@@ -152,11 +175,47 @@ function detectFacesUsingCanvas(video: HTMLVideoElement): FaceDetectionResult {
       }
     }
 
-    // Adaptive threshold: at least 1.5% of frame (allows normal distance and diverse conditions)
-    const minSkinThreshold = Math.max(12, (gridW * gridH) * 0.015);
-    const maxSkinThreshold = (gridW * gridH) * 0.85;
+    const meanLuminance = totalLuminance / totalCells;
 
-    if (totalSkinPixels < minSkinThreshold) {
+    // Second pass: Variance & upper-center edge energy
+    for (let gy = 0; gy < gridH; gy++) {
+      for (let gx = 0; gx < gridW; gx++) {
+        const cellIdx = gy * gridW + gx;
+        const diff = luminances[cellIdx] - meanLuminance;
+        luminanceVarianceSum += diff * diff;
+
+        // Edge energy (upper 75% of frame where head & shoulders are)
+        if (gy < gridH * 0.75 && gx < gridW - 1 && gy < gridH - 1) {
+          const rightCell = luminances[gy * gridW + gx + 1];
+          const downCell = luminances[(gy + 1) * gridW + gx];
+          edgeEnergy += Math.abs(luminances[cellIdx] - rightCell) + Math.abs(luminances[cellIdx] - downCell);
+        }
+      }
+    }
+
+    const stdDev = Math.sqrt(luminanceVarianceSum / totalCells);
+    const avgEdge = edgeEnergy / (gridW * gridH * 0.75);
+
+    // Camera completely dark/covered check
+    const isCameraDarkOrCovered = meanLuminance < 10 && stdDev < 8;
+    // Camera pointed at completely flat textureless blank wall
+    const isBlankFlatWall = stdDev < 4.5 && avgEdge < 3.0;
+
+    if (isCameraDarkOrCovered || isBlankFlatWall) {
+      return {
+        faceCount: 0,
+        status: 'NO_FACE',
+        lookingDirection: 'AWAY',
+        confidence: 0.9,
+      };
+    }
+
+    // Adaptive presence threshold:
+    // If skin pixels detected, or substantial contrast and edges of a seated person
+    const hasSkinPresence = totalSkinPixels >= Math.max(6, totalCells * 0.008);
+    const hasSilhouettePresence = stdDev >= 12.0 && avgEdge >= 6.0 && meanLuminance >= 15;
+
+    if (!hasSkinPresence && !hasSilhouettePresence) {
       return {
         faceCount: 0,
         status: 'NO_FACE',
@@ -165,17 +224,8 @@ function detectFacesUsingCanvas(video: HTMLVideoElement): FaceDetectionResult {
       };
     }
 
-    if (totalSkinPixels > maxSkinThreshold) {
-      return {
-        faceCount: 0,
-        status: 'NO_FACE',
-        lookingDirection: 'AWAY',
-        confidence: 0.75,
-      };
-    }
-
-    // Check for distinct separated face clusters (Multiple Faces)
-    // Compare left half vs right half skin mass
+    // Multiple faces / Shoulder Surfing check
+    // Only trigger if two distinct, widely separated large skin masses exist
     let leftSkin = 0;
     let rightSkin = 0;
     const midGX = Math.floor(gridW / 2);
@@ -183,58 +233,58 @@ function detectFacesUsingCanvas(video: HTMLVideoElement): FaceDetectionResult {
     for (let gy = 0; gy < gridH; gy++) {
       for (let gx = 0; gx < gridW; gx++) {
         if (skinGrid[gy * gridW + gx] === 1) {
-          if (gx < midGX - 3) leftSkin++;
-          else if (gx > midGX + 3) rightSkin++;
+          if (gx < midGX - 5) leftSkin++;
+          else if (gx > midGX + 5) rightSkin++;
         }
       }
     }
 
-    // If both left and right quadrants have independent large skin clusters separated by a gap
-    const clusterMin = minSkinThreshold * 0.8;
+    // Both left and right must be substantial (> 12% of frame each) with a clean gap
+    const clusterMin = totalCells * 0.12;
     if (leftSkin > clusterMin && rightSkin > clusterMin) {
-      // Check if center gap is low skin (indicates 2 separate people)
       let centerSkin = 0;
       for (let gy = 0; gy < gridH; gy++) {
-        for (let gx = midGX - 2; gx <= midGX + 2; gx++) {
+        for (let gx = midGX - 3; gx <= midGX + 3; gx++) {
           if (skinGrid[gy * gridW + gx] === 1) centerSkin++;
         }
       }
-      if (centerSkin < (leftSkin + rightSkin) * 0.15) {
+      if (centerSkin < (leftSkin + rightSkin) * 0.12) {
         return {
           faceCount: 2,
           status: 'MULTIPLE_FACES',
           lookingDirection: 'FORWARD',
-          confidence: 0.88,
+          confidence: 0.92,
         };
       }
     }
 
-    // Normal single face
-    const avgGX = sumX / totalSkinPixels;
+    // Single Authorized Person Confirmed
+    const effectiveTotal = Math.max(1, totalSkinPixels);
+    const avgGX = sumX / effectiveTotal;
     const centerNorm = (avgGX - midGX) / gridW;
 
     let dir: 'FORWARD' | 'LEFT' | 'RIGHT' = 'FORWARD';
-    if (centerNorm < -0.16) dir = 'LEFT';
-    else if (centerNorm > 0.16) dir = 'RIGHT';
+    if (centerNorm < -0.18) dir = 'LEFT';
+    else if (centerNorm > 0.18) dir = 'RIGHT';
 
     return {
       faceCount: 1,
       status: 'NORMAL',
       lookingDirection: dir,
-      confidence: 0.9,
+      confidence: 0.92,
       box: {
         x: Math.max(10, Math.min(80, (avgGX / gridW) * 100 - 15)),
-        y: Math.max(10, Math.min(80, ((sumY / totalSkinPixels) / gridH) * 100 - 15)),
+        y: Math.max(10, Math.min(80, ((sumY / effectiveTotal) / gridH) * 100 - 15)),
         width: 30,
         height: 35,
       },
     };
-  } catch {
+  } catch (err) {
     return {
       faceCount: 1,
       status: 'NORMAL',
       lookingDirection: 'FORWARD',
-      confidence: 0.7,
+      confidence: 0.85,
     };
   }
 }

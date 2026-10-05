@@ -110,6 +110,7 @@ export const AuthorityProctorEnclave: React.FC<AuthorityProctorEnclaveProps> = (
 
   // Consecutive Absence Frame Counter for Grace Period (Section 19 & 20)
   const consecutiveAbsentFrames = useRef(0);
+  const consecutiveMultipleFaces = useRef(0);
   const lastFaceStateLogged = useRef<'NORMAL' | 'ABSENT' | 'SHOULDER_SURFING'>('NORMAL');
 
   // Voice Evidence Recorder State (Section 14 & 15)
@@ -614,7 +615,7 @@ export const AuthorityProctorEnclave: React.FC<AuthorityProctorEnclaveProps> = (
 
         if (result.faceCount >= 1) {
           // Person is present in camera frame!
-          const wasAbsent = consecutiveAbsentFrames.current > 18 || presenceState === 'TEMPORARILY_ABSENT';
+          const wasAbsent = consecutiveAbsentFrames.current > 45 || presenceState === 'TEMPORARILY_ABSENT';
           consecutiveAbsentFrames.current = 0;
 
           if (presenceState !== 'SESSION_LOCKED') {
@@ -626,35 +627,40 @@ export const AuthorityProctorEnclave: React.FC<AuthorityProctorEnclaveProps> = (
             showToast('✓ Presence verified', 'success');
           }
 
-          // Shoulder surfing check (2+ faces)
+          // Debounced shoulder surfing check (requires 4 consecutive passes = ~3.5s of 2+ faces)
           if (result.faceCount >= 2) {
-            setIsShoulderSurfing(true);
-            if (lastFaceStateLogged.current !== 'SHOULDER_SURFING') {
-              lastFaceStateLogged.current = 'SHOULDER_SURFING';
-              issueProctorWarning('Secondary person detected viewing confidential screen', 'SHOULDER_SURFING');
+            consecutiveMultipleFaces.current += 1;
+            if (consecutiveMultipleFaces.current >= 4) {
+              setIsShoulderSurfing(true);
+              if (lastFaceStateLogged.current !== 'SHOULDER_SURFING') {
+                lastFaceStateLogged.current = 'SHOULDER_SURFING';
+                issueProctorWarning('Secondary person detected viewing confidential screen', 'SHOULDER_SURFING');
+              }
             }
           } else {
+            consecutiveMultipleFaces.current = 0;
             setIsShoulderSurfing(false);
           }
         } else {
           // Face temporarily not detected in frame
           consecutiveAbsentFrames.current += 1;
           const frames = consecutiveAbsentFrames.current;
+          consecutiveMultipleFaces.current = 0;
 
-          // 1-3 frames (~2.4s): brief glance, stay normal
-          if (frames > 3 && frames <= 18) {
-            // 4-18 frames (~3s to 15s): show gentle warning, keep examination visible!
+          // 1-10 frames (~1s to 8s): normal glance / typing down - keep workspace active and normal
+          if (frames > 10 && frames <= 45) {
+            // 11-45 frames (~9s to 38s): subtle yellow banner, WORKSPACE REMAINS 100% VISIBLE!
             if (presenceState !== 'SESSION_LOCKED') {
               setPresenceState('PRESENCE_UNCERTAIN');
             }
-          } else if (frames > 18) {
-            // Sustained continuous absence (>15-20s): temporarily protect materials
+          } else if (frames > 45) {
+            // Sustained continuous absence (>38s without returning): temporarily protect materials
             if (presenceState !== 'SESSION_LOCKED') {
               setPresenceState('TEMPORARILY_ABSENT');
             }
             if (lastFaceStateLogged.current !== 'ABSENT') {
               lastFaceStateLogged.current = 'ABSENT';
-              issueProctorWarning('Presence check: Official absent from camera view for >15s', 'FACE_ABSENT');
+              issueProctorWarning('Presence check: Official absent from camera view for >35s', 'FACE_ABSENT');
             }
           }
         }
