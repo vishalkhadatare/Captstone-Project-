@@ -24,8 +24,19 @@ import {
   AlertCircle,
   Maximize2,
   ExternalLink,
+  Play,
+  Pause,
+  Volume2,
+  VolumeX,
 } from 'lucide-react';
-import { AuthorityProctorSession, AuthorityProctorEvent, AuthoritySurveillanceMetrics, User, VoiceEvidenceItem } from '../../types';
+import {
+  AuthorityProctorSession,
+  AuthorityProctorEvent,
+  AuthoritySurveillanceMetrics,
+  User,
+  VoiceEvidenceItem,
+  CameraEvidenceItem,
+} from '../../types';
 import { api } from '../../api';
 
 interface AuthoritySurveillanceDashboardProps {
@@ -53,7 +64,31 @@ export const AuthoritySurveillanceDashboard: React.FC<AuthoritySurveillanceDashb
   const [selectedSession, setSelectedSession] = useState<AuthorityProctorSession | null>(null);
   const [sessionEvents, setSessionEvents] = useState<AuthorityProctorEvent[]>([]);
   const [sessionEvidence, setSessionEvidence] = useState<VoiceEvidenceItem[]>([]);
+  const [sessionCameraEvidence, setSessionCameraEvidence] = useState<CameraEvidenceItem[]>([]);
   const [loadingReview, setLoadingReview] = useState(false);
+  const [reviewError, setReviewError] = useState<string | null>(null);
+
+  // Dedicated Photo Viewer & Audio Player Modals
+  const [photoViewerModal, setPhotoViewerModal] = useState<{
+    open: boolean;
+    evidence: {
+      url: string;
+      title?: string;
+      timestamp?: string;
+      evidenceId?: string;
+      warningNumber?: number;
+      officialName?: string;
+    } | null;
+  }>({ open: false, evidence: null });
+
+  const [audioPlayerModal, setAudioPlayerModal] = useState<{
+    open: boolean;
+    evidence: VoiceEvidenceItem | null;
+  }>({ open: false, evidence: null });
+
+  // Auditor Inquiry Decision State
+  const [auditorRemarksInput, setAuditorRemarksInput] = useState('');
+  const [reviewActionLoading, setReviewActionLoading] = useState(false);
 
   // Lockdown Modal State
   const [lockdownModalOpen, setLockdownModalOpen] = useState(false);
@@ -94,15 +129,37 @@ export const AuthoritySurveillanceDashboard: React.FC<AuthoritySurveillanceDashb
   const handleOpenReview = async (session: AuthorityProctorSession) => {
     setSelectedSession(session);
     setLoadingReview(true);
+    setReviewError(null);
     try {
       const res = await api.authorityProctor.getSessionReview(session.id);
       setSelectedSession(res.session);
       setSessionEvents(res.events || []);
       setSessionEvidence(res.evidence || []);
+      setSessionCameraEvidence(res.camera_evidence || []);
     } catch (err: any) {
       console.error('Error fetching review:', err);
+      setReviewError(err.message || 'Unable to load security evidence.');
     } finally {
       setLoadingReview(false);
+    }
+  };
+
+  const handleAuditorAction = async (action: 'MARK_REVIEWED' | 'ESCALATE' | 'CLOSE_CASE') => {
+    if (!selectedSession) return;
+    setReviewActionLoading(true);
+    try {
+      const res = await api.authorityProctor.reviewAction(selectedSession.id, {
+        action,
+        remarks: auditorRemarksInput.trim() || undefined,
+      });
+      setSelectedSession(res.session);
+      setStatusMessage({ type: 'success', text: res.message });
+      setAuditorRemarksInput('');
+      loadDashboard(false);
+    } catch (err: any) {
+      setStatusMessage({ type: 'error', text: err.message || 'Failed to execute auditor action.' });
+    } finally {
+      setReviewActionLoading(false);
     }
   };
 
@@ -367,6 +424,30 @@ export const AuthoritySurveillanceDashboard: React.FC<AuthoritySurveillanceDashb
                     <td className="py-3.5 px-4">
                       <div className="font-semibold text-slate-900">{s.user_name}</div>
                       <div className="text-[11px] text-slate-400">{s.user_email}</div>
+                      <div className="flex flex-wrap items-center gap-1.5 mt-1">
+                        {(s.has_camera_evidence || s.verification_snapshot || (s.camera_evidence_count && s.camera_evidence_count > 0)) && (
+                          <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[9px] font-semibold bg-emerald-50 text-emerald-700 border border-emerald-200">
+                            <Camera className="w-2.5 h-2.5" />
+                            Camera Evidence Available
+                          </span>
+                        )}
+                        {(s.has_voice_evidence || (s.voice_evidence_count && s.voice_evidence_count > 0)) && (
+                          <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[9px] font-semibold bg-indigo-50 text-indigo-700 border border-indigo-200">
+                            <Mic className="w-2.5 h-2.5" />
+                            Voice Evidence ({s.voice_evidence_count || 1})
+                          </span>
+                        )}
+                        {s.warning_count !== undefined && s.warning_count > 0 && (
+                          <span className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[9px] font-bold ${
+                            s.warning_count >= 3
+                              ? 'bg-rose-100 text-rose-800 border border-rose-300'
+                              : 'bg-amber-100 text-amber-800 border border-amber-300'
+                          }`}>
+                            <AlertTriangle className="w-2.5 h-2.5" />
+                            {s.warning_count}/3 Warnings
+                          </span>
+                        )}
+                      </div>
                     </td>
 
                     {/* Role & Enclave */}
@@ -402,9 +483,24 @@ export const AuthoritySurveillanceDashboard: React.FC<AuthoritySurveillanceDashb
                         </span>
 
                         {/* Mic */}
-                        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-semibold bg-slate-100 text-slate-700 border border-slate-200">
-                          <Mic className="w-3 h-3 text-slate-500" />
-                          {s.audio_level_db} dB
+                        <span
+                          className={`inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-semibold ${
+                            s.microphone_status === 'ACTIVE'
+                              ? 'bg-slate-100 text-slate-700 border border-slate-200'
+                              : 'bg-rose-50 text-rose-700 border border-rose-200'
+                          }`}
+                        >
+                          {s.microphone_status === 'ACTIVE' ? (
+                            <>
+                              <Mic className="w-3 h-3 text-slate-500" />
+                              {s.audio_level_db !== undefined ? `${s.audio_level_db} dB` : 'Active'}
+                            </>
+                          ) : (
+                            <>
+                              <MicOff className="w-3 h-3 text-rose-500" />
+                              Mic Off
+                            </>
+                          )}
                         </span>
                       </div>
                     </td>
@@ -461,7 +557,12 @@ export const AuthoritySurveillanceDashboard: React.FC<AuthoritySurveillanceDashb
 
                     {/* Status */}
                     <td className="py-3.5 px-4">
-                      {s.status === 'LOCKED' ? (
+                      {s.status === 'FLAGGED_FOR_REVIEW' ? (
+                        <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-rose-100 text-rose-800 border border-rose-300 flex items-center gap-1 w-fit animate-pulse">
+                          <AlertTriangle className="w-3 h-3 text-rose-600" />
+                          FLAGGED FOR REVIEW
+                        </span>
+                      ) : s.status === 'LOCKED' ? (
                         <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-rose-900 text-rose-100 border border-rose-700 flex items-center gap-1 w-fit">
                           <Lock className="w-3 h-3" />
                           LOCKED
@@ -542,11 +643,45 @@ export const AuthoritySurveillanceDashboard: React.FC<AuthoritySurveillanceDashb
                     Identity Verification Photo
                   </span>
                   {selectedSession.verification_snapshot ? (
-                    <img
-                      src={selectedSession.verification_snapshot}
-                      alt="Verification"
-                      className="w-32 h-24 object-cover mx-auto rounded-lg border border-slate-700 -scale-x-100"
-                    />
+                    <div>
+                      <img
+                        src={selectedSession.verification_snapshot}
+                        alt="Verification"
+                        className="w-32 h-24 object-cover mx-auto rounded-lg border border-slate-700 -scale-x-100 cursor-pointer"
+                        onClick={() =>
+                          setPhotoViewerModal({
+                            open: true,
+                            evidence: {
+                              url: selectedSession.verification_snapshot!,
+                              title: 'Initial Identity Verification Snapshot',
+                              timestamp: selectedSession.created_at,
+                              evidenceId: 'VERIF-INIT',
+                              warningNumber: 0,
+                              officialName: selectedSession.user_name,
+                            },
+                          })
+                        }
+                      />
+                      <button
+                        onClick={() =>
+                          setPhotoViewerModal({
+                            open: true,
+                            evidence: {
+                              url: selectedSession.verification_snapshot!,
+                              title: 'Initial Identity Verification Snapshot',
+                              timestamp: selectedSession.created_at,
+                              evidenceId: 'VERIF-INIT',
+                              warningNumber: 0,
+                              officialName: selectedSession.user_name,
+                            },
+                          })
+                        }
+                        className="mt-2 px-2.5 py-1 rounded bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-200 text-[10px] font-semibold flex items-center justify-center gap-1 mx-auto cursor-pointer"
+                      >
+                        <Maximize2 className="w-3 h-3 text-emerald-400" />
+                        View Image
+                      </button>
+                    </div>
                   ) : (
                     <div className="w-32 h-24 bg-slate-900 rounded-lg mx-auto flex items-center justify-center text-slate-500 border border-slate-800 text-xs">
                       No Photo Captured
@@ -572,9 +707,17 @@ export const AuthoritySurveillanceDashboard: React.FC<AuthoritySurveillanceDashb
                       </span>
                     </div>
                     <div className="flex items-center justify-between">
-                      <span className="text-xs text-slate-400">Camera Telemetry:</span>
+                      <span className="text-xs text-slate-400">Hardware Telemetry:</span>
                       <span className="text-xs font-mono text-emerald-400">
-                        {selectedSession.camera_status} | {selectedSession.microphone_status}
+                        Camera: {selectedSession.camera_status} | Mic: {selectedSession.microphone_status === 'ACTIVE' ? `${selectedSession.audio_level_db} dB` : 'Off'}
+                      </span>
+                    </div>
+                    <div className="flex items-center justify-between">
+                      <span className="text-xs text-slate-400">Warning History:</span>
+                      <span className={`text-xs font-mono font-bold ${
+                        (selectedSession.warning_count || 0) >= 3 ? 'text-rose-400' : (selectedSession.warning_count || 0) > 0 ? 'text-amber-400' : 'text-emerald-400'
+                      }`}>
+                        {selectedSession.warning_count || 0} / 3 Warnings Capped
                       </span>
                     </div>
                   </div>
@@ -597,21 +740,121 @@ export const AuthoritySurveillanceDashboard: React.FC<AuthoritySurveillanceDashb
                 </div>
               </div>
 
-              {/* Voice Recordings Submitted to Auditor */}
-              {sessionEvidence && sessionEvidence.length > 0 && (
-                <div className="p-4 rounded-xl bg-slate-950 border border-indigo-900/60 space-y-3">
-                  <div className="flex items-center justify-between">
-                    <div className="flex items-center gap-2">
-                      <span className="w-2.5 h-2.5 rounded-full bg-indigo-500 animate-ping" />
-                      <h4 className="text-xs font-bold uppercase tracking-wider text-indigo-300">
-                        Auditor Voice Evidence Recordings ({sessionEvidence.length})
-                      </h4>
-                    </div>
-                    <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-indigo-950 text-indigo-300 border border-indigo-700">
-                      Chief Vigilance Review Queue
-                    </span>
+              {/* Camera Snapshots & Frame Evidence */}
+              <div className="p-4 rounded-xl bg-slate-950 border border-slate-800 space-y-3">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <Camera className="w-4 h-4 text-emerald-400" />
+                    <h4 className="text-xs font-bold uppercase tracking-wider text-slate-200">
+                      Camera Snapshot Evidence ({sessionCameraEvidence.length})
+                    </h4>
                   </div>
+                  <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-emerald-950 text-emerald-300 border border-emerald-700">
+                    CBI Forensic Queue
+                  </span>
+                </div>
 
+                {loadingReview ? (
+                  <div className="text-center py-6 text-slate-400 text-xs flex items-center justify-center gap-2">
+                    <RefreshCw className="w-4 h-4 animate-spin text-emerald-400" />
+                    Loading evidence...
+                  </div>
+                ) : reviewError ? (
+                  <div className="text-center py-6 text-rose-400 text-xs flex items-center justify-center gap-2">
+                    <AlertCircle className="w-4 h-4" />
+                    {reviewError}
+                    <button
+                      onClick={() => selectedSession && handleOpenReview(selectedSession)}
+                      className="underline text-rose-300 ml-2 cursor-pointer"
+                    >
+                      Retry
+                    </button>
+                  </div>
+                ) : sessionCameraEvidence.length === 0 && !selectedSession.verification_snapshot ? (
+                  <div className="text-center py-6 text-slate-500 text-xs">
+                    No camera evidence captured for this session.
+                  </div>
+                ) : (
+                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                    {sessionCameraEvidence.map((cam) => (
+                      <div
+                        key={cam.id}
+                        className="p-2.5 rounded-lg bg-slate-900 border border-slate-800 space-y-2 text-center"
+                      >
+                        <img
+                          src={cam.image_data_url}
+                          alt={cam.event_type}
+                          className="w-full h-20 object-cover rounded border border-slate-700 -scale-x-100 cursor-pointer"
+                          onClick={() =>
+                            setPhotoViewerModal({
+                              open: true,
+                              evidence: {
+                                url: cam.image_data_url,
+                                title: cam.event_type,
+                                timestamp: cam.created_at,
+                                evidenceId: cam.id,
+                                warningNumber: cam.warning_number,
+                                officialName: cam.user_name,
+                              },
+                            })
+                          }
+                        />
+                        <div className="text-[10px] font-bold text-slate-300 truncate">
+                          {cam.event_type.replace(/_/g, ' ')}
+                        </div>
+                        <div className="text-[9px] text-slate-400 font-mono">
+                          {new Date(cam.created_at).toLocaleTimeString()}
+                          {cam.warning_number ? ` (W#${cam.warning_number})` : ''}
+                        </div>
+                        <button
+                          onClick={() =>
+                            setPhotoViewerModal({
+                              open: true,
+                              evidence: {
+                                url: cam.image_data_url,
+                                title: cam.event_type,
+                                timestamp: cam.created_at,
+                                evidenceId: cam.id,
+                                warningNumber: cam.warning_number,
+                                officialName: cam.user_name,
+                              },
+                            })
+                          }
+                          className="w-full py-1 rounded bg-slate-800 hover:bg-slate-700 text-slate-200 text-[10px] font-semibold flex items-center justify-center gap-1 cursor-pointer"
+                        >
+                          <Maximize2 className="w-2.5 h-2.5 text-emerald-400" />
+                          View Image
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              {/* Voice Recordings Submitted to Auditor */}
+              <div className="p-4 rounded-xl bg-slate-950 border border-indigo-900/60 space-y-3">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <span className="w-2.5 h-2.5 rounded-full bg-indigo-500 animate-ping" />
+                    <h4 className="text-xs font-bold uppercase tracking-wider text-indigo-300">
+                      Auditor Voice Evidence Recordings ({sessionEvidence.length})
+                    </h4>
+                  </div>
+                  <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-indigo-950 text-indigo-300 border border-indigo-700">
+                    CBI Chief Vigilance Review Queue
+                  </span>
+                </div>
+
+                {loadingReview ? (
+                  <div className="text-center py-6 text-slate-400 text-xs flex items-center justify-center gap-2">
+                    <RefreshCw className="w-4 h-4 animate-spin text-indigo-400" />
+                    Loading evidence...
+                  </div>
+                ) : sessionEvidence.length === 0 ? (
+                  <div className="text-center py-6 text-slate-500 text-xs">
+                    No voice evidence available.
+                  </div>
+                ) : (
                   <div className="space-y-3">
                     {sessionEvidence.map((ev) => (
                       <div
@@ -625,21 +868,111 @@ export const AuthoritySurveillanceDashboard: React.FC<AuthoritySurveillanceDashb
                             <span className="text-slate-400 font-mono text-[11px]">
                               {new Date(ev.created_at).toLocaleTimeString()} ({ev.duration_seconds}s)
                             </span>
+                            {ev.warning_number ? (
+                              <span className="px-1.5 py-0.2 rounded text-[9px] font-bold bg-amber-950 text-amber-300 border border-amber-800">
+                                Warning #{ev.warning_number}
+                              </span>
+                            ) : null}
                           </div>
-                          <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-amber-950 text-amber-300 border border-amber-800">
-                            {ev.review_status}
-                          </span>
+                          <div className="flex items-center gap-2">
+                            <span className="text-[10px] font-mono text-slate-400">
+                              ID: {ev.id}
+                            </span>
+                            <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-amber-950 text-amber-300 border border-amber-800">
+                              {ev.review_status || 'PENDING_REVIEW'}
+                            </span>
+                          </div>
                         </div>
-                        <audio
-                          controls
-                          src={ev.audio_data_url}
-                          className="w-full h-8 mt-1 accent-indigo-500"
-                        />
+
+                        <div className="flex items-center gap-3">
+                          <audio
+                            controls
+                            src={ev.audio_data_url}
+                            className="flex-1 h-8 accent-indigo-500"
+                          />
+                          <button
+                            onClick={() => setAudioPlayerModal({ open: true, evidence: ev })}
+                            className="px-2.5 py-1.5 rounded bg-indigo-950 hover:bg-indigo-900 border border-indigo-700 text-indigo-300 text-[10px] font-semibold flex items-center gap-1 cursor-pointer shrink-0"
+                          >
+                            <Play className="w-3 h-3 text-indigo-400" />
+                            Play Audio
+                          </button>
+                        </div>
                       </div>
                     ))}
                   </div>
+                )}
+              </div>
+
+              {/* CBI Chief Vigilance & Security Auditor Review Actions */}
+              <div className="p-4 rounded-xl bg-slate-950 border border-slate-800 space-y-3">
+                <div className="flex items-center justify-between">
+                  <h4 className="text-xs font-bold uppercase tracking-wider text-slate-300 flex items-center gap-1.5">
+                    <UserCheck className="w-4 h-4 text-emerald-400" />
+                    CBI Chief Vigilance & Security Auditor Decision & Actions
+                  </h4>
+                  <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-slate-900 text-slate-400 border border-slate-800">
+                    Review Status: {selectedSession.review_status || 'PENDING_REVIEW'}
+                  </span>
                 </div>
-              )}
+
+                <div>
+                  <label className="text-[11px] font-semibold text-slate-400 block mb-1">
+                    Auditor Review Remarks / Forensic Finding Notes:
+                  </label>
+                  <input
+                    type="text"
+                    value={auditorRemarksInput}
+                    onChange={(e) => setAuditorRemarksInput(e.target.value)}
+                    placeholder="Enter formal findings, compliance remarks, or inquiry notes..."
+                    className="w-full px-3 py-2 rounded-lg bg-slate-900 border border-slate-700 text-xs text-slate-100 focus:outline-none focus:ring-1 focus:ring-emerald-500 placeholder:text-slate-500"
+                  />
+                  {selectedSession.auditor_remarks && (
+                    <div className="text-[11px] text-slate-400 mt-1 italic">
+                      Previous Note by {selectedSession.reviewed_by || 'Auditor'}: "{selectedSession.auditor_remarks}"
+                    </div>
+                  )}
+                </div>
+
+                <div className="flex flex-wrap items-center gap-2 pt-1">
+                  <button
+                    onClick={() => handleAuditorAction('MARK_REVIEWED')}
+                    disabled={reviewActionLoading}
+                    className="px-3 py-1.5 rounded-lg bg-emerald-700 hover:bg-emerald-600 disabled:opacity-50 text-white text-xs font-semibold flex items-center gap-1.5 cursor-pointer"
+                  >
+                    <CheckCircle2 className="w-3.5 h-3.5" />
+                    Mark Reviewed
+                  </button>
+
+                  <button
+                    onClick={() => handleAuditorAction('ESCALATE')}
+                    disabled={reviewActionLoading}
+                    className="px-3 py-1.5 rounded-lg bg-amber-600 hover:bg-amber-500 disabled:opacity-50 text-white text-xs font-semibold flex items-center gap-1.5 cursor-pointer"
+                  >
+                    <AlertTriangle className="w-3.5 h-3.5" />
+                    Escalate to High Priority Inquiry
+                  </button>
+
+                  <button
+                    onClick={() => handleAuditorAction('CLOSE_CASE')}
+                    disabled={reviewActionLoading}
+                    className="px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 border border-slate-700 disabled:opacity-50 text-slate-200 text-xs font-semibold flex items-center gap-1.5 cursor-pointer"
+                  >
+                    <XCircle className="w-3.5 h-3.5" />
+                    Close Case
+                  </button>
+
+                  {!selectedSession.emergency_locked && (
+                    <button
+                      onClick={() => handleOpenLockdown(selectedSession)}
+                      className="ml-auto px-3 py-1.5 rounded-lg bg-rose-900 hover:bg-rose-800 text-white text-xs font-semibold flex items-center gap-1.5 cursor-pointer"
+                    >
+                      <Lock className="w-3.5 h-3.5" />
+                      Execute Remote Blackout
+                    </button>
+                  )}
+                </div>
+              </div>
 
               {/* Event Timeline */}
               <div>
@@ -649,7 +982,7 @@ export const AuthoritySurveillanceDashboard: React.FC<AuthoritySurveillanceDashb
 
                 {loadingReview ? (
                   <div className="text-center py-8 text-slate-400 text-xs">
-                    <RefreshCw className="w-5 h-5 animate-spin mx-auto mb-2" />
+                    <RefreshCw className="w-5 h-5 animate-spin mx-auto mb-2 text-emerald-400" />
                     Loading session audit events...
                   </div>
                 ) : sessionEvents.length === 0 ? (
@@ -696,6 +1029,127 @@ export const AuthoritySurveillanceDashboard: React.FC<AuthoritySurveillanceDashb
                   </div>
                 )}
               </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* PHOTO VIEWER MODAL */}
+      {photoViewerModal.open && photoViewerModal.evidence && (
+        <div className="fixed inset-0 z-60 bg-slate-950/90 backdrop-blur-md flex items-center justify-center p-4">
+          <div className="bg-slate-900 border border-slate-700 rounded-2xl w-full max-w-xl p-6 text-slate-100 shadow-2xl space-y-4">
+            <div className="flex items-center justify-between border-b border-slate-800 pb-3">
+              <div>
+                <h3 className="text-sm font-bold text-white flex items-center gap-2">
+                  <Camera className="w-4 h-4 text-emerald-400" />
+                  Forensic Camera Snapshot Evidence
+                </h3>
+                <p className="text-[11px] text-slate-400">
+                  Evidence ID: <span className="font-mono text-emerald-400">{photoViewerModal.evidence.evidenceId || 'CAM-EV-AUDIT'}</span>
+                  {photoViewerModal.evidence.officialName ? ` • Official: ${photoViewerModal.evidence.officialName}` : ''}
+                </p>
+              </div>
+              <button
+                onClick={() => setPhotoViewerModal({ open: false, evidence: null })}
+                className="p-1 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 cursor-pointer"
+              >
+                <XCircle className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="rounded-xl overflow-hidden border border-slate-700 bg-slate-950 flex items-center justify-center p-1">
+              <img
+                src={photoViewerModal.evidence.url}
+                alt="Forensic Evidence"
+                className="max-h-[50vh] w-auto object-contain rounded-lg -scale-x-100"
+              />
+            </div>
+
+            <div className="grid grid-cols-2 gap-3 text-xs bg-slate-950 p-3 rounded-lg border border-slate-800">
+              <div>
+                <span className="text-slate-400 block text-[10px] uppercase">Associated Event</span>
+                <span className="font-semibold text-slate-200">{photoViewerModal.evidence.title || 'Camera Snapshot'}</span>
+              </div>
+              <div>
+                <span className="text-slate-400 block text-[10px] uppercase">Timestamp</span>
+                <span className="font-mono text-slate-300">
+                  {photoViewerModal.evidence.timestamp ? new Date(photoViewerModal.evidence.timestamp).toLocaleString() : 'N/A'}
+                </span>
+              </div>
+            </div>
+
+            <div className="flex items-center justify-between pt-2">
+              <span className="text-[10px] font-mono text-amber-400">
+                RESTRICTED FORENSIC RECORD • ACCESS CONTROLLED
+              </span>
+              <button
+                onClick={() => setPhotoViewerModal({ open: false, evidence: null })}
+                className="px-4 py-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-semibold cursor-pointer"
+              >
+                Close Viewer
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* SECURE AUDIO PLAYER MODAL */}
+      {audioPlayerModal.open && audioPlayerModal.evidence && (
+        <div className="fixed inset-0 z-60 bg-slate-950/90 backdrop-blur-md flex items-center justify-center p-4">
+          <div className="bg-slate-900 border border-slate-700 rounded-2xl w-full max-w-md p-6 text-slate-100 shadow-2xl space-y-4">
+            <div className="flex items-center justify-between border-b border-slate-800 pb-3">
+              <div>
+                <h3 className="text-sm font-bold text-white flex items-center gap-2">
+                  <Mic className="w-4 h-4 text-indigo-400" />
+                  Forensic Voice Evidence Player
+                </h3>
+                <p className="text-[11px] text-slate-400">
+                  Evidence ID: <span className="font-mono text-indigo-400">{audioPlayerModal.evidence.id}</span>
+                </p>
+              </div>
+              <button
+                onClick={() => setAudioPlayerModal({ open: false, evidence: null })}
+                className="p-1 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 cursor-pointer"
+              >
+                <XCircle className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="bg-slate-950 p-4 rounded-xl border border-indigo-900/40 space-y-3">
+              <div className="flex items-center justify-between text-xs">
+                <span className="text-slate-400">Official:</span>
+                <span className="font-semibold text-slate-200">{audioPlayerModal.evidence.user_name}</span>
+              </div>
+              <div className="flex items-center justify-between text-xs">
+                <span className="text-slate-400">Duration:</span>
+                <span className="font-mono text-slate-200">{audioPlayerModal.evidence.duration_seconds}s</span>
+              </div>
+              <div className="flex items-center justify-between text-xs">
+                <span className="text-slate-400">Recorded At:</span>
+                <span className="font-mono text-slate-300">{new Date(audioPlayerModal.evidence.created_at).toLocaleString()}</span>
+              </div>
+              <div className="flex items-center justify-between text-xs">
+                <span className="text-slate-400">Designated Recipient:</span>
+                <span className="font-semibold text-indigo-300">{audioPlayerModal.evidence.recipient || 'CBI Chief Vigilance & Security Auditor'}</span>
+              </div>
+              <audio
+                controls
+                autoPlay={false}
+                src={audioPlayerModal.evidence.audio_data_url}
+                className="w-full h-10 mt-2 accent-indigo-500"
+              />
+            </div>
+
+            <div className="flex items-center justify-between pt-2">
+              <span className="text-[10px] font-mono text-amber-400">
+                RESTRICTED FORENSIC AUDIO • ACCESS MONITORED
+              </span>
+              <button
+                onClick={() => setAudioPlayerModal({ open: false, evidence: null })}
+                className="px-4 py-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-semibold cursor-pointer"
+              >
+                Close Player
+              </button>
             </div>
           </div>
         </div>

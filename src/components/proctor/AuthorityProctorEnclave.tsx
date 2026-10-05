@@ -510,11 +510,18 @@ export const AuthorityProctorEnclave: React.FC<AuthorityProctorEnclaveProps> = (
     if (now - lastWarningTimeRef.current < 4000) return;
     lastWarningTimeRef.current = now;
 
+    // Capture visual frame evidence at the moment of violation
+    const violationSnap = takeSnapshot();
+
     try {
       const res = await api.authorityProctor.issueWarning({
         session_id: session.id,
         reason,
-        details: { event_type: eventType },
+        details: {
+          event_type: eventType,
+          snapshot: violationSnap || undefined,
+          presence_status: isFaceAbsent ? 'ABSENT' : isShoulderSurfing ? 'SHOULDER_SURFING_DETECTED' : 'PRESENT',
+        },
       });
 
       const nextCount = Math.min(3, res.warning_count);
@@ -535,10 +542,14 @@ export const AuthorityProctorEnclave: React.FC<AuthorityProctorEnclaveProps> = (
       });
 
       addTimelineEvent(`WARNING_${nextCount}`, nextCount === 3 ? 'CRITICAL' : 'HIGH', reason);
+      if (violationSnap) {
+        addTimelineEvent('VIOLATION_SNAPSHOT_SAVED', 'HIGH', `Frame evidence associated with Warning #${nextCount} secured for Auditor`);
+      }
 
       if (nextCount >= 3 || res.is_locked) {
         setIsEmergencyLocked(true);
-        setEmergencyReason(`Maximum warning threshold reached (3/3). Session flagged for review by Chief Vigilance & Security Auditor.`);
+        setEmergencyReason(`Maximum warning threshold reached (3/3). Session flagged for review by CBI Chief Vigilance & Security Auditor.`);
+        addTimelineEvent('AUDIT_ESCALATION', 'CRITICAL', 'Case escalated to CBI Chief Vigilance & Security Auditor (Priority: High)');
       }
     } catch (err) {
       console.error('Error issuing authority warning:', err);
@@ -734,6 +745,32 @@ export const AuthorityProctorEnclave: React.FC<AuthorityProctorEnclaveProps> = (
 
     return () => clearInterval(interval);
   }, [enclaveStarted, session, cameraState, micState, isShoulderSurfing, isFaceAbsent, faceResult, audioLevelDb, warningCount]);
+
+  // Periodic Surveillance Snapshot (Configurable interval e.g. 5 minutes)
+  useEffect(() => {
+    if (!enclaveStarted || !session || cameraState !== 'granted') return;
+    const SNAPSHOT_INTERVAL_MS = 5 * 60 * 1000;
+    const snapshotTimer = setInterval(async () => {
+      try {
+        const snap = takeSnapshot();
+        if (snap) {
+          await api.authorityProctor.submitCameraEvidence({
+            session_id: session.id,
+            exam_id: examId,
+            image_data_url: snap,
+            event_type: 'PERIODIC_SURVEILLANCE_SNAPSHOT',
+            presence_status: isFaceAbsent ? 'ABSENT' : isShoulderSurfing ? 'SHOULDER_SURFING_DETECTED' : 'PRESENT',
+            warning_number: warningCount,
+          });
+          addTimelineEvent('PERIODIC_SNAPSHOT_CAPTURED', 'LOW', 'Scheduled surveillance snapshot archived');
+        }
+      } catch (err) {
+        console.warn('Periodic snapshot archiving notice:', err);
+      }
+    }, SNAPSHOT_INTERVAL_MS);
+
+    return () => clearInterval(snapshotTimer);
+  }, [enclaveStarted, session, cameraState, isFaceAbsent, isShoulderSurfing, warningCount, examId]);
 
   // =========================================================================
   // 9. VOICE EVIDENCE RECORDER (MediaRecorder API)

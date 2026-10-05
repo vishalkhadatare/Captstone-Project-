@@ -1007,14 +1007,36 @@ function initializeSchema(db: Database) {
       user_name TEXT NOT NULL,
       user_role TEXT NOT NULL,
       audio_data_url TEXT NOT NULL,
+      storage_reference TEXT,
       duration_seconds INTEGER DEFAULT 0,
       file_size_bytes INTEGER DEFAULT 0,
       mime_type TEXT DEFAULT 'audio/webm',
       event_type TEXT DEFAULT 'VOICE_RECORDING_EVIDENCE',
       warning_number INTEGER DEFAULT 0,
       submitted_by TEXT,
-      recipient TEXT DEFAULT 'Chief Vigilance & Security Auditor',
-      review_status TEXT DEFAULT 'PENDING_AUDIT',
+      recipient TEXT DEFAULT 'CBI Chief Vigilance & Security Auditor',
+      review_status TEXT DEFAULT 'PENDING_REVIEW',
+      created_at TEXT NOT NULL
+    );
+
+    -- Proctor Camera Evidence (Webcam photo frames, verification shots, warning snapshots)
+    CREATE TABLE IF NOT EXISTS proctor_camera_evidence (
+      id TEXT PRIMARY KEY,
+      session_id TEXT NOT NULL,
+      exam_id TEXT,
+      user_id TEXT NOT NULL,
+      user_name TEXT NOT NULL,
+      user_role TEXT NOT NULL,
+      image_data_url TEXT NOT NULL,
+      storage_reference TEXT,
+      file_size_bytes INTEGER DEFAULT 0,
+      mime_type TEXT DEFAULT 'image/jpeg',
+      event_type TEXT DEFAULT 'CAMERA_SNAPSHOT',
+      presence_status TEXT DEFAULT 'PRESENT',
+      warning_number INTEGER DEFAULT 0,
+      submitted_by TEXT,
+      recipient TEXT DEFAULT 'CBI Chief Vigilance & Security Auditor',
+      review_status TEXT DEFAULT 'PENDING_REVIEW',
       created_at TEXT NOT NULL
     );
 
@@ -1166,6 +1188,11 @@ function initializeSchema(db: Database) {
   safeAddColumn('proctor_events', 'user_role TEXT');
   safeAddColumn('proctor_events', 'snapshot_thumbnail TEXT');
   safeAddColumn('authority_proctor_sessions', 'warning_count INTEGER DEFAULT 0');
+  safeAddColumn('authority_proctor_sessions', 'review_status TEXT DEFAULT "PENDING_REVIEW"');
+  safeAddColumn('authority_proctor_sessions', 'auditor_remarks TEXT');
+  safeAddColumn('authority_proctor_sessions', 'reviewed_by TEXT');
+  safeAddColumn('authority_proctor_sessions', 'reviewed_at TEXT');
+  safeAddColumn('proctor_voice_evidence', 'storage_reference TEXT');
 
   try {
     const proctorCols = executeQuery(db, 'PRAGMA table_info(proctor_events)', []);
@@ -1289,7 +1316,7 @@ function initializeSchema(db: Database) {
           face_status, faces_detected_count, audio_level_db, leak_risk_score,
           leak_risk_level, last_heartbeat_at, created_at, updated_at
         ) VALUES (
-          'AUTH-SESS-TRANS-01', 'usr-trans-01', 'Vikram Joshi', 'translator@nbte.edu.in', 'TRANSLATOR',
+          'AUTH-SESS-TRANS-01', 'usr-translator-01', 'Prof. Meera Deshmukh (Chief Linguistic Translator)', 'translator@nbte.edu.in', 'TRANSLATOR',
           'ORG-ZEROLEAK-NATIONAL', 'TRANSLATOR_PORTAL', 'EXAM-2026-CS-NATIONAL',
           'ACTIVE', 'ACTIVE', 'ACTIVE', 'ACTIVE', 'SHOULDER_SURFING_DETECTED', 2, -34.0, 65,
           'HIGH', ?, ?, ?
@@ -1300,18 +1327,35 @@ function initializeSchema(db: Database) {
         INSERT INTO proctor_events (
           id, session_id, user_id, user_role, exam_id, event_type, severity, risk_points, timestamp, metadata_json, created_at
         ) VALUES (
-          'AUTH-EV-02', 'AUTH-SESS-TRANS-01', 'usr-trans-01', 'TRANSLATOR', 'EXAM-2026-CS-NATIONAL',
+          'AUTH-EV-02', 'AUTH-SESS-TRANS-01', 'usr-translator-01', 'TRANSLATOR', 'EXAM-2026-CS-NATIONAL',
           'ENCLAVE_STARTED', 'LOW', 0, ?, '{"action":"Translator Enclave Verified"}', ?
         ),
         (
-          'AUTH-EV-03', 'AUTH-SESS-TRANS-01', 'usr-trans-01', 'TRANSLATOR', 'EXAM-2026-CS-NATIONAL',
+          'AUTH-EV-03', 'AUTH-SESS-TRANS-01', 'usr-translator-01', 'TRANSLATOR', 'EXAM-2026-CS-NATIONAL',
           'SHOULDER_SURFING_DETECTED', 'HIGH', 35, ?, '{"faces_detected":2,"action":"Confidential paper instantly blurred & watermarked to avoid leak"}', ?
         ),
         (
-          'AUTH-EV-04', 'AUTH-SESS-TRANS-01', 'usr-trans-01', 'TRANSLATOR', 'EXAM-2026-CS-NATIONAL',
+          'AUTH-EV-04', 'AUTH-SESS-TRANS-01', 'usr-translator-01', 'TRANSLATOR', 'EXAM-2026-CS-NATIONAL',
           'UNAUTHORIZED_WINDOW_SWITCH', 'MEDIUM', 15, ?, '{"window_focus":false,"duration_seconds":3}', ?
         )
       `, [tenMinsAgo, tenMinsAgo, fiveMinsAgo, fiveMinsAgo, twoMinsAgo, twoMinsAgo]);
+
+      // Seed initial verified camera snapshot for Prof. Meera Deshmukh
+      db.run(`
+        INSERT INTO proctor_camera_evidence (
+          id, session_id, exam_id, user_id, user_name, user_role,
+          image_data_url, file_size_bytes, mime_type, event_type,
+          presence_status, warning_number, submitted_by, recipient,
+          review_status, created_at
+        ) VALUES (
+          'CAM-EV-INIT-01', 'AUTH-SESS-TRANS-01', 'EXAM-2026-CS-NATIONAL',
+          'usr-translator-01', 'Prof. Meera Deshmukh (Chief Linguistic Translator)', 'TRANSLATOR',
+          'data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="320" height="240" viewBox="0 0 320 240"><rect width="320" height="240" fill="%230F172A"/><circle cx="160" cy="100" r="45" fill="%231E293B" stroke="%2300A878" stroke-width="3"/><path d="M100 200 C100 155 220 155 220 200" fill="%231E293B" stroke="%2300A878" stroke-width="3"/><text x="160" y="225" font-family="sans-serif" font-size="11" fill="%2300C98B" text-anchor="middle" font-weight="bold">VERIFIED OFFICIAL: PROF. MEERA DESHMUKH</text></svg>',
+          1024, 'image/svg+xml', 'CAMERA_SNAPSHOT',
+          'PRESENT', 0, 'Prof. Meera Deshmukh', 'CBI Chief Vigilance & Security Auditor',
+          'PENDING_REVIEW', ?
+        )
+      `, [tenMinsAgo]);
 
       // 3. Exam Manager Compilation Session
       db.run(`
@@ -1431,16 +1475,40 @@ function initializeSchema(db: Database) {
         user_name TEXT NOT NULL,
         user_role TEXT NOT NULL,
         audio_data_url TEXT NOT NULL,
+        storage_reference TEXT,
         duration_seconds INTEGER DEFAULT 0,
         file_size_bytes INTEGER DEFAULT 0,
         mime_type TEXT DEFAULT 'audio/webm',
         event_type TEXT DEFAULT 'VOICE_RECORDING_EVIDENCE',
         warning_number INTEGER DEFAULT 0,
         submitted_by TEXT,
-        recipient TEXT DEFAULT 'Chief Vigilance & Security Auditor',
-        review_status TEXT DEFAULT 'PENDING_AUDIT',
+        recipient TEXT DEFAULT 'CBI Chief Vigilance & Security Auditor',
+        review_status TEXT DEFAULT 'PENDING_REVIEW',
         created_at TEXT NOT NULL
       )`).catch(() => {});
+      pgPool.query(`CREATE TABLE IF NOT EXISTS proctor_camera_evidence (
+        id TEXT PRIMARY KEY,
+        session_id TEXT NOT NULL,
+        exam_id TEXT,
+        user_id TEXT NOT NULL,
+        user_name TEXT NOT NULL,
+        user_role TEXT NOT NULL,
+        image_data_url TEXT NOT NULL,
+        storage_reference TEXT,
+        file_size_bytes INTEGER DEFAULT 0,
+        mime_type TEXT DEFAULT 'image/jpeg',
+        event_type TEXT DEFAULT 'CAMERA_SNAPSHOT',
+        presence_status TEXT DEFAULT 'PRESENT',
+        warning_number INTEGER DEFAULT 0,
+        submitted_by TEXT,
+        recipient TEXT DEFAULT 'CBI Chief Vigilance & Security Auditor',
+        review_status TEXT DEFAULT 'PENDING_REVIEW',
+        created_at TEXT NOT NULL
+      )`).catch(() => {});
+      pgPool.query(`ALTER TABLE authority_proctor_sessions ADD COLUMN IF NOT EXISTS review_status TEXT DEFAULT 'PENDING_REVIEW'`).catch(() => {});
+      pgPool.query(`ALTER TABLE authority_proctor_sessions ADD COLUMN IF NOT EXISTS auditor_remarks TEXT`).catch(() => {});
+      pgPool.query(`ALTER TABLE authority_proctor_sessions ADD COLUMN IF NOT EXISTS reviewed_by TEXT`).catch(() => {});
+      pgPool.query(`ALTER TABLE authority_proctor_sessions ADD COLUMN IF NOT EXISTS reviewed_at TEXT`).catch(() => {});
     }
   } catch {}
 }

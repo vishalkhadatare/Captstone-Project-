@@ -22,6 +22,8 @@ import {
   AuthorityProctorEvent,
   AuthoritySurveillanceMetrics,
   VoiceEvidenceItem,
+  CameraEvidenceItem,
+  UnifiedEvidenceItem,
   AicteUniversity,
   RegistrationVerificationResult,
   MultiPaperSourcePaper,
@@ -1305,6 +1307,22 @@ export const api = {
         method: 'POST',
         body: JSON.stringify(payload),
       }),
+    submitCameraEvidence: (payload: {
+      session_id: string;
+      exam_id?: string;
+      image_data_url: string;
+      file_size_bytes?: number;
+      mime_type?: string;
+      event_type?: string;
+      presence_status?: string;
+      warning_number?: number;
+    }) =>
+      request<{ success: boolean; evidence: CameraEvidenceItem }>('/api/authority-proctor/camera-evidence', {
+        method: 'POST',
+        body: JSON.stringify(payload),
+      }),
+    getSessionCameraEvidence: (sessionId: string) =>
+      request<{ success: boolean; evidence: CameraEvidenceItem[] }>(`/api/authority-proctor/sessions/${sessionId}/camera-evidence`),
     issueWarning: (payload: { session_id: string; reason: string; details?: any }) =>
       request<{
         success: boolean;
@@ -1328,7 +1346,19 @@ export const api = {
     getSurveillanceDashboard: () =>
       request<{ success: boolean; metrics: AuthoritySurveillanceMetrics; sessions: AuthorityProctorSession[] }>('/api/authority-proctor/dashboard'),
     getSessionReview: (sessionId: string) =>
-      request<{ success: boolean; session: AuthorityProctorSession; events: AuthorityProctorEvent[]; evidence?: VoiceEvidenceItem[] }>(`/api/authority-proctor/sessions/${sessionId}/review`),
+      request<{
+        success: boolean;
+        session: AuthorityProctorSession;
+        events: AuthorityProctorEvent[];
+        evidence?: VoiceEvidenceItem[];
+        camera_evidence?: CameraEvidenceItem[];
+        unified_evidence?: UnifiedEvidenceItem[];
+      }>(`/api/authority-proctor/sessions/${sessionId}/review`),
+    reviewAction: (sessionId: string, payload: { action: 'MARK_REVIEWED' | 'ESCALATE' | 'CLOSE_CASE'; remarks?: string }) =>
+      request<{ success: boolean; message: string; session: AuthorityProctorSession }>(`/api/authority-proctor/sessions/${sessionId}/review-action`, {
+        method: 'POST',
+        body: JSON.stringify(payload),
+      }),
     emergencyLockSession: (sessionId: string, reason: string) =>
       request<{ success: boolean; message: string }>(`/api/authority-proctor/sessions/${sessionId}/emergency-lock`, {
         method: 'POST',

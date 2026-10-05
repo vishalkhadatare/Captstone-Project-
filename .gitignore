@@ -75,5 +75,9 @@ test_*.py
 test_*.cjs
 tests/role_counts.ts
 tests/test_insert_debug.ts
+storage/evidence/images/*
+!storage/evidence/images/.gitkeep
+storage/evidence/audio/*
+!storage/evidence/audio/.gitkeep
 
 

@@ -157,7 +157,11 @@ import {
   getAuthoritySurveillanceDashboard,
   saveVoiceEvidence,
   getVoiceEvidenceBySession,
+  saveCameraEvidence,
+  getCameraEvidenceBySession,
+  getUnifiedSessionEvidence,
   issueAuthorityWarning,
+  handleAuditorReviewAction,
 } from './server/proctor.ts';
 import {
   generateMultiPaperSets,
@@ -11984,6 +11988,57 @@ async function startServer() {
     }
   });
 
+  // Camera snapshot evidence submission
+  app.post('/api/authority-proctor/camera-evidence', authenticateToken, async (req: Request, res: Response) => {
+    try {
+      const { session_id, exam_id, image_data_url, file_size_bytes, mime_type, event_type, presence_status, warning_number } = req.body;
+      if (!session_id || !image_data_url) {
+        return res.status(400).json({ error: 'session_id and image_data_url are required' });
+      }
+      const db = await getDb();
+      const evidence = saveCameraEvidence(db, {
+        session_id,
+        exam_id,
+        user_id: req.user!.id,
+        user_name: req.user!.full_name,
+        user_role: req.user!.role,
+        image_data_url,
+        file_size_bytes: Number(file_size_bytes) || 0,
+        mime_type: mime_type || 'image/jpeg',
+        event_type: event_type || 'CAMERA_SNAPSHOT',
+        presence_status: presence_status || 'PRESENT',
+        warning_number: Number(warning_number) || 0,
+        submitted_by: req.user!.full_name,
+        recipient: 'CBI Chief Vigilance & Security Auditor',
+      });
+
+      await logAuditEvent({
+        event_type: 'AUTHORITY_CAMERA_SNAPSHOT_LOGGED',
+        user_id: req.user!.id,
+        org_id: req.user!.org_id,
+        role: req.user!.role,
+        details: { session_id, evidence_id: evidence.id, event_type },
+      });
+
+      return res.json({ success: true, evidence });
+    } catch (e: any) {
+      console.error('Camera evidence submit error:', e);
+      return res.status(500).json({ error: e.message });
+    }
+  });
+
+  // Fetch camera evidence records for session
+  app.get('/api/authority-proctor/sessions/:id/camera-evidence', authenticateToken, async (req: Request, res: Response) => {
+    try {
+      const sessionId = req.params.id;
+      const db = await getDb();
+      const evidence = getCameraEvidenceBySession(db, sessionId);
+      return res.json({ success: true, evidence });
+    } catch (e: any) {
+      return res.status(500).json({ error: e.message });
+    }
+  });
+
   // Fetch voice evidence records for session
   app.get('/api/authority-proctor/sessions/:id/evidence', authenticateToken, async (req: Request, res: Response) => {
     try {
@@ -12066,14 +12121,100 @@ async function startServer() {
         };
       });
 
-      const evidence = getVoiceEvidenceBySession(db, sessionId);
+      const voiceEvidence = getVoiceEvidenceBySession(db, sessionId);
+      const cameraEvidence = getCameraEvidenceBySession(db, sessionId);
+      const unifiedEvidence = getUnifiedSessionEvidence(db, sessionId);
 
       return res.json({
         success: true,
         session: sessionRows[0],
         events: parsedEvents,
-        evidence: evidence || [],
+        evidence: voiceEvidence || [],
+        camera_evidence: cameraEvidence || [],
+        unified_evidence: unifiedEvidence || [],
       });
+    } catch (e: any) {
+      return res.status(500).json({ error: e.message });
+    }
+  });
+
+  // Auditor Review Actions (Mark Reviewed, Escalate, Close Case)
+  app.post('/api/authority-proctor/sessions/:id/review-action', authenticateToken, requireRole(['ORG_OWNER', 'AUDITOR', 'EXAM_MANAGER']), async (req: Request, res: Response) => {
+    try {
+      const sessionId = req.params.id;
+      const { action, remarks } = req.body;
+      if (!action || !['MARK_REVIEWED', 'ESCALATE', 'CLOSE_CASE'].includes(action)) {
+        return res.status(400).json({ error: 'Valid action (MARK_REVIEWED, ESCALATE, CLOSE_CASE) is required' });
+      }
+      const db = await getDb();
+      const result = handleAuditorReviewAction(db, sessionId, action, remarks || '', req.user!);
+      await logAuditEvent({
+        event_type: `AUDITOR_${action}_EXECUTED`,
+        user_id: req.user!.id,
+        org_id: req.user!.org_id,
+        role: req.user!.role,
+        details: { session_id: sessionId, action, remarks },
+      });
+      return res.json(result);
+    } catch (e: any) {
+      console.error('Auditor review action error:', e);
+      return res.status(500).json({ error: e.message });
+    }
+  });
+
+  // Secure authenticated evidence stream endpoint
+  app.get('/api/authority-proctor/evidence/:id/file', authenticateToken, async (req: Request, res: Response) => {
+    try {
+      const evidenceId = req.params.id;
+      const db = await getDb();
+
+      // 1. Check camera evidence table
+      const camRows = executeQuery(db, 'SELECT * FROM proctor_camera_evidence WHERE id = ?', [evidenceId]);
+      if (camRows.length > 0) {
+        const ev = camRows[0];
+        if (req.user!.role !== 'AUDITOR' && req.user!.role !== 'ORG_OWNER' && req.user!.role !== 'EXAM_MANAGER' && req.user!.id !== ev.user_id) {
+          return res.status(403).json({ error: 'Unauthorized to view this forensic evidence' });
+        }
+        if (ev.storage_reference && fs.existsSync(ev.storage_reference)) {
+          res.setHeader('Content-Type', ev.mime_type || 'image/jpeg');
+          res.setHeader('Content-Disposition', 'inline');
+          return fs.createReadStream(ev.storage_reference).pipe(res);
+        }
+        if (ev.image_data_url && ev.image_data_url.startsWith('data:')) {
+          const parts = ev.image_data_url.split(',');
+          const mimeMatch = parts[0].match(/:(.*?);/);
+          const mime = mimeMatch ? mimeMatch[1] : 'image/jpeg';
+          const buffer = Buffer.from(parts[1], 'base64');
+          res.setHeader('Content-Type', mime);
+          res.setHeader('Content-Disposition', 'inline');
+          return res.send(buffer);
+        }
+      }
+
+      // 2. Check voice evidence table
+      const voiceRows = executeQuery(db, 'SELECT * FROM proctor_voice_evidence WHERE id = ?', [evidenceId]);
+      if (voiceRows.length > 0) {
+        const ev = voiceRows[0];
+        if (req.user!.role !== 'AUDITOR' && req.user!.role !== 'ORG_OWNER' && req.user!.role !== 'EXAM_MANAGER' && req.user!.id !== ev.user_id) {
+          return res.status(403).json({ error: 'Unauthorized to access this forensic audio evidence' });
+        }
+        if (ev.storage_reference && fs.existsSync(ev.storage_reference)) {
+          res.setHeader('Content-Type', ev.mime_type || 'audio/webm');
+          res.setHeader('Content-Disposition', 'inline');
+          return fs.createReadStream(ev.storage_reference).pipe(res);
+        }
+        if (ev.audio_data_url && ev.audio_data_url.startsWith('data:')) {
+          const parts = ev.audio_data_url.split(',');
+          const mimeMatch = parts[0].match(/:(.*?);/);
+          const mime = mimeMatch ? mimeMatch[1] : 'audio/webm';
+          const buffer = Buffer.from(parts[1], 'base64');
+          res.setHeader('Content-Type', mime);
+          res.setHeader('Content-Disposition', 'inline');
+          return res.send(buffer);
+        }
+      }
+
+      return res.status(404).json({ error: 'Evidence record not found' });
     } catch (e: any) {
       return res.status(500).json({ error: e.message });
     }

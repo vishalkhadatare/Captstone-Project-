@@ -7,6 +7,13 @@ import {
   updateAuthorityHeartbeat,
   emergencyLockAuthoritySession,
   getAuthoritySurveillanceDashboard,
+  saveCameraEvidence,
+  getCameraEvidenceBySession,
+  saveVoiceEvidence,
+  getVoiceEvidenceBySession,
+  getUnifiedSessionEvidence,
+  issueAuthorityWarning,
+  handleAuditorReviewAction,
 } from './proctor.ts';
 
 async function createTestDb(): Promise<Database> {
@@ -38,7 +45,12 @@ async function createTestDb(): Promise<Database> {
       locked_by TEXT,
       last_heartbeat_at TEXT NOT NULL,
       created_at TEXT NOT NULL,
-      updated_at TEXT NOT NULL
+      updated_at TEXT NOT NULL,
+      warning_count INTEGER DEFAULT 0,
+      review_status TEXT DEFAULT 'PENDING_REVIEW',
+      auditor_remarks TEXT,
+      reviewed_by TEXT,
+      reviewed_at TEXT
     );
 
     CREATE TABLE IF NOT EXISTS proctor_events (
@@ -55,6 +67,46 @@ async function createTestDb(): Promise<Database> {
       timestamp TEXT NOT NULL,
       metadata_json TEXT,
       snapshot_thumbnail TEXT,
+      created_at TEXT NOT NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS proctor_camera_evidence (
+      id TEXT PRIMARY KEY,
+      session_id TEXT NOT NULL,
+      exam_id TEXT,
+      user_id TEXT NOT NULL,
+      user_name TEXT NOT NULL,
+      user_role TEXT NOT NULL,
+      image_data_url TEXT NOT NULL,
+      storage_reference TEXT,
+      file_size_bytes INTEGER DEFAULT 0,
+      mime_type TEXT DEFAULT 'image/jpeg',
+      event_type TEXT DEFAULT 'CAMERA_SNAPSHOT',
+      presence_status TEXT DEFAULT 'PRESENT',
+      warning_number INTEGER DEFAULT 0,
+      submitted_by TEXT,
+      recipient TEXT DEFAULT 'CBI Chief Vigilance & Security Auditor',
+      review_status TEXT DEFAULT 'PENDING_REVIEW',
+      created_at TEXT NOT NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS proctor_voice_evidence (
+      id TEXT PRIMARY KEY,
+      session_id TEXT NOT NULL,
+      exam_id TEXT,
+      user_id TEXT NOT NULL,
+      user_name TEXT NOT NULL,
+      user_role TEXT NOT NULL,
+      audio_data_url TEXT NOT NULL,
+      storage_reference TEXT,
+      duration_seconds REAL DEFAULT 0,
+      file_size_bytes INTEGER DEFAULT 0,
+      mime_type TEXT DEFAULT 'audio/webm',
+      event_type TEXT DEFAULT 'VOICE_RECORDING_EVIDENCE',
+      warning_number INTEGER DEFAULT 0,
+      submitted_by TEXT,
+      recipient TEXT DEFAULT 'CBI Chief Vigilance & Security Auditor',
+      review_status TEXT DEFAULT 'PENDING_REVIEW',
       created_at TEXT NOT NULL
     );
 
@@ -191,4 +243,150 @@ test('4. Emergency remote lockdown terminates authority session immediately', as
   assert.equal(updated.emergency_locked, 1);
   assert.equal(dash.metrics.locked_sessions, 1);
 });
+
+test('5. 3-Warning engine strictly caps at 3 and triggers lockdown and audit escalation at 3/3', async () => {
+  const db = await createTestDb();
+  const user = {
+    id: 'usr-trans-test',
+    full_name: 'Prof. Meera Deshmukh',
+    email: 'translator@nbte.edu.in',
+    role: 'TRANSLATOR',
+    org_id: 'ORG-ZEROLEAK',
+  };
+
+  const session = startAuthorityEnclaveSession(db, user, 'TRANSLATOR_PORTAL', 'EXAM-CS-01');
+  assert.equal(session.warning_count, 0);
+
+  // Warning 1
+  const w1 = issueAuthorityWarning(db, session.id, 'Shoulder surfing detected', 'SHOULDER_SURFING_DETECTED');
+  assert.equal(w1.warning_count, 1);
+  assert.equal(w1.status, 'ACTIVE');
+
+  // Warning 2
+  const w2 = issueAuthorityWarning(db, session.id, 'Unauthorized second face in frame', 'SHOULDER_SURFING_DETECTED');
+  assert.equal(w2.warning_count, 2);
+  assert.equal(w2.status, 'ACTIVE');
+
+  // Warning 3 (Maximum allowed)
+  const w3 = issueAuthorityWarning(db, session.id, 'Repeated proctoring violation', 'SHOULDER_SURFING_DETECTED');
+  assert.equal(w3.warning_count, 3);
+  assert.equal(w3.status, 'FLAGGED_FOR_REVIEW');
+  assert.equal(w3.is_locked, true);
+
+  const dashAt3 = getAuthoritySurveillanceDashboard(db);
+  const sessAt3 = dashAt3.sessions.find(s => s.id === session.id);
+  assert.equal(sessAt3.emergency_locked, 1);
+
+  // Attempting Warning 4 must NOT exceed 3
+  const w4 = issueAuthorityWarning(db, session.id, 'Post-lock violation attempt', 'SUSPICIOUS_ACTIVITY');
+  assert.equal(w4.warning_count, 3);
+});
+
+test('6. Camera and voice evidence persistence and unified session retrieval', async () => {
+  const db = await createTestDb();
+  const user = {
+    id: 'usr-trans-test',
+    full_name: 'Prof. Meera Deshmukh',
+    email: 'translator@nbte.edu.in',
+    role: 'TRANSLATOR',
+    org_id: 'ORG-ZEROLEAK',
+  };
+
+  const session = startAuthorityEnclaveSession(db, user, 'TRANSLATOR_PORTAL', 'EXAM-CS-01');
+
+  // Save Camera Evidence
+  const cam = saveCameraEvidence(db, {
+    session_id: session.id,
+    exam_id: 'EXAM-CS-01',
+    user_id: user.id,
+    user_name: user.full_name,
+    user_role: user.role,
+    image_data_url: 'data:image/png;base64,mocksnap',
+    reason: 'SHOULDER_SURFING_DETECTED',
+    presence_status: 'SUSPICIOUS',
+    warning_number: 1,
+  });
+
+  assert.ok(cam.id.startsWith('CAM-EV-'));
+  assert.equal(cam.recipient, 'CBI Chief Vigilance & Security Auditor');
+  assert.equal(cam.review_status, 'PENDING_REVIEW');
+
+  // Save Voice Evidence
+  const voice = saveVoiceEvidence(db, {
+    session_id: session.id,
+    exam_id: 'EXAM-CS-01',
+    user_id: user.id,
+    user_name: user.full_name,
+    user_role: user.role,
+    audio_data_url: 'data:audio/webm;base64,mockaudio',
+    duration_seconds: 4.8,
+    warning_number: 1,
+  });
+
+  assert.ok(voice.id.startsWith('VOICE-EV-'));
+  assert.equal(voice.recipient, 'CBI Chief Vigilance & Security Auditor');
+  assert.equal(voice.review_status, 'PENDING_REVIEW');
+
+  // Unified Evidence
+  const unified = getUnifiedSessionEvidence(db, session.id);
+  assert.ok(unified.length >= 2);
+  const types = unified.map(u => u.type);
+  assert.ok(types.includes('CAMERA_SNAPSHOT'));
+  assert.ok(types.includes('VOICE_EVIDENCE'));
+
+  // Dashboard evidence aggregation
+  const dash = getAuthoritySurveillanceDashboard(db, 'ORG-ZEROLEAK');
+  const sess = dash.sessions.find(s => s.id === session.id);
+  assert.ok(sess.camera_evidence_count >= 1);
+  assert.equal(sess.voice_evidence_count, 1);
+  assert.equal(sess.has_camera_evidence, true);
+  assert.equal(sess.has_voice_evidence, true);
+});
+
+test('7. Auditor review action handles MARK_REVIEWED, ESCALATE, and CLOSE_CASE', async () => {
+  const db = await createTestDb();
+  const user = {
+    id: 'usr-trans-test',
+    full_name: 'Prof. Meera Deshmukh',
+    email: 'translator@nbte.edu.in',
+    role: 'TRANSLATOR',
+    org_id: 'ORG-ZEROLEAK',
+  };
+
+  const session = startAuthorityEnclaveSession(db, user, 'TRANSLATOR_PORTAL', 'EXAM-CS-01');
+
+  // Mark Reviewed
+  const revRes = handleAuditorReviewAction(
+    db,
+    session.id,
+    'MARK_REVIEWED',
+    'Auditor verified background credentials and biometric photo match',
+    'CBI Security Auditor A. Roy'
+  );
+  assert.equal(revRes.success, true);
+  assert.equal(revRes.session?.review_status, 'REVIEWED');
+
+  // Escalate
+  const escRes = handleAuditorReviewAction(
+    db,
+    session.id,
+    'ESCALATE',
+    'Escalated to Vigilance Committee for unauthorized voice whisper',
+    'CBI Security Auditor A. Roy'
+  );
+  assert.equal(escRes.success, true);
+  assert.equal(escRes.session?.review_status, 'ESCALATED');
+
+  // Close Case
+  const closeRes = handleAuditorReviewAction(
+    db,
+    session.id,
+    'CLOSE_CASE',
+    'Formal investigation concluded, cleared with caution',
+    'CBI Security Auditor A. Roy'
+  );
+  assert.equal(closeRes.success, true);
+  assert.equal(closeRes.session?.review_status, 'RESOLVED');
+});
+
 

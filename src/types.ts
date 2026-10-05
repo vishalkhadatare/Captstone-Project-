@@ -730,6 +730,34 @@ export interface AuthorityProctorSession {
   last_heartbeat_at: string;
   created_at: string;
   updated_at: string;
+  camera_evidence_count?: number;
+  voice_evidence_count?: number;
+  has_camera_evidence?: boolean;
+  has_voice_evidence?: boolean;
+  review_status?: string;
+  auditor_remarks?: string;
+  reviewed_by?: string;
+  reviewed_at?: string;
+}
+
+export interface CameraEvidenceItem {
+  id: string;
+  session_id: string;
+  exam_id?: string;
+  user_id: string;
+  user_name: string;
+  user_role: string;
+  image_data_url: string;
+  storage_reference?: string;
+  file_size_bytes?: number;
+  mime_type?: string;
+  event_type: string;
+  presence_status?: string;
+  warning_number?: number;
+  submitted_by?: string;
+  recipient?: string;
+  review_status?: string;
+  created_at: string;
 }
 
 export interface VoiceEvidenceItem {
@@ -740,6 +768,7 @@ export interface VoiceEvidenceItem {
   user_name: string;
   user_role: string;
   audio_data_url: string;
+  storage_reference?: string;
   duration_seconds: number;
   file_size_bytes?: number;
   mime_type?: string;
@@ -747,6 +776,29 @@ export interface VoiceEvidenceItem {
   warning_number?: number;
   submitted_by?: string;
   recipient?: string;
+  review_status?: string;
+  created_at: string;
+}
+
+export interface UnifiedEvidenceItem {
+  id: string;
+  session_id: string;
+  exam_id?: string;
+  user_id: string;
+  user_name: string;
+  user_role: string;
+  type: 'CAMERA_SNAPSHOT' | 'VOICE_EVIDENCE' | 'SECURITY_EVENT' | 'PROCTOR_WARNING';
+  file_url?: string;
+  storage_reference?: string;
+  duration_seconds?: number;
+  mime_type?: string;
+  file_size_bytes?: number;
+  event_id?: string;
+  event_type?: string;
+  warning_number?: number;
+  severity?: string;
+  presence_status?: string;
+  submitted_to?: string;
   review_status?: string;
   created_at: string;
 }

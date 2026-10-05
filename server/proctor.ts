@@ -1,3 +1,5 @@
+import fs from 'node:fs';
+import path from 'node:path';
 import { v4 as uuidv4 } from 'uuid';
 import { Database } from 'sql.js';
 import { executeQuery, executeRun } from './db.ts';
@@ -425,6 +427,27 @@ export function startAuthorityEnclaveSession(
     snapshot_thumbnail: verificationSnapshot || null,
   });
 
+  // If verification snapshot is provided, save it as official camera evidence
+  if (verificationSnapshot) {
+    try {
+      saveCameraEvidence(db, {
+        session_id: sessionId,
+        exam_id: examId,
+        user_id: user.id,
+        user_name: user.full_name,
+        user_role: user.role,
+        image_data_url: verificationSnapshot,
+        event_type: 'INITIAL_VERIFICATION_SNAPSHOT',
+        presence_status: 'PRESENT',
+        warning_number: 0,
+        submitted_by: user.full_name,
+        recipient: 'CBI Chief Vigilance & Security Auditor',
+      });
+    } catch (e) {
+      console.warn('Could not auto-save initial verification camera snapshot:', e);
+    }
+  }
+
   const rows = executeQuery(db, 'SELECT * FROM authority_proctor_sessions WHERE id = ?', [sessionId]);
   return rows[0] as AuthorityProctorSession;
 }
@@ -612,38 +635,158 @@ export function endAuthorityEnclaveSession(db: Database, sessionId: string) {
   return { success: true };
 }
 
-export function getAuthoritySurveillanceDashboard(db: Database, orgId?: string) {
-  let sql = `
-    SELECT
-      s.*,
-      COALESCE(e.name, 'Question Bank / System Enclave') as exam_name
-    FROM authority_proctor_sessions s
-    LEFT JOIN examinations e ON s.exam_id = e.id
-    WHERE 1=1
-  `;
-  const params: any[] = [];
-  if (orgId && orgId !== 'GLOBAL') {
-    sql += ' AND s.org_id = ?';
-    params.push(orgId);
+const EVIDENCE_DIR = path.resolve(process.cwd(), 'storage', 'evidence');
+const IMAGES_DIR = path.join(EVIDENCE_DIR, 'images');
+const AUDIO_DIR = path.join(EVIDENCE_DIR, 'audio');
+
+function ensureEvidenceDirs() {
+  if (!fs.existsSync(IMAGES_DIR)) fs.mkdirSync(IMAGES_DIR, { recursive: true });
+  if (!fs.existsSync(AUDIO_DIR)) fs.mkdirSync(AUDIO_DIR, { recursive: true });
+}
+
+export function saveEvidenceBufferToDisk(
+  dataUrlOrBase64: string,
+  kind: 'images' | 'audio',
+  id: string,
+  ext: string = 'jpg'
+): string | null {
+  try {
+    ensureEvidenceDirs();
+    const base64Data = dataUrlOrBase64.includes(',') ? dataUrlOrBase64.split(',')[1] : dataUrlOrBase64;
+    const buffer = Buffer.from(base64Data, 'base64');
+    if (buffer.length === 0) return null;
+    const targetPath = path.join(kind === 'images' ? IMAGES_DIR : AUDIO_DIR, `${id}.${ext}`);
+    fs.writeFileSync(targetPath, buffer);
+    return targetPath;
+  } catch (err) {
+    console.warn('[ZeroLeak Storage] Failed to persist evidence buffer to disk:', err);
+    return null;
   }
-  sql += ' ORDER BY s.updated_at DESC';
+}
 
-  const sessions = executeQuery(db, sql, params);
+export interface CameraEvidenceRecord {
+  id: string;
+  session_id: string;
+  exam_id?: string;
+  user_id: string;
+  user_name: string;
+  user_role: string;
+  image_data_url: string;
+  storage_reference?: string;
+  file_size_bytes?: number;
+  mime_type?: string;
+  event_type: string;
+  presence_status?: string;
+  warning_number?: number;
+  submitted_by?: string;
+  recipient?: string;
+  review_status?: string;
+  created_at: string;
+}
 
-  const totalActive = sessions.filter(s => s.status === 'ACTIVE').length;
-  const highRisk = sessions.filter(s => s.leak_risk_level === 'HIGH' || s.leak_risk_level === 'CRITICAL').length;
-  const shoulderSurfingAlerts = sessions.filter(s => s.face_status === 'SHOULDER_SURFING_DETECTED').length;
-  const lockedDown = sessions.filter(s => s.status === 'LOCKED').length;
+export function saveCameraEvidence(
+  db: Database,
+  params: {
+    session_id: string;
+    exam_id?: string;
+    user_id: string;
+    user_name: string;
+    user_role: string;
+    image_data_url: string;
+    file_size_bytes?: number;
+    mime_type?: string;
+    event_type?: string;
+    presence_status?: string;
+    warning_number?: number;
+    submitted_by?: string;
+    recipient?: string;
+  }
+): CameraEvidenceRecord {
+  const id = `CAM-EV-${uuidv4().substring(0, 8).toUpperCase()}`;
+  const now = new Date().toISOString();
+  const ext = (params.mime_type || 'image/jpeg').includes('png') ? 'png' : 'jpg';
+  const diskRef = saveEvidenceBufferToDisk(params.image_data_url, 'images', id, ext);
+
+  executeRun(
+    db,
+    `INSERT INTO proctor_camera_evidence (
+      id, session_id, exam_id, user_id, user_name, user_role,
+      image_data_url, storage_reference, file_size_bytes, mime_type,
+      event_type, presence_status, warning_number, submitted_by, recipient,
+      review_status, created_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'PENDING_REVIEW', ?)`,
+    [
+      id,
+      params.session_id,
+      params.exam_id || null,
+      params.user_id,
+      params.user_name,
+      params.user_role,
+      params.image_data_url,
+      diskRef || null,
+      params.file_size_bytes || 0,
+      params.mime_type || 'image/jpeg',
+      params.event_type || 'CAMERA_SNAPSHOT',
+      params.presence_status || 'PRESENT',
+      params.warning_number || 0,
+      params.submitted_by || params.user_name,
+      params.recipient || 'CBI Chief Vigilance & Security Auditor',
+      now,
+    ]
+  );
+
+  // Update verification_snapshot on session if not set
+  executeRun(
+    db,
+    `UPDATE authority_proctor_sessions SET verification_snapshot = COALESCE(verification_snapshot, ?), updated_at = ? WHERE id = ?`,
+    [params.image_data_url, now, params.session_id]
+  );
+
+  // Log event in proctor_events timeline
+  recordAuthorityLeakEvent(db, {
+    session_id: params.session_id,
+    user_id: params.user_id,
+    user_role: params.user_role,
+    exam_id: params.exam_id,
+    event_type: 'CAMERA_SNAPSHOT_CREATED',
+    severity: params.warning_number && params.warning_number > 0 ? 'HIGH' : 'LOW',
+    metadata: {
+      evidence_id: id,
+      event_type: params.event_type || 'CAMERA_SNAPSHOT',
+      presence_status: params.presence_status || 'PRESENT',
+      warning_number: params.warning_number || 0,
+      recipient: params.recipient || 'CBI Chief Vigilance & Security Auditor',
+    },
+    snapshot_thumbnail: params.image_data_url,
+  });
 
   return {
-    metrics: {
-      total_active_sessions: totalActive,
-      high_risk_sessions: highRisk,
-      shoulder_surfing_alerts: shoulderSurfingAlerts,
-      locked_sessions: lockedDown,
-    },
-    sessions,
+    id,
+    session_id: params.session_id,
+    exam_id: params.exam_id,
+    user_id: params.user_id,
+    user_name: params.user_name,
+    user_role: params.user_role,
+    image_data_url: params.image_data_url,
+    storage_reference: diskRef || undefined,
+    file_size_bytes: params.file_size_bytes || 0,
+    mime_type: params.mime_type || 'image/jpeg',
+    event_type: params.event_type || 'CAMERA_SNAPSHOT',
+    presence_status: params.presence_status || 'PRESENT',
+    warning_number: params.warning_number || 0,
+    submitted_by: params.submitted_by || params.user_name,
+    recipient: params.recipient || 'CBI Chief Vigilance & Security Auditor',
+    review_status: 'PENDING_REVIEW',
+    created_at: now,
   };
+}
+
+export function getCameraEvidenceBySession(db: Database, sessionId: string): CameraEvidenceRecord[] {
+  return executeQuery(
+    db,
+    'SELECT * FROM proctor_camera_evidence WHERE session_id = ? ORDER BY created_at DESC',
+    [sessionId]
+  ) as CameraEvidenceRecord[];
 }
 
 export interface VoiceEvidenceRecord {
@@ -654,6 +797,7 @@ export interface VoiceEvidenceRecord {
   user_name: string;
   user_role: string;
   audio_data_url: string;
+  storage_reference?: string;
   duration_seconds: number;
   file_size_bytes?: number;
   mime_type?: string;
@@ -683,13 +827,15 @@ export function saveVoiceEvidence(
 ): VoiceEvidenceRecord {
   const id = `VOICE-EV-${uuidv4().substring(0, 8).toUpperCase()}`;
   const now = new Date().toISOString();
+  const diskRef = saveEvidenceBufferToDisk(params.audio_data_url, 'audio', id, 'webm');
+
   executeRun(
     db,
     `INSERT INTO proctor_voice_evidence (
       id, session_id, exam_id, user_id, user_name, user_role,
-      audio_data_url, duration_seconds, file_size_bytes, mime_type,
+      audio_data_url, storage_reference, duration_seconds, file_size_bytes, mime_type,
       event_type, warning_number, submitted_by, recipient, review_status, created_at
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'VOICE_RECORDING_EVIDENCE', ?, ?, 'Chief Vigilance & Security Auditor', 'PENDING_AUDIT', ?)`,
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'VOICE_RECORDING_EVIDENCE', ?, ?, 'CBI Chief Vigilance & Security Auditor', 'PENDING_REVIEW', ?)`,
     [
       id,
       params.session_id,
@@ -698,7 +844,8 @@ export function saveVoiceEvidence(
       params.user_name,
       params.user_role,
       params.audio_data_url,
-      params.duration_seconds || 0,
+      diskRef || null,
+      Math.round(params.duration_seconds || 0),
       params.file_size_bytes || 0,
       params.mime_type || 'audio/webm',
       params.warning_number || 0,
@@ -713,12 +860,13 @@ export function saveVoiceEvidence(
     user_id: params.user_id,
     user_role: params.user_role,
     exam_id: params.exam_id,
-    event_type: 'VOICE_EVIDENCE_SUBMITTED',
-    severity: 'MEDIUM',
+    event_type: 'VOICE_EVIDENCE_CREATED',
+    severity: params.warning_number && params.warning_number > 0 ? 'HIGH' : 'MEDIUM',
     metadata: {
       evidence_id: id,
       duration_seconds: params.duration_seconds,
-      recipient: 'Chief Vigilance & Security Auditor',
+      warning_number: params.warning_number || 0,
+      recipient: 'CBI Chief Vigilance & Security Auditor',
       audio_format: params.mime_type || 'audio/webm',
     },
   });
@@ -731,14 +879,15 @@ export function saveVoiceEvidence(
     user_name: params.user_name,
     user_role: params.user_role,
     audio_data_url: params.audio_data_url,
+    storage_reference: diskRef || undefined,
     duration_seconds: params.duration_seconds || 0,
     file_size_bytes: params.file_size_bytes || 0,
     mime_type: params.mime_type || 'audio/webm',
     event_type: 'VOICE_RECORDING_EVIDENCE',
     warning_number: params.warning_number || 0,
     submitted_by: params.submitted_by || params.user_name,
-    recipient: 'Chief Vigilance & Security Auditor',
-    review_status: 'PENDING_AUDIT',
+    recipient: 'CBI Chief Vigilance & Security Auditor',
+    review_status: 'PENDING_REVIEW',
     created_at: now,
   };
 }
@@ -749,6 +898,106 @@ export function getVoiceEvidenceBySession(db: Database, sessionId: string): Voic
     'SELECT * FROM proctor_voice_evidence WHERE session_id = ? ORDER BY created_at DESC',
     [sessionId]
   ) as VoiceEvidenceRecord[];
+}
+
+export function getUnifiedSessionEvidence(db: Database, sessionId: string) {
+  const cameraEv = getCameraEvidenceBySession(db, sessionId);
+  const voiceEv = getVoiceEvidenceBySession(db, sessionId);
+
+  const unified = [
+    ...cameraEv.map(c => ({
+      id: c.id,
+      session_id: c.session_id,
+      exam_id: c.exam_id,
+      user_id: c.user_id,
+      user_name: c.user_name,
+      user_role: c.user_role,
+      type: 'CAMERA_SNAPSHOT' as const,
+      file_url: c.image_data_url,
+      storage_reference: c.storage_reference,
+      mime_type: c.mime_type,
+      file_size_bytes: c.file_size_bytes,
+      event_type: c.event_type,
+      warning_number: c.warning_number,
+      presence_status: c.presence_status,
+      submitted_to: c.recipient,
+      review_status: c.review_status,
+      created_at: c.created_at,
+    })),
+    ...voiceEv.map(v => ({
+      id: v.id,
+      session_id: v.session_id,
+      exam_id: v.exam_id,
+      user_id: v.user_id,
+      user_name: v.user_name,
+      user_role: v.user_role,
+      type: 'VOICE_EVIDENCE' as const,
+      file_url: v.audio_data_url,
+      storage_reference: v.storage_reference,
+      duration_seconds: v.duration_seconds,
+      mime_type: v.mime_type,
+      file_size_bytes: v.file_size_bytes,
+      event_type: v.event_type,
+      warning_number: v.warning_number,
+      submitted_to: v.recipient,
+      review_status: v.review_status,
+      created_at: v.created_at,
+    })),
+  ];
+
+  unified.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
+  return unified;
+}
+
+export function getAuthoritySurveillanceDashboard(db: Database, orgId?: string) {
+  let sql = `
+    SELECT
+      s.*,
+      COALESCE(e.name, 'Question Bank / System Enclave') as exam_name,
+      (SELECT COUNT(*) FROM proctor_camera_evidence c WHERE c.session_id = s.id) as camera_evidence_count,
+      (SELECT COUNT(*) FROM proctor_voice_evidence v WHERE v.session_id = s.id) as voice_evidence_count
+    FROM authority_proctor_sessions s
+    LEFT JOIN examinations e ON s.exam_id = e.id
+    WHERE 1=1
+  `;
+  const params: any[] = [];
+  if (orgId && orgId !== 'GLOBAL') {
+    sql += ' AND s.org_id = ?';
+    params.push(orgId);
+  }
+  sql += ' ORDER BY s.updated_at DESC';
+
+  const rawSessions = executeQuery(db, sql, params);
+  const sessions = rawSessions.map((s: any) => {
+    const camCount = Number(s.camera_evidence_count) || 0;
+    const voiceCount = Number(s.voice_evidence_count) || 0;
+    return {
+      ...s,
+      camera_evidence_count: camCount,
+      voice_evidence_count: voiceCount,
+      has_camera_evidence: Boolean(s.verification_snapshot || camCount > 0),
+      has_voice_evidence: Boolean(voiceCount > 0),
+    };
+  });
+
+  const totalActive = sessions.filter((s: any) => s.status === 'ACTIVE').length;
+  const highRisk = sessions.filter(
+    (s: any) => s.leak_risk_level === 'HIGH' || s.leak_risk_level === 'CRITICAL' || s.status === 'FLAGGED_FOR_REVIEW'
+  ).length;
+  const shoulderSurfingAlerts = sessions.filter((s: any) => s.face_status === 'SHOULDER_SURFING_DETECTED').length;
+  const lockedDown = sessions.filter(
+    (s: any) => s.status === 'LOCKED' || s.status === 'FLAGGED_FOR_REVIEW' || s.emergency_locked === 1
+  ).length;
+
+  return {
+    metrics: {
+      total_active_sessions: totalActive,
+      high_risk_sessions: highRisk,
+      shoulder_surfing_alerts: shoulderSurfingAlerts,
+      locked_sessions: lockedDown,
+    },
+    sessions,
+  };
 }
 
 export function issueAuthorityWarning(
@@ -763,6 +1012,7 @@ export function issueAuthorityWarning(
   status: string;
   is_locked: boolean;
   message: string;
+  evidence_id?: string;
 } {
   const rows = executeQuery(
     db,
@@ -800,11 +1050,35 @@ export function issueAuthorityWarning(
       newCount,
       newStatus,
       isLocked ? 1 : 0,
+      isLocked ? 1 : 0,
       isLocked ? `3/3 Warnings Exceeded: ${reason}` : null,
       now,
       sessionId,
     ]
   );
+
+  let evidenceId: string | undefined = undefined;
+
+  // If violation snapshot was captured, associate with this warning
+  if (details?.snapshot) {
+    try {
+      const snapEv = saveCameraEvidence(db, {
+        session_id: sessionId,
+        exam_id: session.exam_id,
+        user_id: session.user_id,
+        user_name: session.user_name,
+        user_role: session.user_role,
+        image_data_url: details.snapshot,
+        event_type: `WARNING_${newCount}_SNAPSHOT`,
+        presence_status: details.presence_status || 'UNCERTAIN',
+        warning_number: newCount,
+        recipient: 'CBI Chief Vigilance & Security Auditor',
+      });
+      evidenceId = snapEv.id;
+    } catch (err) {
+      console.warn('Failed to associate warning snapshot:', err);
+    }
+  }
 
   // Record warning event in proctor_events timeline
   recordAuthorityLeakEvent(db, {
@@ -818,9 +1092,31 @@ export function issueAuthorityWarning(
       warning_number: newCount,
       max_warnings: 3,
       reason,
+      evidence_id: evidenceId || null,
       ...details,
     },
+    snapshot_thumbnail: details?.snapshot || null,
   });
+
+  // If reached 3 warnings, generate audit escalation event
+  if (newCount >= 3) {
+    recordAuthorityLeakEvent(db, {
+      session_id: sessionId,
+      user_id: session.user_id,
+      user_role: session.user_role,
+      exam_id: session.exam_id,
+      event_type: 'AUDIT_ESCALATION',
+      severity: 'CRITICAL',
+      metadata: {
+        recipient: 'CBI Chief Vigilance & Security Auditor',
+        priority: 'HIGH',
+        status: 'PENDING_REVIEW',
+        warning_count: 3,
+        reason: `Threshold of 3 warnings reached: ${reason}`,
+      },
+      snapshot_thumbnail: details?.snapshot || null,
+    });
+  }
 
   return {
     warning_count: newCount,
@@ -828,12 +1124,100 @@ export function issueAuthorityWarning(
     warnings_remaining: Math.max(0, 3 - newCount),
     status: newStatus,
     is_locked: isLocked,
+    evidence_id: evidenceId,
     message:
       newCount === 1
         ? 'Warning 1 of 3: Suspicious activity logged. Please maintain continuous camera presence.'
         : newCount === 2
         ? 'Warning 2 of 3: FINAL WARNING. The next infraction will flag your session for immediate auditor review.'
-        : 'Warning 3 of 3: Violation threshold reached. Session flagged for forensic review by Chief Vigilance & Security Auditor.',
+        : 'Warning 3 of 3: Violation threshold reached. Session flagged for forensic review by CBI Chief Vigilance & Security Auditor.',
+  };
+}
+
+export function handleAuditorReviewAction(
+  db: Database,
+  sessionId: string,
+  action: 'MARK_REVIEWED' | 'ESCALATE' | 'CLOSE_CASE',
+  remarks: string,
+  auditorUser: { id?: string; full_name?: string; role?: string } | string
+): { success: boolean; message: string; session: AuthorityProctorSession } {
+  const rows = executeQuery(db, 'SELECT * FROM authority_proctor_sessions WHERE id = ?', [sessionId]);
+  if (!rows || rows.length === 0) {
+    throw new Error('Authority proctor session not found');
+  }
+  const session = rows[0];
+  const now = new Date().toISOString();
+
+  const auditor = typeof auditorUser === 'object' && auditorUser !== null
+    ? {
+        id: auditorUser.id || 'usr-auditor',
+        full_name: auditorUser.full_name || 'CBI Chief Vigilance & Security Auditor',
+        role: auditorUser.role || 'AUDITOR',
+      }
+    : {
+        id: 'usr-auditor',
+        full_name: typeof auditorUser === 'string' && auditorUser.trim() ? auditorUser : 'CBI Chief Vigilance & Security Auditor',
+        role: 'AUDITOR',
+      };
+
+  let newStatus = session.status;
+  let newReviewStatus = 'REVIEWED';
+  let message = '';
+
+  if (action === 'MARK_REVIEWED') {
+    newReviewStatus = 'REVIEWED';
+    message = `Session verified and marked reviewed by ${auditor.full_name}.`;
+    executeRun(db, `UPDATE proctor_camera_evidence SET review_status = 'REVIEWED' WHERE session_id = ?`, [sessionId]);
+    executeRun(db, `UPDATE proctor_voice_evidence SET review_status = 'REVIEWED' WHERE session_id = ?`, [sessionId]);
+  } else if (action === 'ESCALATE') {
+    newStatus = 'FLAGGED_FOR_REVIEW';
+    newReviewStatus = 'ESCALATED';
+    message = `Session escalated to CBI Chief Vigilance & Security Auditor for formal inquiry.`;
+    executeRun(
+      db,
+      `UPDATE authority_proctor_sessions SET emergency_locked = 1, emergency_lock_reason = ? WHERE id = ?`,
+      [`Auditor Escalation: ${remarks || 'Suspicious behavior flagged for formal investigation.'}`, sessionId]
+    );
+  } else if (action === 'CLOSE_CASE') {
+    newStatus = 'COMPLETED';
+    newReviewStatus = 'RESOLVED';
+    message = `Forensic audit case closed and archived.`;
+  }
+
+  executeRun(
+    db,
+    `UPDATE authority_proctor_sessions SET
+      status = ?,
+      review_status = ?,
+      auditor_remarks = ?,
+      reviewed_by = ?,
+      reviewed_at = ?,
+      updated_at = ?
+    WHERE id = ?`,
+    [newStatus, newReviewStatus, remarks || '', auditor.full_name, now, now, sessionId]
+  );
+
+  recordAuthorityLeakEvent(db, {
+    session_id: sessionId,
+    user_id: auditor.id,
+    user_role: auditor.role,
+    exam_id: session.exam_id,
+    event_type: `AUDITOR_ACTION_${action}`,
+    severity: action === 'ESCALATE' ? 'CRITICAL' : 'LOW',
+    metadata: {
+      action,
+      auditor_name: auditor.full_name,
+      remarks,
+      previous_status: session.status,
+      new_status: newStatus,
+    },
+  });
+
+  const updatedRows = executeQuery(db, 'SELECT * FROM authority_proctor_sessions WHERE id = ?', [sessionId]);
+  return {
+    success: true,
+    message,
+    session: updatedRows[0] as AuthorityProctorSession,
   };
 }
 
