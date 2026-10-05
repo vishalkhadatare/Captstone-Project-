@@ -162,6 +162,11 @@ export async function hydrateFromPostgres(db: Database): Promise<void> {
     'generated_papers',
     'generated_paper_questions',
     'candidate_paper_assignments',
+    'competitive_exams',
+    'competitive_question_pool_files',
+    'competitive_question_pools',
+    'competitive_questions',
+    'competitive_generated_papers',
   ];
 
   let totalRowsLoaded = 0;
@@ -169,7 +174,10 @@ export async function hydrateFromPostgres(db: Database): Promise<void> {
     db.exec('BEGIN TRANSACTION;');
     for (const table of coreTables) {
       try {
-        const res = await pool.query(`SELECT * FROM ${table}`);
+        const querySql = table === 'competitive_question_pool_files'
+          ? `SELECT id, org_id, exam_id, subject_id, subject_name, file_name, mime_type, file_size, file_hash, status, question_count, error_message, uploaded_at, processed_at FROM ${table}`
+          : `SELECT * FROM ${table}`;
+        const res = await pool.query(querySql);
         if (res.rows.length > 0) {
           totalRowsLoaded += res.rows.length;
           for (const row of res.rows) {

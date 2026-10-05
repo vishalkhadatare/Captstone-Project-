@@ -1400,6 +1400,68 @@ export const api = {
         body: JSON.stringify(payload),
       }),
   },
+  competitive: {
+    getExams: () => request<{ success: boolean; exams: any[] }>('/api/competitive/exams'),
+    saveExam: (payload: any) =>
+      request<{ success: boolean; exam: any; message: string }>('/api/competitive/exams', {
+        method: 'POST',
+        body: JSON.stringify(payload),
+      }),
+    uploadSubjectPdf: (payload: {
+      exam_id: string;
+      subject_id?: string;
+      subject_name?: string;
+      subject?: string;
+      file_name: string;
+      file_data?: string;
+      raw_text?: string;
+      marks_per_question?: number;
+      negative_marks?: number;
+    }) =>
+      request<{ success: boolean; message: string; fileId: string; poolId: string; extractedCount: number; pdf?: any; questions: any[] }>(
+        '/api/competitive/upload-subject-pdf',
+        {
+          method: 'POST',
+          body: JSON.stringify(payload),
+        }
+      ),
+    getQuestionPools: (examId: string) =>
+      request<{ success: boolean; pools: any[]; questions: any[] }>(
+        `/api/competitive/question-pools/${encodeURIComponent(examId)}`
+      ),
+    getSubjectPoolFiles: (examId: string, subjectId: string) =>
+      request<{ success: boolean; files: any[] }>(
+        `/api/competitive/pool-files/${encodeURIComponent(examId)}/${encodeURIComponent(subjectId)}`
+      ),
+    validateBlueprint: (examId: string, blueprint: any) =>
+      request<{ success: boolean; valid: boolean; subjectResults: any[]; overallMessage: string }>(
+        '/api/competitive/validate-blueprint',
+        {
+          method: 'POST',
+          body: JSON.stringify({ exam_id: examId, blueprint }),
+        }
+      ),
+    generateFinalPaper: (examId: string, blueprint: any) =>
+      request<{ success: boolean; message: string; paper: any }>('/api/competitive/generate-final-paper', {
+        method: 'POST',
+        body: JSON.stringify({ exam_id: examId, blueprint }),
+      }),
+    getGeneratedPaper: (paperId: string) =>
+      request<{ success: boolean; paper: any }>(
+        `/api/competitive/generated-papers/${encodeURIComponent(paperId)}`
+      ),
+    deletePoolFile: (payload: {
+      exam_id: string;
+      subject_id?: string;
+      file_id?: string;
+      source_pdf?: string;
+      subject?: string;
+    }) =>
+      request<{ success: boolean; message: string }>('/api/competitive/delete-pool-file', {
+        method: 'POST',
+        body: JSON.stringify(payload),
+      }),
+  },
 };
 
 /**

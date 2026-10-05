@@ -798,4 +798,104 @@ CREATE INDEX IF NOT EXISTS idx_gen_paper_q_paper ON generated_paper_questions(ge
 CREATE INDEX IF NOT EXISTS idx_candidate_paper_assign ON candidate_paper_assignments(generated_paper_id, candidate_id);
 CREATE INDEX IF NOT EXISTS idx_candidate_assign_fingerprint ON candidate_paper_assignments(paper_fingerprint);
 
+-- Competitive Examination Tables
+CREATE TABLE IF NOT EXISTS competitive_exams (
+    id TEXT PRIMARY KEY,
+    org_id TEXT NOT NULL,
+    name TEXT NOT NULL,
+    exam_type TEXT NOT NULL,
+    duration_minutes INTEGER NOT NULL DEFAULT 180,
+    exam_date TEXT,
+    exam_time TEXT,
+    instructions TEXT,
+    blueprint_json TEXT,
+    status TEXT NOT NULL DEFAULT 'DRAFT',
+    created_by TEXT,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS competitive_question_pool_files (
+    id TEXT PRIMARY KEY,
+    org_id TEXT NOT NULL,
+    exam_id TEXT NOT NULL,
+    subject_id TEXT NOT NULL,
+    subject_name TEXT NOT NULL,
+    file_name TEXT NOT NULL,
+    mime_type TEXT DEFAULT 'application/pdf',
+    file_size INTEGER DEFAULT 0,
+    file_data BYTEA,
+    file_hash TEXT,
+    status TEXT NOT NULL DEFAULT 'PENDING',
+    question_count INTEGER DEFAULT 0,
+    error_message TEXT,
+    uploaded_at TEXT NOT NULL,
+    processed_at TEXT
+);
+
+CREATE TABLE IF NOT EXISTS competitive_question_pools (
+    id TEXT PRIMARY KEY,
+    org_id TEXT NOT NULL,
+    exam_id TEXT NOT NULL,
+    subject TEXT NOT NULL,
+    source_pdf_name TEXT NOT NULL,
+    page_count INTEGER DEFAULT 1,
+    question_count INTEGER DEFAULT 0,
+    file_size INTEGER DEFAULT 0,
+    uploaded_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS competitive_questions (
+    id TEXT PRIMARY KEY,
+    org_id TEXT NOT NULL,
+    exam_id TEXT NOT NULL,
+    subject_id TEXT,
+    source_file_id TEXT,
+    pool_id TEXT,
+    subject TEXT NOT NULL,
+    question_number TEXT,
+    question_type TEXT NOT NULL DEFAULT 'MCQ',
+    question_text TEXT NOT NULL,
+    options_json TEXT,
+    sub_questions_json TEXT,
+    marks REAL NOT NULL DEFAULT 4.0,
+    negative_marks REAL NOT NULL DEFAULT 1.0,
+    source_pdf TEXT,
+    source_page INTEGER,
+    source_question_number TEXT,
+    verification_status TEXT NOT NULL DEFAULT 'VERIFIED',
+    translation_status TEXT DEFAULT 'PENDING',
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS competitive_generated_papers (
+    id TEXT PRIMARY KEY,
+    org_id TEXT NOT NULL,
+    exam_id TEXT NOT NULL,
+    title TEXT NOT NULL,
+    exam_type TEXT NOT NULL,
+    total_questions INTEGER NOT NULL,
+    total_marks REAL NOT NULL,
+    total_positive_marks REAL NOT NULL,
+    total_negative_marks REAL NOT NULL,
+    sections_json TEXT NOT NULL,
+    questions_json TEXT NOT NULL,
+    blueprint_snapshot_json TEXT NOT NULL,
+    source_provenance_json TEXT,
+    paper_fingerprint TEXT NOT NULL,
+    generated_by TEXT,
+    generated_at TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_comp_exams_org ON competitive_exams(org_id);
+CREATE INDEX IF NOT EXISTS idx_comp_pool_files_exam_sub ON competitive_question_pool_files(exam_id, subject_id);
+CREATE INDEX IF NOT EXISTS idx_comp_pool_files_status ON competitive_question_pool_files(status);
+CREATE INDEX IF NOT EXISTS idx_comp_pools_exam ON competitive_question_pools(exam_id);
+CREATE INDEX IF NOT EXISTS idx_comp_questions_exam ON competitive_questions(exam_id, subject);
+CREATE INDEX IF NOT EXISTS idx_comp_questions_source_file ON competitive_questions(source_file_id);
+CREATE INDEX IF NOT EXISTS idx_comp_questions_exam_subject_id ON competitive_questions(exam_id, subject_id);
+CREATE INDEX IF NOT EXISTS idx_comp_gen_papers_exam ON competitive_generated_papers(exam_id);
+
+
 

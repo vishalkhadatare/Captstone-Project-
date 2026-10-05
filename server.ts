@@ -173,6 +173,18 @@ import {
 import { uploadDraftPapersMulter, handleUploadUniversityDrafts } from './server/universityIngestion.ts';
 import { handleUniversityRagPipeline } from './server/universityRagPipeline.ts';
 import { handleGenerateFinalUniversityPaper, handleGetUniversityAuditLogs, handleDownloadUniversityPaper } from './server/universityFinalPipeline.ts';
+import {
+  initializeCompetitiveSchema,
+  handleGetCompetitiveExams,
+  handleSaveCompetitiveExam,
+  handleUploadSubjectPdf,
+  handleGetSubjectPoolFiles,
+  handleGetQuestionPools,
+  handleValidateBlueprint,
+  handleGenerateCompetitivePaper,
+  handleGetGeneratedPaper,
+  handleDeletePoolFile,
+} from './server/competitiveExam.ts';
 
 const configuredJwtSecret = process.env.JWT_SECRET;
 if (process.env.NODE_ENV === 'production' && (!configuredJwtSecret || configuredJwtSecret.length < 32)) {
@@ -4833,10 +4845,17 @@ async function startServer() {
         if (r.cloudinary_url) deletedSet.add(r.cloudinary_url.toLowerCase());
       });
 
-      const allPapers = executeQuery(
-        db,
-        `SELECT * FROM question_papers ORDER BY uploaded_at DESC`
-      );
+      const examIdStr = typeof exam_id === 'string' ? exam_id.trim() : '';
+      const allPapers = examIdStr
+        ? executeQuery(
+            db,
+            `SELECT * FROM question_papers WHERE exam_id = ? ORDER BY uploaded_at DESC`,
+            [examIdStr]
+          )
+        : executeQuery(
+            db,
+            `SELECT * FROM question_papers ORDER BY uploaded_at DESC`
+          );
 
       // Clean out any lingering deleted papers from database
       const validPapers = allPapers.filter((p: any) => {
@@ -10150,6 +10169,19 @@ async function startServer() {
     }
   });
 
+  // =========================================================================
+  // ZEROLEAK COMPETITIVE EXAMINATION MODULE API ROUTES
+  // =========================================================================
+  app.get('/api/competitive/exams', authenticateToken, requireRole(['EXAM_MANAGER', 'ORG_OWNER', 'AUDITOR']), handleGetCompetitiveExams);
+  app.post('/api/competitive/exams', authenticateToken, requireRole(['EXAM_MANAGER', 'ORG_OWNER']), handleSaveCompetitiveExam);
+  app.post('/api/competitive/upload-subject-pdf', authenticateToken, requireRole(['EXAM_MANAGER', 'ORG_OWNER']), handleUploadSubjectPdf);
+  app.get('/api/competitive/pool-files/:examId/:subjectId', authenticateToken, requireRole(['EXAM_MANAGER', 'ORG_OWNER', 'AUDITOR']), handleGetSubjectPoolFiles);
+  app.get('/api/competitive/question-pools/:examId', authenticateToken, requireRole(['EXAM_MANAGER', 'ORG_OWNER', 'AUDITOR']), handleGetQuestionPools);
+  app.post('/api/competitive/validate-blueprint', authenticateToken, requireRole(['EXAM_MANAGER', 'ORG_OWNER']), handleValidateBlueprint);
+  app.post('/api/competitive/generate-final-paper', authenticateToken, requireRole(['EXAM_MANAGER', 'ORG_OWNER']), handleGenerateCompetitivePaper);
+  app.get('/api/competitive/generated-papers/:paperId', authenticateToken, requireRole(['EXAM_MANAGER', 'ORG_OWNER', 'AUDITOR', 'CENTRE_OPERATOR']), handleGetGeneratedPaper);
+  app.post('/api/competitive/delete-pool-file', authenticateToken, requireRole(['EXAM_MANAGER', 'ORG_OWNER']), handleDeletePoolFile);
+
   // Centre Operator: Open Secure Viewer (Strict Backend Time-Lock & Device Enforced)
   app.post('/api/delivery/open-viewer', authenticateToken, requireApprovedDevice, requireRole(['CENTRE_OPERATOR', 'EXAM_MANAGER']), async (req: Request, res: Response) => {
     try {
@@ -12955,6 +12987,7 @@ async function startServer() {
       await seedAcademicDemoDataInternal();
       console.log('[ZeroLeak Startup] 4/6 Cleaning legacy questions...');
       const db = await getDb();
+      await initializeCompetitiveSchema(db);
       cleanLegacyDummyQuestions(db);
       saveDb();
       console.log('[ZeroLeak Startup] 5/6 Database initialization complete.');

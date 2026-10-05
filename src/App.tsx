@@ -47,9 +47,9 @@ export function App() {
     trusted_devices: 'trusted-devices',
     all_examinations: 'all-examinations',
     create_examination: 'create-examination',
-    question_workflow: 'question-workflow',
+    question_workflow: 'competitive-examination',
     question_pools: 'question-pools',
-    blueprint_pattern: 'blueprint-pattern',
+    blueprint_pattern: 'competitive-examination',
     paper_generation: 'paper-generation',
     multi_paper_generator: 'multi-paper-generator',
     paper_versions: 'paper-versions',
@@ -81,6 +81,10 @@ export function App() {
 
   const syncTabFromLocation = () => {
     const hash = window.location.hash.replace(/^#\/?/, '').replace(/^#/, '');
+    if (hash === 'question-workflow' || hash === 'blueprint-pattern') {
+      setActiveSubTab('question_workflow');
+      return;
+    }
     const matchedTab = (Object.entries(tabToHashMap) as [NavSubTab, string][]).find(([, value]) => value === hash)?.[0];
     const requestedTab = matchedTab === 'proctor_dashboard' && (currentUser?.role === 'ORG_OWNER' || currentUser?.role === 'EXAM_MANAGER')
       ? 'dashboard'

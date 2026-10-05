@@ -145,7 +145,6 @@ export const UniversityFormatGenerator: React.FC<UniversityFormatGeneratorProps>
 
   useEffect(() => {
     loadExaminations();
-    loadUploadedPapers();
     checkCloudinary();
     checkFormatex();
     checkLatexOnline();
@@ -349,22 +348,21 @@ export const UniversityFormatGenerator: React.FC<UniversityFormatGeneratorProps>
   };
 
   const loadUploadedPapers = async (examId?: string) => {
+    if (!examId) {
+      setUploadedPapers([]);
+      return;
+    }
     setLoadingPapers(true);
     try {
       let res = await api.getUploadedQuestionPapers(examId);
-      if (res.success && Array.isArray(res.papers) && res.papers.length === 0) {
-        // Automatically sync from Cloudinary if local bank is currently empty
-        const syncRes = await api.syncCloudinaryQuestionPapers(examId);
-        if (syncRes.success && Array.isArray(syncRes.papers)) {
-          setUploadedPapers(syncRes.papers);
-          return;
-        }
-      }
       if (res.success && Array.isArray(res.papers)) {
         setUploadedPapers(res.papers);
+      } else {
+        setUploadedPapers([]);
       }
     } catch (e: any) {
       console.error('Failed to load uploaded question papers:', e);
+      setUploadedPapers([]);
     } finally {
       setLoadingPapers(false);
     }
@@ -1191,9 +1189,9 @@ export const UniversityFormatGenerator: React.FC<UniversityFormatGeneratorProps>
         ) : uploadedPapers.length === 0 ? (
           <div className="p-10 rounded-2xl bg-slate-50 border border-dashed border-slate-300 text-center space-y-3">
             <UploadCloud className="w-10 h-10 text-sky-600 mx-auto" />
-            <div className="text-sm font-bold text-slate-900">No draft question papers indexed in local bank yet</div>
+            <div className="text-sm font-bold text-slate-900">No source paper uploaded yet</div>
             <p className="text-xs text-slate-500 max-w-md mx-auto">
-              Upload PDF question papers in <strong className="text-slate-800">Exam Workflow</strong> or click below to sync directly from your Cloudinary storage.
+              No draft papers uploaded for this configuration. Upload exactly 3 question-paper PDFs above to attach source papers.
             </p>
             <button
               type="button"

@@ -21,6 +21,7 @@ import {
   LogOut,
   ShieldCheck,
   Shuffle,
+  Award,
 } from 'lucide-react';
 import { UserRole } from '../types';
 
@@ -117,22 +118,15 @@ export const Sidebar: React.FC<SidebarProps> = ({
             ],
           },
           {
-            title: 'Question Bank',
+            title: 'Competitive Examination',
             items: [
-              { id: 'question_workflow', label: 'Question Workflow', icon: FileCheck },
-              { id: 'question_pools', label: 'Question Pools', icon: HelpCircle },
+              { id: 'question_workflow', label: 'Competitive Examination', icon: Award },
             ],
           },
           {
-            title: 'Configuration',
-            items: [{ id: 'blueprint_pattern', label: 'Blueprint & Pattern', icon: Cpu }],
-          },
-          {
-            title: 'Paper Generation',
+            title: 'University',
             items: [
-              { id: 'paper_generation', label: 'Paper Generation', icon: Lock },
-              { id: 'multi_paper_generator', label: 'Multi-Paper Generator', icon: Shuffle },
-              { id: 'paper_versions', label: 'Paper Versions', icon: Layers },
+              { id: 'paper_generation', label: 'University Paper Generation', icon: Lock },
             ],
           },
           {

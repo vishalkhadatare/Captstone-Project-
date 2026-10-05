@@ -58,6 +58,7 @@ import { BlueprintPatternModule } from './BlueprintPatternModule';
 import { QuestionPaperPdfModal } from './QuestionPaperPdfModal';
 import { UniversityFormatGenerator } from './UniversityFormatGenerator';
 import { PaperGenerationModule } from '../PaperGenerationModule';
+import { CompetitiveExaminationUnifiedWorkflow } from '../competitive/CompetitiveExaminationUnifiedWorkflow';
 
 interface ExamManagerWorkspaceProps {
   currentUser: User | null;
@@ -2027,9 +2028,17 @@ export const ExamManagerWorkspace: React.FC<ExamManagerWorkspaceProps> = ({
       )}
 
       {/* ============================================================ */}
-      {/* QUESTION WORKFLOW SECTION (HIGH-ASSURANCE QUESTION MANAGEMENT) */}
+      {/* COMPETITIVE EXAMINATION (UNIFIED 7-STEP WORKFLOW)            */}
       {/* ============================================================ */}
-      {activeSubTab === 'question_workflow' && (() => {
+      {(activeSubTab === 'question_workflow' || activeSubTab === 'blueprint_pattern') && (
+        <CompetitiveExaminationUnifiedWorkflow
+          currentUser={currentUser}
+          org={org}
+          onRefresh={onRefresh}
+        />
+      )}
+
+      {false && (() => {
         // 1. Filter examinations by selected governance type
         const typeFilteredWorkflowExams = (examinations || []).filter(ex => {
           const isUni = ex.category === 'University Exam' || ex.category?.toLowerCase().includes('university');
@@ -3401,8 +3410,8 @@ export const ExamManagerWorkspace: React.FC<ExamManagerWorkspaceProps> = ({
         </div>
       )}
 
-      {/* BLUEPRINT & PATTERN */}
-      {activeSubTab === 'blueprint_pattern' && (
+      {/* BLUEPRINT & PATTERN (INTEGRATED INTO COMPETITIVE EXAMINATION) */}
+      {false && activeSubTab === 'blueprint_pattern' && (
         <BlueprintPatternModule examinations={examinations} onRefresh={onRefresh} />
       )}
 
