@@ -51,8 +51,16 @@ export const DEVICE_APPROVAL_EVENT = 'zeroleak:device-approval-needed';
  * repoint the frontend without touching code.
  */
 export const API_BASE: string =
-  ((import.meta.env.VITE_API_URL as string | undefined) || '').trim() ||
-  (import.meta.env.PROD ? 'https://backed-repeated-aerobics.ngrok-free.dev' : '');
+  ((import.meta.env.VITE_API_URL as string | undefined) || '').trim();
+
+/**
+ * Prism transport selection. Same-origin builds stream over Server-Sent
+ * Events; deployments whose API is reached through the free ngrok tunnel
+ * (Netlify, flagged at build time) poll the snapshot endpoints instead,
+ * because EventSource cannot send ngrok's required skip header.
+ */
+const PRISM_POLLING: boolean =
+  Boolean(API_BASE) || import.meta.env.VITE_PRISM_POLLING === '1';
 
 function getStoredToken(): string | null {
   return localStorage.getItem('zeroleak_jwt_token');
@@ -268,11 +276,9 @@ function buildApiHeaders(extra?: HeadersInit): Record<string, string> {
     'x-device-fingerprint': getDeviceFingerprint(),
     ...(extra as Record<string, string>),
   };
-  // Cross-origin API hosts behind ngrok answer browser requests with an
-  // interstitial warning page unless this header is present.
-  if (API_BASE) {
-    headers['ngrok-skip-browser-warning'] = '1';
-  }
+  // Send ngrok's skip header on every call: harmless same-origin, and when a
+  // proxy (e.g. Netlify) forwards it, the tunnel never serves its interstitial.
+  headers['ngrok-skip-browser-warning'] = '1';
   if (token) {
     headers['Authorization'] = `Bearer ${token}`;
   }
@@ -1525,7 +1531,7 @@ export function subscribeBrowserStatus(onFrame: (frame: BrowserStatusFrame) => v
   // Cross-origin API host behind ngrok's free tier: EventSource cannot send
   // the ngrok-skip-browser-warning header, so the tunnel answers with its
   // interstitial page instead of the stream. Poll a JSON snapshot instead.
-  if (API_BASE) {
+  if (PRISM_POLLING) {
     let stopped = false;
     let busy = false;
     const tick = async () => {
@@ -1672,7 +1678,7 @@ export function subscribeBrowserLive(onEvent: (event: BrowserLiveEvent) => void)
   // them as they change. Frame cadence drops to roughly one per second — a
   // slideshow rather than live video, which still beats a permanently loading
   // panel.
-  if (API_BASE) {
+  if (PRISM_POLLING) {
     let stopped = false;
     let busy = false;
     let lastFrameSeq = -1;
