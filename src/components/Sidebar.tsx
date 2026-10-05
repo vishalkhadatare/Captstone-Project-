@@ -100,10 +100,6 @@ export const Sidebar: React.FC<SidebarProps> = ({
               { id: 'trusted_devices', label: 'Trusted Workstations', icon: Laptop },
             ],
           },
-          {
-            title: 'SECURITY',
-            items: [{ id: 'security_events', label: 'Security Events', icon: ShieldAlert }],
-          },
         ];
 
       case 'EXAM_MANAGER':
