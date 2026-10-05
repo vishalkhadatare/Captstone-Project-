@@ -88,6 +88,29 @@ export const AuthorityProctorEnclave: React.FC<AuthorityProctorEnclaveProps> = (
   const [enclaveStarted, setEnclaveStarted] = useState(false);
   const [isStartingEnclave, setIsStartingEnclave] = useState(false);
 
+  // Dedicated Setup & Permission Verification Modal (Section 3: opens automatically after login)
+  const [setupModalOpen, setSetupModalOpen] = useState(true);
+  const [permissionPhase, setPermissionPhase] = useState<'IDLE' | 'REQUESTING' | 'SUCCESS' | 'DENIED' | 'ERROR'>('IDLE');
+
+  // Graduated Presence States: 'PRESENT' | 'CHECKING' | 'UNCERTAIN' | 'ABSENT' (Section 25)
+  const [presenceStatus, setPresenceStatus] = useState<'PRESENT' | 'CHECKING' | 'UNCERTAIN' | 'ABSENT'>('PRESENT');
+
+  // Hardware Disconnect Flags (Sections 23 & 24)
+  const [isCameraDisconnected, setIsCameraDisconnected] = useState(false);
+  const [isMicDisconnected, setIsMicDisconnected] = useState(false);
+
+  // Subtle Non-blocking Toast Notification (Sections 31 & 32)
+  const [toast, setToast] = useState<{ text: string; type: 'success' | 'warning' | 'info' } | null>(null);
+  const toastTimeoutRef = useRef<any>(null);
+
+  const showToast = (text: string, type: 'success' | 'warning' | 'info' = 'info') => {
+    if (toastTimeoutRef.current) clearTimeout(toastTimeoutRef.current);
+    setToast({ text, type });
+    toastTimeoutRef.current = setTimeout(() => {
+      setToast(null);
+    }, 3800);
+  };
+
   // Independent Hardware Permission States
   const [cameraState, setCameraState] = useState<DevicePermissionState>('not_requested');
   const [micState, setMicState] = useState<DevicePermissionState>('not_requested');
@@ -110,14 +133,8 @@ export const AuthorityProctorEnclave: React.FC<AuthorityProctorEnclaveProps> = (
   const [leakRiskScore, setLeakRiskScore] = useState(0);
   const [leakRiskLevel, setLeakRiskLevel] = useState<RiskLevel>('NORMAL');
 
-  // Strict 3-Warning Rule Engine (0/3, 1/3, 2/3, 3/3 — NEVER 4/3)
+  // Strict 3-Warning Rule Engine (Maintained in backend, hidden from translator UI)
   const [warningCount, setWarningCount] = useState(0);
-  const [activeWarningModal, setActiveWarningModal] = useState<{
-    level: 1 | 2 | 3;
-    title: string;
-    reason: string;
-    timestamp: string;
-  } | null>(null);
   const lastWarningTimeRef = useRef<number>(0);
 
   // Focus & Visibility Debounced Guard (>2.5s threshold with deduplication)
@@ -274,19 +291,54 @@ export const AuthorityProctorEnclave: React.FC<AuthorityProctorEnclaveProps> = (
     }
   };
 
+  // Capture verification photo via canvas from real webcam video stream
+  const captureVerificationPhoto = async (stream: MediaStream): Promise<string> => {
+    try {
+      const videoTrack = stream.getVideoTracks()[0];
+      if (!videoTrack) return '';
+
+      const tempVideo = document.createElement('video');
+      tempVideo.muted = true;
+      tempVideo.playsInline = true;
+      tempVideo.srcObject = stream;
+      await tempVideo.play().catch(() => {});
+
+      // Wait 350ms for camera exposure stabilization
+      await new Promise(r => setTimeout(r, 350));
+
+      const canvas = document.createElement('canvas');
+      canvas.width = tempVideo.videoWidth || 640;
+      canvas.height = tempVideo.videoHeight || 480;
+      const ctx = canvas.getContext('2d');
+      if (ctx) {
+        ctx.drawImage(tempVideo, 0, 0, canvas.width, canvas.height);
+        const dataUrl = canvas.toDataURL('image/jpeg', 0.85);
+        setVerificationSnapshot(dataUrl);
+        return dataUrl;
+      }
+    } catch (e) {
+      console.warn('Initial photo capture notice:', e);
+    }
+    return '';
+  };
+
   // =========================================================================
   // 2. EXPLICIT USER ACTION: Request Camera & Microphone Permissions
   // =========================================================================
   const handleRequestHardwarePermissions = async () => {
     setIsRequestingPermissions(true);
     setPermissionError(null);
+    setPermissionPhase('REQUESTING');
     setCameraState('requesting');
     setMicState('requesting');
+    setIsCameraDisconnected(false);
+    setIsMicDisconnected(false);
 
     addTimelineEvent('PERMISSION_REQUEST', 'LOW', 'Official clicked Enable Camera & Microphone');
 
     let vStream: MediaStream | null = null;
     let aStream: MediaStream | null = null;
+    let finalStream: MediaStream | null = null;
 
     try {
       // 1. Try combined request first
@@ -297,6 +349,7 @@ export const AuthorityProctorEnclave: React.FC<AuthorityProctorEnclaveProps> = (
 
       vStream = combined;
       aStream = combined;
+      finalStream = combined;
       setCameraState('granted');
       setMicState('granted');
       setMediaStream(combined);
@@ -338,6 +391,7 @@ export const AuthorityProctorEnclave: React.FC<AuthorityProctorEnclaveProps> = (
         if (vStream) tracks.push(...vStream.getVideoTracks());
         if (aStream) tracks.push(...aStream.getAudioTracks());
         const assembled = new MediaStream(tracks);
+        finalStream = assembled;
         setMediaStream(assembled);
         streamRef.current = assembled;
 
@@ -347,6 +401,58 @@ export const AuthorityProctorEnclave: React.FC<AuthorityProctorEnclaveProps> = (
       }
     } finally {
       setIsRequestingPermissions(false);
+    }
+
+    // Attach hardware disconnect listeners (Sections 23 & 24)
+    if (finalStream) {
+      finalStream.getVideoTracks().forEach(track => {
+        track.onended = () => {
+          setIsCameraDisconnected(true);
+          setCameraState('denied');
+          showToast('⚠ Camera connection lost. Please restore camera access.', 'warning');
+        };
+      });
+      finalStream.getAudioTracks().forEach(track => {
+        track.onended = () => {
+          setIsMicDisconnected(true);
+          setMicState('denied');
+          showToast('⚠ Microphone connection lost. Please restore microphone access.', 'warning');
+        };
+      });
+
+      // If both granted: capture authorized verification photo & initialize proctor session
+      if (vStream && aStream) {
+        setPermissionPhase('SUCCESS');
+        try {
+          const snap = await captureVerificationPhoto(finalStream);
+          const res = await api.authorityProctor.startSession({
+            workspace_type: workspaceType,
+            exam_id: examId,
+            verification_snapshot: snap || undefined,
+          });
+
+          setSession(res.session);
+          setWarningCount(Number(res.session.warning_count) || 0);
+          addTimelineEvent('PROCTOR_SESSION_STARTED', 'LOW', `Enclave session ${res.session.id} authorized & active`);
+
+          // Short 850ms confirmation before closing setup modal
+          setTimeout(() => {
+            setSetupModalOpen(false);
+            setEnclaveStarted(true);
+            showToast('✓ Camera verification recorded', 'success');
+          }, 850);
+        } catch (err: any) {
+          console.error('Session start error:', err);
+          setTimeout(() => {
+            setSetupModalOpen(false);
+            setEnclaveStarted(true);
+          }, 850);
+        }
+      } else {
+        setPermissionPhase('DENIED');
+      }
+    } else {
+      setPermissionPhase('DENIED');
     }
   };
 
@@ -527,19 +633,17 @@ export const AuthorityProctorEnclave: React.FC<AuthorityProctorEnclaveProps> = (
       const nextCount = Math.min(3, res.warning_count);
       setWarningCount(nextCount);
 
-      const titleText =
-        nextCount === 1
-          ? 'First Proctor Warning'
-          : nextCount === 2
-          ? 'Second Proctor Warning'
-          : 'Final Proctor Warning — Session Under Review';
+      // Gentle non-disruptive notification for translator workspace
+      const userActionNotice =
+        reason.includes('Focus') || eventType === 'FOCUS_LOST'
+          ? 'Please keep the secure examination session active.'
+          : reason.includes('Secondary') || eventType === 'SHOULDER_SURFING'
+          ? 'Please ensure you are working alone in the secure area.'
+          : reason.includes('Screenshot') || eventType === 'SCREENSHOT_ATTEMPT'
+          ? 'Screen capture is prohibited in this secure enclave.'
+          : 'Please remain visible and focused on the secure session.';
 
-      setActiveWarningModal({
-        level: nextCount as 1 | 2 | 3,
-        title: titleText,
-        reason,
-        timestamp: new Date().toLocaleTimeString(),
-      });
+      showToast(userActionNotice, 'warning');
 
       addTimelineEvent(`WARNING_${nextCount}`, nextCount === 3 ? 'CRITICAL' : 'HIGH', reason);
       if (violationSnap) {
@@ -548,7 +652,7 @@ export const AuthorityProctorEnclave: React.FC<AuthorityProctorEnclaveProps> = (
 
       if (nextCount >= 3 || res.is_locked) {
         setIsEmergencyLocked(true);
-        setEmergencyReason(`Maximum warning threshold reached (3/3). Session flagged for review by CBI Chief Vigilance & Security Auditor.`);
+        setEmergencyReason('Maximum proctoring violation threshold reached (3/3). Session placed under official audit review.');
         addTimelineEvent('AUDIT_ESCALATION', 'CRITICAL', 'Case escalated to CBI Chief Vigilance & Security Auditor (Priority: High)');
       }
     } catch (err) {
@@ -622,18 +726,25 @@ export const AuthorityProctorEnclave: React.FC<AuthorityProctorEnclaveProps> = (
         if (!active) return;
         setFaceResult(result);
 
-        // A. Absence Detection
+        // A. Graduated Presence Detection (0-2s Checking, 2-4s Uncertain, >4.5s Absent)
         if (result.faceCount === 0) {
           consecutiveAbsentFrames.current += 1;
-          if (consecutiveAbsentFrames.current >= 3) {
+          const frames = consecutiveAbsentFrames.current;
+          if (frames <= 2) {
+            setPresenceStatus('CHECKING');
+          } else if (frames <= 4) {
+            setPresenceStatus('UNCERTAIN');
+          } else {
+            setPresenceStatus('ABSENT');
             setIsFaceAbsent(true);
             if (lastFaceStateLogged.current !== 'ABSENT') {
               lastFaceStateLogged.current = 'ABSENT';
-              addTimelineEvent('FACE_ABSENT', 'MEDIUM', 'Official absent from camera view');
+              addTimelineEvent('FACE_ABSENT', 'MEDIUM', 'Official absent from camera view (>4.5s)');
             }
           }
         } else {
           consecutiveAbsentFrames.current = 0;
+          setPresenceStatus('PRESENT');
           if (isFaceAbsent) {
             setIsFaceAbsent(false);
             if (lastFaceStateLogged.current === 'ABSENT') {
@@ -857,7 +968,8 @@ export const AuthorityProctorEnclave: React.FC<AuthorityProctorEnclaveProps> = (
       });
 
       setVoiceSubmittedSuccess({ evidenceId: res.evidence.id });
-      addTimelineEvent('VOICE_EVIDENCE_SENT', 'MEDIUM', `Voice evidence ${res.evidence.id} transmitted to Chief Auditor`);
+      showToast('✓ Voice evidence securely recorded', 'success');
+      addTimelineEvent('VOICE_EVIDENCE_SENT', 'MEDIUM', `Voice evidence ${res.evidence.id} securely archived`);
     } catch (err: any) {
       console.error('Voice submit failed:', err);
       setVoiceSubmissionFailed(true);
@@ -1246,6 +1358,46 @@ export const AuthorityProctorEnclave: React.FC<AuthorityProctorEnclaveProps> = (
           )}
         </div>
 
+        {/* Camera Disconnect Notice */}
+        {isCameraDisconnected && (
+          <div className="p-4 rounded-xl bg-[#FFF1F3] border border-[#E84B5F]/30 text-[#142B38] text-xs flex items-center justify-between gap-3 animate-fade-in shadow-2xs">
+            <div className="flex items-center gap-2.5">
+              <CameraOff className="w-5 h-5 text-[#E84B5F] shrink-0" />
+              <div>
+                <span className="font-bold text-[#E84B5F] block">Camera connection lost</span>
+                <span className="text-[#65777F]">Please restore camera access to continue your examination session.</span>
+              </div>
+            </div>
+            <button
+              type="button"
+              onClick={handleRequestHardwarePermissions}
+              className="px-4 py-2 rounded-xl bg-white border border-[#E84B5F]/40 hover:bg-[#FFF1F3] text-[#E84B5F] font-bold text-xs shrink-0 cursor-pointer shadow-2xs"
+            >
+              Reconnect Camera
+            </button>
+          </div>
+        )}
+
+        {/* Microphone Disconnect Notice */}
+        {isMicDisconnected && (
+          <div className="p-4 rounded-xl bg-[#FFF7E8] border border-[#F0A11A]/30 text-[#142B38] text-xs flex items-center justify-between gap-3 animate-fade-in shadow-2xs">
+            <div className="flex items-center gap-2.5">
+              <AlertTriangle className="w-5 h-5 text-[#F0A11A] shrink-0" />
+              <div>
+                <span className="font-bold text-[#F0A11A] block">Microphone connection lost</span>
+                <span className="text-[#65777F]">Please restore microphone access to maintain session security.</span>
+              </div>
+            </div>
+            <button
+              type="button"
+              onClick={handleRequestHardwarePermissions}
+              className="px-4 py-2 rounded-xl bg-white border border-[#F0A11A]/40 hover:bg-[#FFF7E8] text-[#F0A11A] font-bold text-xs shrink-0 cursor-pointer shadow-2xs"
+            >
+              Reconnect Microphone
+            </button>
+          </div>
+        )}
+
         {/* ======================================================== */}
         {/* TWO-COLUMN PROCTORING WORKSPACE (LIGHT UI)                */}
         {/* ======================================================== */}
@@ -1423,16 +1575,16 @@ export const AuthorityProctorEnclave: React.FC<AuthorityProctorEnclaveProps> = (
                   </div>
                   <div>
                     <h3 className="text-sm font-bold text-[#142B38] tracking-tight">
-                      VOICE EVIDENCE RECORDING
+                      VOICE EVIDENCE
                     </h3>
                     <p className="text-xs text-[#65777F]">
-                      Record official remarks or incident notes and route directly to the Chief Vigilance Auditor.
+                      Record official remarks or translation incident notes.
                     </p>
                   </div>
                 </div>
 
-                <span className="px-2.5 py-0.5 rounded bg-[#EEF6FF] text-[#2878D8] text-[10px] font-bold font-mono border border-[#2878D8]/20">
-                  AUDITOR PIPELINE
+                <span className="px-2.5 py-0.5 rounded bg-[#EAF9F3] text-[#008A63] text-[10px] font-bold font-mono border border-[#00A878]/30">
+                  OFFICIAL RECORD
                 </span>
               </div>
 
@@ -1453,9 +1605,9 @@ export const AuthorityProctorEnclave: React.FC<AuthorityProctorEnclaveProps> = (
                     <div>
                       <span className={`text-xs font-bold block ${isRecordingVoice ? 'text-[#E84B5F]' : 'text-[#142B38]'}`}>
                         {isRecordingVoice
-                          ? '🔴 VOICE RECORDING ACTIVE'
+                          ? '🔴 RECORDING ACTIVE'
                           : voiceAudioUrl
-                          ? 'VOICE EVIDENCE READY'
+                          ? 'VOICE NOTE READY'
                           : 'STANDBY — READY TO RECORD'}
                       </span>
                       <span className="text-xs font-mono text-[#65777F]">
@@ -1474,7 +1626,7 @@ export const AuthorityProctorEnclave: React.FC<AuthorityProctorEnclaveProps> = (
                       className="px-4 py-2 rounded-xl text-white font-bold text-xs shadow-xs hover:shadow-md transition-all cursor-pointer disabled:opacity-50"
                       style={{ background: 'linear-gradient(135deg, #00A878, #00C98B)' }}
                     >
-                      Start Voice Evidence
+                      Start Recording
                     </button>
                   ) : (
                     <button
@@ -1508,7 +1660,7 @@ export const AuthorityProctorEnclave: React.FC<AuthorityProctorEnclaveProps> = (
                     {/* Submit Button */}
                     <div className="flex flex-col sm:flex-row items-center justify-between gap-3 pt-1">
                       <p className="text-[11px] text-[#65777F]">
-                        Transmits authenticated voice remarks to the Chief Vigilance Auditor.
+                        Encrypts and archives official voice evidence for this session.
                       </p>
                       <button
                         type="button"
@@ -1519,17 +1671,17 @@ export const AuthorityProctorEnclave: React.FC<AuthorityProctorEnclaveProps> = (
                         {isSubmittingVoice ? (
                           <>
                             <RefreshCw className="w-3.5 h-3.5 animate-spin" />
-                            <span>Encrypting & Sending...</span>
+                            <span>Encrypting & Saving...</span>
                           </>
                         ) : voiceSubmittedSuccess ? (
                           <>
                             <CheckCircle2 className="w-3.5 h-3.5 text-white" />
-                            <span>Submitted to Auditor ✓</span>
+                            <span>Saved ✓</span>
                           </>
                         ) : (
                           <>
                             <Send className="w-3.5 h-3.5" />
-                            <span>SUBMIT TO CHIEF VIGILANCE & SECURITY AUDITOR</span>
+                            <span>Save Voice Evidence</span>
                           </>
                         )}
                       </button>
@@ -1542,10 +1694,10 @@ export const AuthorityProctorEnclave: React.FC<AuthorityProctorEnclaveProps> = (
                   <div className="p-3 rounded-xl bg-[#EAF9F3] border border-[#00A878]/30 text-[#008A63] text-xs space-y-1">
                     <div className="font-bold flex items-center gap-1.5">
                       <CheckCircle2 className="w-4 h-4 text-[#00A878]" />
-                      VOICE EVIDENCE SUBMITTED
+                      VOICE EVIDENCE SAVED
                     </div>
                     <div className="font-mono text-[11px] text-[#142B38]">
-                      Evidence ID: <strong>{voiceSubmittedSuccess.evidenceId}</strong> • Recipient: Chief Vigilance & Security Auditor • Status: ✓ PENDING REVIEW
+                      Evidence ID: <strong>{voiceSubmittedSuccess.evidenceId}</strong> • Status: ✓ SECURED IN ARCHIVE
                     </div>
                   </div>
                 )}
@@ -1631,101 +1783,77 @@ export const AuthorityProctorEnclave: React.FC<AuthorityProctorEnclaveProps> = (
                 </div>
 
                 <div className="flex items-center justify-between p-3 rounded-xl bg-[#F6FAF9] border border-[#DCE7EA]">
-                  <span className="font-semibold text-[#142B38]">Warning Count</span>
-                  <span className="font-mono font-bold text-[#142B38]">
-                    {warningCount} / 3
+                  <span className="font-semibold text-[#142B38]">Official Presence</span>
+                  <span className={`font-mono font-bold ${
+                    presenceStatus === 'PRESENT'
+                      ? 'text-[#008A63]'
+                      : presenceStatus === 'CHECKING'
+                      ? 'text-[#2878D8]'
+                      : presenceStatus === 'UNCERTAIN'
+                      ? 'text-[#F0A11A]'
+                      : 'text-[#E84B5F]'
+                  }`}>
+                    {presenceStatus === 'PRESENT'
+                      ? '● Verified Present'
+                      : presenceStatus === 'CHECKING'
+                      ? '○ Verifying...'
+                      : presenceStatus === 'UNCERTAIN'
+                      ? '⚠ Presence Uncertain'
+                      : '● Official Absent'}
                   </span>
                 </div>
               </div>
             </div>
 
-            {/* PART 15 & 16: PROCTOR WARNINGS CARD (WHITE BACKGROUND) */}
+            {/* PART 25: LIVE SECURITY ACTIVITY (WHITE CARD) */}
             <div className="bg-white rounded-2xl border border-[#DCE7EA] p-6 shadow-[0_6px_24px_rgba(30,70,80,0.05)] space-y-4">
               <div className="flex items-center justify-between pb-3 border-b border-[#F0F4F8]">
                 <div className="flex items-center gap-2.5">
-                  <div className="p-1.5 rounded-lg bg-[#FFF7E8] text-[#F0A11A]">
-                    <AlertTriangle className="w-4 h-4" />
+                  <div className="p-1.5 rounded-lg bg-[#EEF6FF] text-[#2878D8]">
+                    <Activity className="w-4 h-4" />
                   </div>
                   <div>
                     <h3 className="text-sm font-bold text-[#142B38] tracking-tight">
-                      PROCTOR WARNINGS
+                      LIVE SECURITY ACTIVITY
                     </h3>
                     <p className="text-xs text-[#65777F]">
-                      Threshold capped at 3 warnings. Third violation flags session for auditor review.
+                      Real-time cryptographic audit log of sensor and focus events.
                     </p>
                   </div>
                 </div>
 
-                <span className={`px-3 py-1 rounded-full text-xs font-mono font-black border ${
-                  warningCount === 0
-                    ? 'bg-[#EAF9F3] text-[#008A63] border-[#00A878]/30'
-                    : warningCount === 1
-                    ? 'bg-[#FFF7E8] text-[#F0A11A] border-[#F0A11A]/30'
-                    : warningCount === 2
-                    ? 'bg-orange-50 text-orange-600 border-orange-200'
-                    : 'bg-[#FFF1F3] text-[#E84B5F] border-[#E84B5F]/30'
-                }`}>
-                  {warningCount} / 3
+                <span className="text-xs font-mono text-[#65777F]">
+                  {timelineEvents.length} events logged
                 </span>
               </div>
 
-              {/* Visual 3 Indicator Circles */}
-              <div className="p-4 rounded-xl bg-[#F6FAF9] border border-[#DCE7EA] space-y-3">
-                <div className="flex items-center justify-between text-xs">
-                  <span className="font-semibold text-[#142B38]">Violation Progression:</span>
-                  <span className="font-mono text-[#65777F]">{3 - warningCount} warnings remaining</span>
-                </div>
-
-                <div className="grid grid-cols-3 gap-3">
-                  {/* Circle 1 */}
-                  <div className={`p-3 rounded-xl border flex flex-col items-center text-center space-y-1 ${
-                    warningCount >= 1
-                      ? 'bg-[#FFF7E8] border-[#F0A11A] text-amber-900 shadow-2xs'
-                      : 'bg-white border-[#DCE7EA] text-[#65777F]'
-                  }`}>
-                    <div className={`w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold ${
-                      warningCount >= 1 ? 'bg-[#F0A11A] text-white' : 'bg-[#E1E9EB] text-[#65777F]'
-                    }`}>
-                      1
+              <div className="space-y-2 max-h-56 overflow-y-auto pr-1">
+                {timelineEvents.map((ev) => (
+                  <div
+                    key={ev.id}
+                    className="p-3 rounded-xl bg-[#F6FAF9] border border-[#DCE7EA] flex items-center justify-between gap-3 text-xs"
+                  >
+                    <div className="flex items-center gap-2.5 truncate">
+                      <span className={`px-2 py-0.5 rounded text-[10px] font-bold uppercase shrink-0 ${
+                        ev.severity === 'CRITICAL'
+                          ? 'bg-[#FFF1F3] text-[#E84B5F] border border-[#E84B5F]/30'
+                          : ev.severity === 'HIGH'
+                          ? 'bg-orange-50 text-orange-700 border border-orange-200'
+                          : ev.severity === 'MEDIUM'
+                          ? 'bg-[#FFF7E8] text-[#F0A11A] border border-[#F0A11A]/30'
+                          : 'bg-[#EAF9F3] text-[#008A63] border border-[#00A878]/30'
+                      }`}>
+                        {ev.event_type}
+                      </span>
+                      <span className="text-[#142B38] font-medium truncate">
+                        {ev.description}
+                      </span>
                     </div>
-                    <span className="text-xs font-bold">Warning 1</span>
-                    <span className="text-[10px]">Amber Alert</span>
+                    <span className="font-mono text-[11px] text-[#65777F] shrink-0">
+                      {ev.time}
+                    </span>
                   </div>
-
-                  {/* Circle 2 */}
-                  <div className={`p-3 rounded-xl border flex flex-col items-center text-center space-y-1 ${
-                    warningCount >= 2
-                      ? 'bg-orange-50 border-orange-500 text-orange-900 shadow-2xs'
-                      : 'bg-white border-[#DCE7EA] text-[#65777F]'
-                  }`}>
-                    <div className={`w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold ${
-                      warningCount >= 2 ? 'bg-orange-500 text-white' : 'bg-[#E1E9EB] text-[#65777F]'
-                    }`}>
-                      2
-                    </div>
-                    <span className="text-xs font-bold">Warning 2</span>
-                    <span className="text-[10px]">Orange Notice</span>
-                  </div>
-
-                  {/* Circle 3 */}
-                  <div className={`p-3 rounded-xl border flex flex-col items-center text-center space-y-1 ${
-                    warningCount >= 3
-                      ? 'bg-[#FFF1F3] border-[#E84B5F] text-rose-900 shadow-2xs'
-                      : 'bg-white border-[#DCE7EA] text-[#65777F]'
-                  }`}>
-                    <div className={`w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold ${
-                      warningCount >= 3 ? 'bg-[#E84B5F] text-white' : 'bg-[#E1E9EB] text-[#65777F]'
-                    }`}>
-                      3
-                    </div>
-                    <span className="text-xs font-bold">Warning 3</span>
-                    <span className="text-[10px]">Red Escalation</span>
-                  </div>
-                </div>
-
-                <p className="text-[11px] text-[#65777F] pt-2 border-t border-[#DCE7EA] leading-relaxed">
-                  <strong>Policy Enforcement:</strong> At 3 warnings, access is flagged for review by the Chief Vigilance & Security Auditor. The warning counter is strictly capped and will never display 4/3.
-                </p>
+                ))}
               </div>
             </div>
           </div>
@@ -1773,131 +1901,136 @@ export const AuthorityProctorEnclave: React.FC<AuthorityProctorEnclaveProps> = (
             )}
           </div>
         </div>
-
-        {/* ======================================================== */}
-        {/* PART 25: LIVE SECURITY ACTIVITY (WHITE CARD)             */}
-        {/* ======================================================== */}
-        <div className="bg-white rounded-2xl border border-[#DCE7EA] p-6 shadow-[0_6px_24px_rgba(30,70,80,0.05)] space-y-4">
-          <div className="flex items-center justify-between pb-3 border-b border-[#F0F4F8]">
-            <div className="flex items-center gap-2.5">
-              <div className="p-1.5 rounded-lg bg-[#EEF6FF] text-[#2878D8]">
-                <Activity className="w-4 h-4" />
-              </div>
-              <div>
-                <h3 className="text-sm font-bold text-[#142B38] tracking-tight">
-                  LIVE SECURITY ACTIVITY
-                </h3>
-                <p className="text-xs text-[#65777F]">
-                  Real-time cryptographic audit log of sensor and focus events.
-                </p>
-              </div>
-            </div>
-
-            <span className="text-xs font-mono text-[#65777F]">
-              {timelineEvents.length} events logged
-            </span>
-          </div>
-
-          <div className="space-y-2 max-h-56 overflow-y-auto pr-1">
-            {timelineEvents.map((ev) => (
-              <div
-                key={ev.id}
-                className="p-3 rounded-xl bg-[#F6FAF9] border border-[#DCE7EA] flex items-center justify-between gap-3 text-xs"
-              >
-                <div className="flex items-center gap-2.5 truncate">
-                  <span className={`px-2 py-0.5 rounded text-[10px] font-bold uppercase shrink-0 ${
-                    ev.severity === 'CRITICAL'
-                      ? 'bg-[#FFF1F3] text-[#E84B5F] border border-[#E84B5F]/30'
-                      : ev.severity === 'HIGH'
-                      ? 'bg-orange-50 text-orange-700 border border-orange-200'
-                      : ev.severity === 'MEDIUM'
-                      ? 'bg-[#FFF7E8] text-[#F0A11A] border border-[#F0A11A]/30'
-                      : 'bg-[#EAF9F3] text-[#008A63] border border-[#00A878]/30'
-                  }`}>
-                    {ev.event_type}
-                  </span>
-                  <span className="text-[#142B38] font-medium truncate">
-                    {ev.description}
-                  </span>
-                </div>
-                <span className="font-mono text-[11px] text-[#65777F] shrink-0">
-                  {ev.time}
-                </span>
-              </div>
-            ))}
-          </div>
-        </div>
       </div>
 
       {/* ======================================================== */}
-      {/* PART 18, 19, 20: WHITE PROCTOR WARNING MODALS            */}
+      {/* FLOATING TOAST NOTIFICATION                              */}
       {/* ======================================================== */}
-      {activeWarningModal && (
+      {toast && (
+        <div
+          role="status"
+          aria-live="polite"
+          className={`fixed top-5 right-5 z-50 px-4 py-3 rounded-2xl shadow-[0_8px_30px_rgba(0,0,0,0.12)] border flex items-center gap-2.5 text-xs font-semibold animate-in fade-in slide-in-from-top-3 duration-200 ${
+            toast.type === 'warning'
+              ? 'bg-[#FFF7E8] border-[#F0A11A]/40 text-amber-950'
+              : toast.type === 'success'
+              ? 'bg-[#EAF9F3] border-[#00A878]/40 text-[#008A63]'
+              : 'bg-white border-[#DCE7EA] text-[#142B38]'
+          }`}
+        >
+          {toast.type === 'warning' ? (
+            <AlertTriangle className="w-4 h-4 text-[#F0A11A] shrink-0" />
+          ) : toast.type === 'success' ? (
+            <CheckCircle2 className="w-4 h-4 text-[#00A878] shrink-0" />
+          ) : (
+            <ShieldCheck className="w-4 h-4 text-[#2878D8] shrink-0" />
+          )}
+          <span>{toast.text}</span>
+        </div>
+      )}
+
+      {/* ======================================================== */}
+      {/* AUTOMATIC CAMERA & MICROPHONE SETUP MODAL (LIGHT THEME)  */}
+      {/* ======================================================== */}
+      {setupModalOpen && (
         <div className="fixed inset-0 z-50 bg-black/40 backdrop-blur-xs flex items-center justify-center p-4">
-          <div className={`bg-white rounded-2xl border-t-4 w-full max-w-lg p-6 shadow-2xl space-y-4 animate-in fade-in zoom-in-95 ${
-            activeWarningModal.level === 3
-              ? 'border-t-[#E84B5F]'
-              : activeWarningModal.level === 2
-              ? 'border-t-orange-500'
-              : 'border-t-[#F0A11A]'
-          }`}>
-            <div className="flex items-center gap-3">
-              <div className={`p-3 rounded-2xl ${
-                activeWarningModal.level === 3
-                  ? 'bg-[#FFF1F3] text-[#E84B5F]'
-                  : activeWarningModal.level === 2
-                  ? 'bg-orange-50 text-orange-600'
-                  : 'bg-[#FFF7E8] text-[#F0A11A]'
-              }`}>
-                <AlertTriangle className="w-7 h-7" />
+          <div className="bg-white rounded-3xl border border-[#DCE7EA] w-full max-w-lg p-6 shadow-2xl space-y-5 animate-in fade-in zoom-in-95">
+            <div className="flex items-center gap-3 pb-3 border-b border-[#F0F4F8]">
+              <div className="p-2.5 rounded-2xl bg-[#EAF9F3] text-[#00A878]">
+                <ShieldCheck className="w-6 h-6" />
               </div>
               <div>
-                <span className="text-[10px] font-bold uppercase tracking-wider text-[#65777F]">
-                  Proctor Warning #{activeWarningModal.level} of 3
+                <span className="text-[10px] font-bold uppercase tracking-wider text-[#00A878]">
+                  ZeroLeak Secure Session
                 </span>
-                <h3 className="text-lg font-bold text-[#142B38]">
-                  {activeWarningModal.title}
+                <h3 className="text-base font-bold text-[#142B38]">
+                  Camera &amp; Microphone Verification
                 </h3>
               </div>
             </div>
 
-            <div className="p-3.5 rounded-xl bg-[#F6FAF9] border border-[#DCE7EA] text-xs space-y-1">
-              <span className="text-[#65777F] font-semibold">Incident Details:</span>
-              <p className="text-[#142B38] font-medium">{activeWarningModal.reason}</p>
-            </div>
-
             <p className="text-xs text-[#65777F] leading-relaxed">
-              {activeWarningModal.level === 3
-                ? 'Maximum warning threshold reached. This examination session has been flagged for forensic review by the Chief Vigilance & Security Auditor.'
-                : activeWarningModal.level === 2
-                ? 'Repeated focus changes detected. One additional violation will flag the session for security review.'
-                : 'Please maintain continuous focus on this window and ensure your camera remains unobstructed.'}
+              To begin the secure examination session, ZeroLeak requires access to your camera and microphone.
             </p>
 
-            <div className="pt-2 flex justify-end gap-2">
-              {activeWarningModal.level === 3 ? (
-                <>
-                  <button
-                    type="button"
-                    onClick={() => setActiveWarningModal(null)}
-                    className="px-4 py-2 rounded-xl bg-[#E84B5F] hover:bg-[#d63b4f] text-white font-bold text-xs cursor-pointer"
-                  >
-                    Continue Under Review
-                  </button>
-                </>
-              ) : (
+            <div className="space-y-2.5">
+              <div className="p-3.5 rounded-2xl bg-[#F6FAF9] border border-[#DCE7EA] flex items-center justify-between text-xs">
+                <div className="flex items-center gap-3">
+                  <div className="p-2 rounded-xl bg-white border border-[#DCE7EA] text-[#00A878]">
+                    <Camera className="w-4 h-4" />
+                  </div>
+                  <div>
+                    <span className="font-bold text-[#142B38] block">Camera</span>
+                    <span className="text-[11px] text-[#65777F]">Used for official presence verification.</span>
+                  </div>
+                </div>
+                <span className={`font-mono text-xs font-bold ${
+                  cameraState === 'granted' ? 'text-[#008A63]' : 'text-[#65777F]'
+                }`}>
+                  {cameraState === 'granted' ? '✓ Camera ready' : 'Required'}
+                </span>
+              </div>
+
+              <div className="p-3.5 rounded-2xl bg-[#F6FAF9] border border-[#DCE7EA] flex items-center justify-between text-xs">
+                <div className="flex items-center gap-3">
+                  <div className="p-2 rounded-xl bg-white border border-[#DCE7EA] text-[#00B8D9]">
+                    <Mic className="w-4 h-4" />
+                  </div>
+                  <div>
+                    <span className="font-bold text-[#142B38] block">Microphone</span>
+                    <span className="text-[11px] text-[#65777F]">Used for authorized voice evidence.</span>
+                  </div>
+                </div>
+                <span className={`font-mono text-xs font-bold ${
+                  micState === 'granted' ? 'text-[#008A63]' : 'text-[#65777F]'
+                }`}>
+                  {micState === 'granted' ? '✓ Microphone ready' : 'Required'}
+                </span>
+              </div>
+            </div>
+
+            {permissionPhase === 'SUCCESS' ? (
+              <div className="p-3.5 rounded-2xl bg-[#EAF9F3] border border-[#00A878]/30 text-xs font-bold text-[#008A63] flex items-center justify-center gap-2 animate-fade-in">
+                <CheckCircle2 className="w-4 h-4 text-[#00A878]" />
+                <span>✓ Secure session initialized</span>
+              </div>
+            ) : permissionPhase === 'DENIED' || cameraState === 'denied' || micState === 'denied' ? (
+              <div className="space-y-3">
+                <div className="p-3.5 rounded-2xl bg-[#FFF1F3] border border-[#E84B5F]/30 text-xs text-[#E84B5F] flex items-center gap-2">
+                  <AlertCircle className="w-4 h-4 shrink-0" />
+                  <span>Permission was declined. Please allow camera and microphone access in browser settings.</span>
+                </div>
                 <button
                   type="button"
-                  onClick={() => setActiveWarningModal(null)}
-                  className="px-5 py-2.5 rounded-xl text-white font-bold text-xs cursor-pointer shadow-xs"
-                  style={{
-                    background: activeWarningModal.level === 2 ? '#EA580C' : '#F0A11A',
-                  }}
+                  onClick={handleRequestHardwarePermissions}
+                  disabled={isRequestingPermissions}
+                  className="w-full py-3 rounded-2xl text-white font-bold text-xs shadow-xs cursor-pointer"
+                  style={{ background: 'linear-gradient(135deg, #00A878, #00C98B)' }}
                 >
-                  I Understand
+                  {isRequestingPermissions ? 'Requesting Access...' : 'Retry Permissions'}
                 </button>
-              )}
-            </div>
+              </div>
+            ) : (
+              <button
+                type="button"
+                onClick={handleRequestHardwarePermissions}
+                disabled={isRequestingPermissions}
+                className="w-full py-3.5 rounded-2xl text-white font-bold text-xs shadow-[0_4px_16px_rgba(0,168,120,0.25)] hover:shadow-[0_6px_20px_rgba(0,168,120,0.35)] transition-all cursor-pointer flex items-center justify-center gap-2"
+                style={{ background: 'linear-gradient(135deg, #00A878, #00C98B)' }}
+              >
+                {isRequestingPermissions ? (
+                  <>
+                    <RefreshCw className="w-4 h-4 animate-spin text-white" />
+                    <span>Requesting Permissions...</span>
+                  </>
+                ) : (
+                  <>
+                    <ShieldCheck className="w-4 h-4 text-white" />
+                    <span>Enable Camera &amp; Microphone</span>
+                  </>
+                )}
+              </button>
+            )}
           </div>
         </div>
       )}
