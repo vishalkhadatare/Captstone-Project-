@@ -677,7 +677,7 @@ export const ChromeLikeBrowser: React.FC<ChromeLikeBrowserProps> = ({
   const isBlank = activeUrl === NEW_TAB_URL;
 
   return (
-    <div className="flex flex-col flex-1 min-h-0 w-full bg-slate-950">
+    <div className="flex flex-col flex-1 min-h-0 w-full bg-[#F8FAFC]">
       {/*
        * Browser chrome - the tab strip, address bar, navigation and bookmark bar.
        *
@@ -690,7 +690,7 @@ export const ChromeLikeBrowser: React.FC<ChromeLikeBrowserProps> = ({
       {chrome && (
         <>
       {/* Tab strip, address bar and navigation, in Chrome's order. */}
-      <div className="bg-slate-900 border-b border-slate-800 shrink-0">
+      <div className="bg-slate-100 border-b border-slate-200 shrink-0">
         <div className="flex items-end gap-1 px-3 pt-2 overflow-x-auto">
           {tabs.map(tab => {
             const isActive = tab.id === activeId;
@@ -703,14 +703,14 @@ export const ChromeLikeBrowser: React.FC<ChromeLikeBrowserProps> = ({
                 title={tab.title}
                 className={`group flex items-center gap-2 px-3 py-1.5 rounded-t-xl max-w-[220px] min-w-[120px] cursor-pointer border-t border-x transition-all ${
                   isActive
-                    ? 'bg-slate-950 border-slate-700 text-white'
-                    : 'bg-slate-800/60 border-transparent text-slate-400 hover:text-slate-200 hover:bg-slate-800'
+                    ? 'bg-white border-slate-200 text-slate-900 shadow-2xs'
+                    : 'bg-slate-200/50 border-transparent text-slate-600 hover:text-slate-900 hover:bg-slate-200'
                 }`}
               >
                 {tab.isLoading ? (
-                  <Loader2 className="w-3 h-3 animate-spin text-emerald-400 shrink-0" />
+                  <Loader2 className="w-3 h-3 animate-spin text-emerald-600 shrink-0" />
                 ) : (
-                  <Globe className="w-3 h-3 shrink-0 text-slate-500" />
+                  <Globe className="w-3 h-3 shrink-0 text-slate-400" />
                 )}
                 <span className="text-[11px] truncate flex-1">{tab.title || 'New Tab'}</span>
                 <button
@@ -720,7 +720,7 @@ export const ChromeLikeBrowser: React.FC<ChromeLikeBrowserProps> = ({
                     closeOne(tab.id);
                   }}
                   title="Close tab"
-                  className="p-0.5 rounded hover:bg-slate-700/80 text-slate-500 hover:text-rose-300 shrink-0 cursor-pointer"
+                  className="p-0.5 rounded hover:bg-slate-100 text-slate-400 hover:text-rose-600 shrink-0 cursor-pointer"
                 >
                   <X className="w-3 h-3" />
                 </button>
@@ -733,7 +733,7 @@ export const ChromeLikeBrowser: React.FC<ChromeLikeBrowserProps> = ({
             onClick={() => openNewTab()}
             title={`New tab (Ctrl+T) - ${tabs.length}/${policy?.maxTabs ?? MAX_TABS}`}
             disabled={tabs.length >= (policy?.maxTabs ?? MAX_TABS)}
-            className="mb-1 p-1.5 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 disabled:opacity-40 transition-all cursor-pointer shrink-0"
+            className="mb-1 p-1.5 rounded-lg text-slate-500 hover:text-slate-900 hover:bg-slate-200 disabled:opacity-40 transition-all cursor-pointer shrink-0"
           >
             <Plus className="w-3.5 h-3.5" />
           </button>
@@ -744,7 +744,7 @@ export const ChromeLikeBrowser: React.FC<ChromeLikeBrowserProps> = ({
             event.preventDefault();
             go(omnibox);
           }}
-          className="flex items-center gap-2 px-3 py-2"
+          className="flex items-center gap-2 px-3 py-2 bg-white border-b border-slate-200"
         >
           <div className="flex items-center gap-0.5 shrink-0">
             <button
@@ -752,7 +752,7 @@ export const ChromeLikeBrowser: React.FC<ChromeLikeBrowserProps> = ({
               onClick={navigateBack}
               disabled={!canBack}
               title="Back (Alt+Left)"
-              className="p-1.5 rounded-lg text-slate-300 hover:text-white hover:bg-slate-800 disabled:opacity-30 transition-all cursor-pointer"
+              className="p-1.5 rounded-lg text-slate-600 hover:text-slate-900 hover:bg-slate-100 disabled:opacity-30 transition-all cursor-pointer"
             >
               <ArrowLeft className="w-4 h-4" />
             </button>
@@ -761,7 +761,7 @@ export const ChromeLikeBrowser: React.FC<ChromeLikeBrowserProps> = ({
               onClick={navigateForward}
               disabled={!canForward}
               title="Forward (Alt+Right)"
-              className="p-1.5 rounded-lg text-slate-300 hover:text-white hover:bg-slate-800 disabled:opacity-30 transition-all cursor-pointer"
+              className="p-1.5 rounded-lg text-slate-600 hover:text-slate-900 hover:bg-slate-100 disabled:opacity-30 transition-all cursor-pointer"
             >
               <ArrowRight className="w-4 h-4" />
             </button>
@@ -769,17 +769,17 @@ export const ChromeLikeBrowser: React.FC<ChromeLikeBrowserProps> = ({
               type="button"
               onClick={reload}
               title="Reload (Ctrl+R)"
-              className="p-1.5 rounded-lg text-slate-300 hover:text-white hover:bg-slate-800 transition-all cursor-pointer"
+              className="p-1.5 rounded-lg text-slate-600 hover:text-slate-900 hover:bg-slate-100 transition-all cursor-pointer"
             >
-              <RotateCcw className={`w-3.5 h-3.5 ${activeTab?.isLoading ? 'animate-spin text-emerald-400' : ''}`} />
+              <RotateCcw className={`w-3.5 h-3.5 ${activeTab?.isLoading ? 'animate-spin text-emerald-600' : ''}`} />
             </button>
           </div>
 
-          <div className="flex-1 flex items-center gap-2 bg-slate-950 border border-slate-700/80 rounded-full px-3 py-1.5 text-xs text-slate-200 focus-within:border-emerald-500 focus-within:ring-1 focus-within:ring-emerald-500/40 transition-all min-w-0">
+          <div className="flex-1 flex items-center gap-2 bg-[#F8FAFC] border border-slate-200 rounded-full px-3 py-1.5 text-xs text-slate-800 focus-within:border-emerald-500 focus-within:bg-white focus-within:ring-1 focus-within:ring-emerald-500/30 transition-all min-w-0">
             {isBlank ? (
-              <Search className="w-3.5 h-3.5 text-slate-500 shrink-0" />
+              <Search className="w-3.5 h-3.5 text-slate-400 shrink-0" />
             ) : (
-              <Lock className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
+              <Lock className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
             )}
             <input
               ref={omniboxRef}
@@ -790,7 +790,7 @@ export const ChromeLikeBrowser: React.FC<ChromeLikeBrowserProps> = ({
               onChange={event => setOmnibox(event.target.value)}
               placeholder={`Search ${policy?.searchHost ?? 'the web'} or type a URL`}
               spellCheck={false}
-              className="w-full bg-transparent outline-none text-slate-100 placeholder-slate-500 text-xs"
+              className="w-full bg-transparent outline-none text-slate-900 placeholder-slate-400 text-xs"
             />
             {omnibox && (
               <button
@@ -800,7 +800,7 @@ export const ChromeLikeBrowser: React.FC<ChromeLikeBrowserProps> = ({
                   omniboxRef.current?.focus();
                 }}
                 title="Clear"
-                className="text-slate-500 hover:text-slate-300 shrink-0 cursor-pointer"
+                className="text-slate-400 hover:text-slate-700 shrink-0 cursor-pointer"
               >
                 <X className="w-3 h-3" />
               </button>
@@ -813,17 +813,17 @@ export const ChromeLikeBrowser: React.FC<ChromeLikeBrowserProps> = ({
             type="button"
             onClick={() => onOpenExternal(activeUrl)}
             title="Open this page in a real browser tab"
-            className="p-2 rounded-lg text-slate-300 hover:text-white hover:bg-slate-800 transition-all cursor-pointer flex items-center gap-1 text-xs shrink-0"
+            className="p-2 rounded-lg text-slate-600 hover:text-slate-900 hover:bg-slate-100 transition-all cursor-pointer flex items-center gap-1 text-xs shrink-0"
           >
-            <ExternalLink className="w-3.5 h-3.5 text-indigo-400" />
+            <ExternalLink className="w-3.5 h-3.5 text-indigo-600" />
             <span className="hidden md:inline">New Tab</span>
           </button>
         </form>
       </div>
 
       {/* Bookmarks bar: the core set, then the key-free AI tools. */}
-      <div className="bg-slate-950/70 border-b border-slate-800/80 px-3 py-1.5 flex items-center gap-2 overflow-x-auto text-xs shrink-0">
-        <Star className="w-3 h-3 text-slate-500 shrink-0" />
+      <div className="bg-white border-b border-slate-200 px-3 py-1.5 flex items-center gap-2 overflow-x-auto text-xs shrink-0">
+        <Star className="w-3 h-3 text-slate-400 shrink-0" />
         {coreBookmarks.map(bookmark => (
           <button
             key={bookmark.id}
@@ -832,8 +832,8 @@ export const ChromeLikeBrowser: React.FC<ChromeLikeBrowserProps> = ({
             title={bookmark.url}
             className={`px-2.5 py-1 rounded-lg text-xs font-medium flex items-center gap-1.5 transition-all cursor-pointer shrink-0 border ${
               activeUrl === bookmark.url
-                ? 'bg-emerald-600/30 text-emerald-300 border-emerald-500/40 shadow-sm'
-                : 'bg-slate-900/80 hover:bg-slate-800 text-slate-300 border-slate-800'
+                ? 'bg-emerald-50 text-emerald-700 border-emerald-300 shadow-2xs'
+                : 'bg-slate-50 hover:bg-slate-100 text-slate-700 border-slate-200'
             }`}
           >
             <span>{bookmark.icon}</span>
@@ -849,8 +849,8 @@ export const ChromeLikeBrowser: React.FC<ChromeLikeBrowserProps> = ({
          */}
         {aiBookmarks.length > 0 && (
           <>
-            <span className="w-px h-4 bg-slate-700 shrink-0" />
-            <span className="text-[11px] font-semibold text-emerald-400 flex items-center gap-1 shrink-0">
+            <span className="w-px h-4 bg-slate-200 shrink-0" />
+            <span className="text-[11px] font-semibold text-emerald-600 flex items-center gap-1 shrink-0">
               <Sparkles className="w-3 h-3" /> Free AI, no API key:
             </span>
           </>
@@ -865,8 +865,8 @@ export const ChromeLikeBrowser: React.FC<ChromeLikeBrowserProps> = ({
               .join('\n')}
             className={`px-2.5 py-1 rounded-lg text-xs font-medium flex items-center gap-1.5 transition-all cursor-pointer shrink-0 border ${
               activeUrl === bookmark.url
-                ? 'bg-emerald-600/30 text-emerald-300 border-emerald-500/40 shadow-sm'
-                : 'bg-slate-900/80 hover:bg-slate-800 text-slate-300 border-slate-800'
+                ? 'bg-emerald-50 text-emerald-700 border-emerald-300 shadow-2xs'
+                : 'bg-slate-50 hover:bg-slate-100 text-slate-700 border-slate-200'
             }`}
           >
             <span
@@ -875,7 +875,7 @@ export const ChromeLikeBrowser: React.FC<ChromeLikeBrowserProps> = ({
             <span>{bookmark.icon}</span>
             <span>{bookmark.name}</span>
             {bookmark.badge && (
-              <span className="text-[9px] font-mono px-1 rounded bg-emerald-950/70 text-emerald-300/90 border border-emerald-900/60">
+              <span className="text-[9px] font-mono px-1 rounded bg-emerald-50 text-emerald-700 border border-emerald-200">
                 {bookmark.badge}
               </span>
             )}
@@ -883,9 +883,6 @@ export const ChromeLikeBrowser: React.FC<ChromeLikeBrowserProps> = ({
         ))}
 
         <span className="hidden xl:inline text-[11px] text-slate-500 shrink-0">
-          {/* The engine is whatever the server MEASURED as frameable - Google
-              refuses framing, so it is not Google, and saying otherwise was a
-              claim the policy contradicts. */}
           Bookmarks open in a new tab; the address bar searches{' '}
           {policy?.searchHost?.replace(/^www\./, '') ?? 'the configured engine'}.
         </span>
@@ -894,9 +891,9 @@ export const ChromeLikeBrowser: React.FC<ChromeLikeBrowserProps> = ({
       )}
 
         {notice && (
-          <div className="bg-amber-950/50 border-b border-amber-800/50 px-3 py-1 text-[11px] text-amber-200 shrink-0 flex items-center justify-between gap-3">
+          <div className="bg-amber-50 border-b border-amber-200 px-3 py-1 text-[11px] text-amber-900 shrink-0 flex items-center justify-between gap-3">
           <span>{notice}</span>
-          <button type="button" onClick={() => setNotice(null)} className="text-amber-300 hover:text-white cursor-pointer">
+          <button type="button" onClick={() => setNotice(null)} className="text-amber-700 hover:text-amber-900 cursor-pointer">
             ✕
           </button>
         </div>
@@ -905,7 +902,7 @@ export const ChromeLikeBrowser: React.FC<ChromeLikeBrowserProps> = ({
       {topSlot}
 
       {/* Panes. Every tab stays mounted so switching keeps its page and session. */}
-      <div className="relative flex-1 w-full overflow-hidden bg-slate-950">
+      <div className="relative flex-1 w-full overflow-hidden bg-[#F8FAFC]">
         {tabs.map(tab => (
           <BrowserPane
             key={tab.id}
@@ -927,11 +924,11 @@ export const ChromeLikeBrowser: React.FC<ChromeLikeBrowserProps> = ({
 
         {/* Minimal new-tab page: just one button to open ZeroLeak AI */}
         {isBlank && (
-          <div className="absolute inset-0 flex items-center justify-center bg-slate-950">
+          <div className="absolute inset-0 flex items-center justify-center bg-[#F8FAFC]">
             <button
               type="button"
               onClick={() => go('https://prism.openai.com/')}
-              className="flex items-center gap-3 px-8 py-4 rounded-2xl bg-emerald-600 hover:bg-emerald-500 active:bg-emerald-700 text-white font-semibold text-base shadow-lg shadow-emerald-900/40 transition-all cursor-pointer"
+              className="flex items-center gap-3 px-8 py-4 rounded-2xl bg-emerald-600 hover:bg-emerald-700 active:bg-emerald-800 text-white font-semibold text-base shadow-lg shadow-emerald-600/20 transition-all cursor-pointer"
             >
               <ZeroLeakLogo variant="icon" imgHeightClass="h-5 w-auto" />
               Open ZeroLeak AI
@@ -940,7 +937,7 @@ export const ChromeLikeBrowser: React.FC<ChromeLikeBrowserProps> = ({
         )}
 
         {activeTab?.error && !isBlank && (
-          <div className="absolute bottom-3 left-3 right-3 rounded-xl border border-rose-800/60 bg-rose-950/80 px-3 py-2 text-[11px] text-rose-100">
+          <div className="absolute bottom-3 left-3 right-3 rounded-xl border border-rose-200 bg-white/95 px-3 py-2 text-[11px] text-rose-800 shadow-md">
             <span className="font-semibold">This tab could not load.</span> {activeTab.error}
           </div>
         )}

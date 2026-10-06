@@ -414,7 +414,7 @@ export const StreamedBrowserSurface: React.FC<StreamedBrowserSurfaceProps> = ({
   const ready = status?.state === 'ready';
 
   return (
-    <div ref={boxRef} className="absolute inset-0 flex items-center justify-center bg-slate-950 overflow-hidden">
+    <div ref={boxRef} className="absolute inset-0 flex items-center justify-center bg-[#F8FAFC] overflow-hidden">
       <canvas
         ref={canvasRef}
         width={status?.viewport.width ?? 1280}
@@ -435,24 +435,24 @@ export const StreamedBrowserSurface: React.FC<StreamedBrowserSurfaceProps> = ({
         onFocus={() => setFocused(true)}
         onBlur={() => setFocused(false)}
         style={{ maxWidth: '100%', maxHeight: '100%', visibility: visible ? 'visible' : 'hidden' }}
-        className={`bg-white outline-none ${ready ? 'cursor-auto' : 'cursor-wait'}`}
+        className={`bg-white outline-none shadow-2xs ${ready ? 'cursor-auto' : 'cursor-wait'}`}
       />
 
       {/* The stream's own progress, so a slow first frame is not mistaken for a
           blank page. */}
       {!ready && (
         <div className="absolute inset-0 flex items-center justify-center px-6">
-          <div className="max-w-md text-center space-y-2 rounded-xl border border-slate-700 bg-slate-900/95 px-5 py-4">
+          <div className="max-w-md text-center space-y-2 rounded-2xl border border-slate-200 bg-white/95 px-6 py-5 shadow-xl">
             {status?.state === 'error' ? (
-              <TriangleAlert className="w-5 h-5 text-rose-400 mx-auto" />
+              <TriangleAlert className="w-6 h-6 text-rose-500 mx-auto" />
             ) : (
-              <Loader2 className="w-5 h-5 text-emerald-400 mx-auto animate-spin" />
+              <Loader2 className="w-6 h-6 text-emerald-600 mx-auto animate-spin" />
             )}
-            <p className="text-sm font-semibold text-slate-100">
+            <p className="text-sm font-bold text-slate-900">
               {status?.state === 'error' ? 'Failed to connect to ZeroLeak AI' : 'Loading ZeroLeak AI...'}
             </p>
-            <p className="text-[11px] text-slate-400">{status?.reason ?? 'Connecting to workspace...'}</p>
-            {status?.error && <p className="text-[11px] text-rose-300">{status.error}</p>}
+            <p className="text-xs text-slate-500">{status?.reason ?? 'Connecting to workspace...'}</p>
+            {status?.error && <p className="text-xs text-rose-600 font-medium">{status.error}</p>}
           </div>
         </div>
       )}
@@ -465,8 +465,8 @@ export const StreamedBrowserSurface: React.FC<StreamedBrowserSurfaceProps> = ({
             onClick={() => setKeyboardOpen(open => !open)}
             className={`absolute bottom-3 right-3 z-10 flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-[11px] font-semibold shadow-lg transition-colors ${
               keyboardOpen
-                ? 'border-emerald-400 bg-emerald-600 text-white'
-                : 'border-slate-600 bg-slate-900/95 text-slate-200'
+                ? 'border-emerald-500 bg-emerald-600 text-white'
+                : 'border-slate-200 bg-white text-slate-800'
             }`}
           >
             <Keyboard className="w-3.5 h-3.5" />

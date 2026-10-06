@@ -45,7 +45,10 @@ const http = require('node:http');
 const crypto = require('node:crypto');
 const fs = require('node:fs');
 const path = require('node:path');
-const { app, BrowserWindow, dialog, session, screen } = require('electron');
+const { app, BrowserWindow, dialog, session, screen, nativeTheme } = require('electron');
+if (nativeTheme) {
+  nativeTheme.themeSource = 'light';
+}
 
 let ZEROLEAK_LOGO_DATA_URI = '';
 try {
@@ -173,8 +176,38 @@ let lastReportDurationMs = 0;
 const PAGE_TRACE_SCRIPT = `(() => {
   if (window.__zeroleakPageTrace) return;
   window.__zeroleakPageTrace = true;
+  window.__zeroleakPendingPickers = window.__zeroleakPendingPickers || [];
   const tell = (what) => { try { console.log('[browser-host] ' + what); } catch (_) {} };
-  for (const name of ['showOpenFilePicker', 'showDirectoryPicker', 'showSaveFilePicker']) {
+
+  window.showOpenFilePicker = function(options) {
+    tell('the page asked for a file: showOpenFilePicker');
+    return new Promise((resolve, reject) => {
+      window.__zeroleakPendingPickers.push({ type: 'file', options, resolve, reject, time: Date.now() });
+      setTimeout(() => {
+        const idx = window.__zeroleakPendingPickers.findIndex(p => p.resolve === resolve);
+        if (idx !== -1) {
+          window.__zeroleakPendingPickers.splice(idx, 1);
+          reject(new DOMException('The user aborted a request.', 'AbortError'));
+        }
+      }, 60000);
+    });
+  };
+
+  window.showDirectoryPicker = function(options) {
+    tell('the page asked for a file: showDirectoryPicker');
+    return new Promise((resolve, reject) => {
+      window.__zeroleakPendingPickers.push({ type: 'directory', options, resolve, reject, time: Date.now() });
+      setTimeout(() => {
+        const idx = window.__zeroleakPendingPickers.findIndex(p => p.resolve === resolve);
+        if (idx !== -1) {
+          window.__zeroleakPendingPickers.splice(idx, 1);
+          reject(new DOMException('The user aborted a request.', 'AbortError'));
+        }
+      }, 60000);
+    });
+  };
+
+  for (const name of ['showSaveFilePicker']) {
     const original = window[name];
     if (typeof original !== 'function') continue;
     try {
@@ -200,12 +233,26 @@ const PAGE_TRACE_SCRIPT = `(() => {
 /**
  * Brand injection script: replaces OpenAI / Prism logos and brand text with
  * ZeroLeak AI and the official ZeroLeak logo inside the streamed page.
+ * Also enforces clean white / light enterprise theme across the page.
  */
 const ZEROLEAK_BRANDING_SCRIPT = `(() => {
   const LOGO_DATA = ${JSON.stringify(ZEROLEAK_LOGO_DATA_URI)};
 
   function applyZeroLeakBranding() {
     try {
+      // 0. Enforce clean white / light theme
+      if (document.documentElement) {
+        document.documentElement.classList.remove('dark');
+        document.documentElement.classList.add('light');
+        document.documentElement.setAttribute('data-theme', 'light');
+        document.documentElement.style.colorScheme = 'light';
+      }
+      if (document.body) {
+        document.body.classList.remove('dark');
+        document.body.classList.add('light');
+        document.body.style.colorScheme = 'light';
+      }
+
       // 1. Update page title
       if (document.title && /Prism/i.test(document.title)) {
         document.title = document.title.replace(/OpenAI\\s*Prism/gi, 'ZeroLeak AI').replace(/Prism/gi, 'ZeroLeak AI');
@@ -331,13 +378,10 @@ const installSelectedFiles = async (contents, files) => {
   if (!contents || contents.isDestroyed() || !files || files.length === 0) return;
   const payload = JSON.stringify(files);
   const script = `(() => {
-    let input = window.__zeroleakFileInput;
-    if (!input || !input.isConnected) {
-      const inputs = Array.from(document.querySelectorAll('input[type="file"]'));
-      input = inputs[inputs.length - 1] || null;
-    }
-    const transfer = new DataTransfer();
     const items = ${payload};
+    const createdFiles = [];
+    const transfer = new DataTransfer();
+
     for (const item of items) {
       try {
         const binary = atob(item.base64);
@@ -345,7 +389,8 @@ const installSelectedFiles = async (contents, files) => {
         for (let i = 0; i < binary.length; i++) {
           bytes[i] = binary.charCodeAt(i);
         }
-        const file = new File([bytes], item.name, {
+        const blob = new Blob([bytes], { type: item.type || 'application/octet-stream' });
+        const file = new File([blob], item.name, {
           type: item.type || 'application/octet-stream',
           lastModified: item.lastModified || Date.now()
         });
@@ -357,14 +402,71 @@ const installSelectedFiles = async (contents, files) => {
             });
           } catch (_) {}
         }
+        createdFiles.push(file);
         transfer.items.add(file);
       } catch (err) {
         console.error('[browser-host] failed creating File:', err);
       }
     }
 
-    let inputUpdated = false;
-    if (input) {
+    let handled = false;
+
+    // 1. Resolve pending showOpenFilePicker / showDirectoryPicker if any
+    if (window.__zeroleakPendingPickers && window.__zeroleakPendingPickers.length > 0) {
+      const picker = window.__zeroleakPendingPickers.shift();
+      if (picker && picker.resolve) {
+        function makeFileHandle(f) {
+          return {
+            kind: 'file',
+            name: f.name,
+            getFile: async () => f,
+            queryPermission: async () => 'granted',
+            requestPermission: async () => 'granted',
+            isSameEntry: async (other) => other && other.name === f.name,
+          };
+        }
+        if (picker.type === 'directory') {
+          const dirHandle = {
+            kind: 'directory',
+            name: 'project',
+            values: async function* () {
+              for (const f of createdFiles) yield makeFileHandle(f);
+            },
+            entries: async function* () {
+              for (const f of createdFiles) yield [f.name, makeFileHandle(f)];
+            },
+            keys: async function* () {
+              for (const f of createdFiles) yield f.name;
+            },
+            getFileHandle: async (name) => {
+              const found = createdFiles.find(f => f.name === name);
+              if (found) return makeFileHandle(found);
+              throw new DOMException('File not found', 'NotFoundError');
+            },
+            queryPermission: async () => 'granted',
+            requestPermission: async () => 'granted',
+            isSameEntry: async (other) => other === this,
+          };
+          picker.resolve(dirHandle);
+          handled = true;
+        } else {
+          picker.resolve(createdFiles.map(makeFileHandle));
+          handled = true;
+        }
+      }
+    }
+
+    // 2. Feed candidate file inputs (both tracked in-memory input and DOM inputs)
+    const inputsToTry = [];
+    if (window.__zeroleakFileInput) {
+      inputsToTry.push(window.__zeroleakFileInput);
+    }
+    const domInputs = Array.from(document.querySelectorAll('input[type="file"]'));
+    domInputs.forEach(i => {
+      if (!inputsToTry.includes(i)) inputsToTry.push(i);
+    });
+
+    for (const input of inputsToTry) {
       try {
         const proto = window.HTMLInputElement.prototype;
         const setter = Object.getOwnPropertyDescriptor(proto, 'files')?.set;
@@ -373,27 +475,33 @@ const installSelectedFiles = async (contents, files) => {
         } else {
           input.files = transfer.files;
         }
-        inputUpdated = true;
-      } catch (_) {
-        input.files = transfer.files;
-        inputUpdated = true;
+        input.dispatchEvent(new Event('input', { bubbles: true, cancelable: true }));
+        input.dispatchEvent(new Event('change', { bubbles: true, cancelable: true }));
+        handled = true;
+      } catch (e) {
+        console.error('[browser-host] input update error:', e);
       }
-      input.dispatchEvent(new Event('input', { bubbles: true, cancelable: true }));
-      input.dispatchEvent(new Event('change', { bubbles: true, cancelable: true }));
     }
 
-    // Also trigger drop event on drop-zones, dialogs, or document body
-    const dropTarget = document.querySelector('[data-drop-zone], .drop-target, [role="dialog"], .project-list, body') || document.body;
+    // 3. Trigger Drag & Drop events on drop zones and document
+    const dropTargets = Array.from(document.querySelectorAll('[data-drop-zone], .drop-target, [role="dialog"], [role="main"], main, body'));
+    if (!dropTargets.includes(document.body)) dropTargets.push(document.body);
+
+    for (const target of dropTargets) {
+      try {
+        target.dispatchEvent(new DragEvent('dragenter', { bubbles: true, cancelable: true, dataTransfer: transfer }));
+        target.dispatchEvent(new DragEvent('dragover', { bubbles: true, cancelable: true, dataTransfer: transfer }));
+        target.dispatchEvent(new DragEvent('drop', { bubbles: true, cancelable: true, dataTransfer: transfer }));
+        handled = true;
+      } catch (_) {}
+    }
+
     try {
-      const dropEvt = new DragEvent('drop', {
-        bubbles: true,
-        cancelable: true,
-        dataTransfer: transfer,
-      });
-      dropTarget.dispatchEvent(dropEvt);
+      window.dispatchEvent(new DragEvent('drop', { bubbles: true, cancelable: true, dataTransfer: transfer }));
+      document.dispatchEvent(new DragEvent('drop', { bubbles: true, cancelable: true, dataTransfer: transfer }));
     } catch (_) {}
 
-    return inputUpdated || transfer.files.length > 0;
+    return handled || createdFiles.length > 0;
   })()`;
   try {
     const installed = await contents.executeJavaScript(script, true);
@@ -1139,6 +1247,7 @@ const createPrimary = () => {
     width: Math.min(WIDTH, workArea.width),
     height: Math.min(HEIGHT, workArea.height),
     show: false,
+    backgroundColor: '#ffffff',
     // Without this the window never renders while hidden, and there would be no
     // frames at all - offscreen rendering and `show: false` are the whole trick.
     paintWhenInitiallyHidden: true,

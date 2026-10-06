@@ -1778,7 +1778,7 @@ export type StreamedBrowserCommand =
   | { type: 'resize'; viewport: { width: number; height: number } }
   | {
       type: 'upload-files';
-      files: Array<{ name: string; type: string; base64: string; lastModified: number }>;
+      files: Array<{ name: string; relativePath?: string; type: string; base64: string; lastModified: number }>;
     };
 
 /** Is a streamed browser running, and what is it showing? */
