@@ -284,44 +284,162 @@ const ZEROLEAK_BRANDING_SCRIPT = `(() => {
  * object, older ones pass (event, level, message, line, source) - so both shapes
  * are read rather than assumed.
  */
+function getMimeType(fileName) {
+  const ext = path.extname(fileName || '').toLowerCase();
+  switch (ext) {
+    case '.zip': return 'application/zip';
+    case '.gz':
+    case '.tgz': return 'application/gzip';
+    case '.tar': return 'application/x-tar';
+    case '.tex': return 'text/x-tex';
+    case '.pdf': return 'application/pdf';
+    case '.png': return 'image/png';
+    case '.jpg':
+    case '.jpeg': return 'image/jpeg';
+    case '.bib': return 'text/x-bibtex';
+    case '.cls':
+    case '.sty': return 'text/plain';
+    default: return 'application/octet-stream';
+  }
+}
+
+function collectFilesRecursively(dirPath, rootDir = null) {
+  if (!rootDir) rootDir = dirPath;
+  const entries = fs.readdirSync(dirPath, { withFileTypes: true });
+  const results = [];
+  for (const entry of entries) {
+    const full = path.join(dirPath, entry.name);
+    if (entry.isDirectory()) {
+      results.push(...collectFilesRecursively(full, rootDir));
+    } else if (entry.isFile()) {
+      const rel = path.relative(rootDir, full).replace(/\\/g, '/');
+      try {
+        results.push({
+          name: entry.name,
+          relativePath: rel,
+          type: getMimeType(entry.name),
+          base64: fs.readFileSync(full).toString('base64'),
+          lastModified: fs.statSync(full).mtimeMs,
+        });
+      } catch (_) {}
+    }
+  }
+  return results;
+}
+
 const installSelectedFiles = async (contents, files) => {
+  if (!contents || contents.isDestroyed() || !files || files.length === 0) return;
   const payload = JSON.stringify(files);
   const script = `(() => {
-    const input = window.__zeroleakFileInput;
-    if (!input || String(input.type).toLowerCase() !== 'file') return false;
-    const transfer = new DataTransfer();
-    for (const item of ${payload}) {
-      const binary = atob(item.base64);
-      const bytes = Uint8Array.from(binary, character => character.charCodeAt(0));
-      transfer.items.add(new File([bytes], item.name, { type: item.type, lastModified: item.lastModified }));
+    let input = window.__zeroleakFileInput;
+    if (!input || !input.isConnected) {
+      const inputs = Array.from(document.querySelectorAll('input[type="file"]'));
+      input = inputs[inputs.length - 1] || null;
     }
-    input.files = transfer.files;
-    input.dispatchEvent(new Event('input', { bubbles: true }));
-    input.dispatchEvent(new Event('change', { bubbles: true }));
-    return true;
+    const transfer = new DataTransfer();
+    const items = ${payload};
+    for (const item of items) {
+      try {
+        const binary = atob(item.base64);
+        const bytes = new Uint8Array(binary.length);
+        for (let i = 0; i < binary.length; i++) {
+          bytes[i] = binary.charCodeAt(i);
+        }
+        const file = new File([bytes], item.name, {
+          type: item.type || 'application/octet-stream',
+          lastModified: item.lastModified || Date.now()
+        });
+        if (item.relativePath) {
+          try {
+            Object.defineProperty(file, 'webkitRelativePath', {
+              value: item.relativePath,
+              writable: false
+            });
+          } catch (_) {}
+        }
+        transfer.items.add(file);
+      } catch (err) {
+        console.error('[browser-host] failed creating File:', err);
+      }
+    }
+
+    let inputUpdated = false;
+    if (input) {
+      try {
+        const proto = window.HTMLInputElement.prototype;
+        const setter = Object.getOwnPropertyDescriptor(proto, 'files')?.set;
+        if (setter) {
+          setter.call(input, transfer.files);
+        } else {
+          input.files = transfer.files;
+        }
+        inputUpdated = true;
+      } catch (_) {
+        input.files = transfer.files;
+        inputUpdated = true;
+      }
+      input.dispatchEvent(new Event('input', { bubbles: true, cancelable: true }));
+      input.dispatchEvent(new Event('change', { bubbles: true, cancelable: true }));
+    }
+
+    // Also trigger drop event on drop-zones, dialogs, or document body
+    const dropTarget = document.querySelector('[data-drop-zone], .drop-target, [role="dialog"], .project-list, body') || document.body;
+    try {
+      const dropEvt = new DragEvent('drop', {
+        bubbles: true,
+        cancelable: true,
+        dataTransfer: transfer,
+      });
+      dropTarget.dispatchEvent(dropEvt);
+    } catch (_) {}
+
+    return inputUpdated || transfer.files.length > 0;
   })()`;
   try {
     const installed = await contents.executeJavaScript(script, true);
-    log(installed ? `installed ${files.length} selected file(s) in the page` : 'the file input was gone before selection completed');
+    log(installed ? `installed ${files.length} selected file(s) in the page` : 'no file input or drop target found');
+    announce(`✓ Successfully installed ${files.length} file(s) into project`);
   } catch (err) {
     log(`could not install selected files: ${err.message}`);
+    announce(`Failed installing files: ${err.message}`);
   }
 };
 
 const handleFileInputRequest = async (win, contents, directory) => {
-  if (!win || win.isDestroyed() || !contents || contents.isDestroyed()) return;
-  const result = await dialog.showOpenDialog(win, {
-    title: directory ? 'Select a folder to import' : 'Select a file to import',
-    properties: directory ? ['openDirectory'] : ['openFile', 'multiSelections'],
-  });
-  if (result.canceled || result.filePaths.length === 0) return;
-  const files = result.filePaths.map(filePath => ({
-    name: require('node:path').basename(filePath),
-    type: 'application/octet-stream',
-    base64: fs.readFileSync(filePath).toString('base64'),
-    lastModified: fs.statSync(filePath).mtimeMs,
-  }));
-  await installSelectedFiles(contents, files);
+  if (!contents || contents.isDestroyed()) return;
+  // Inform the web client through status notice so the client browser can open its picker
+  announce(directory ? 'REQUEST_DIRECTORY_PICKER' : 'REQUEST_FILE_PICKER');
+  try {
+    // Note: Do NOT pass win to showOpenDialog, because win is hidden (show: false)
+    // which suppresses modal dialogs in Windows.
+    const result = await dialog.showOpenDialog({
+      title: directory ? 'ZeroLeak AI - Select Folder to Import' : 'ZeroLeak AI - Select Project Archive (.zip, .tar.gz) or File to Import',
+      properties: directory ? ['openDirectory'] : ['openFile', 'multiSelections'],
+      filters: directory ? [] : [
+        { name: 'Archives & LaTeX Files', extensions: ['zip', 'tar.gz', 'tgz', 'gz', 'tar', 'tex', 'pdf'] },
+        { name: 'All Files', extensions: ['*'] }
+      ]
+    });
+    if (result.canceled || !result.filePaths || result.filePaths.length === 0) return;
+    let files = [];
+    if (directory) {
+      for (const dirPath of result.filePaths) {
+        files.push(...collectFilesRecursively(dirPath));
+      }
+    } else {
+      files = result.filePaths.map(filePath => ({
+        name: path.basename(filePath),
+        type: getMimeType(filePath),
+        base64: fs.readFileSync(filePath).toString('base64'),
+        lastModified: fs.statSync(filePath).mtimeMs,
+      }));
+    }
+    if (files.length > 0) {
+      await installSelectedFiles(contents, files);
+    }
+  } catch (err) {
+    log(`showOpenDialog error: ${err.message}`);
+  }
 };
 
 const reportPageConsole = (contents, win) => {
@@ -333,8 +451,12 @@ const reportPageConsole = (contents, win) => {
         : { level: args[1], message: args[2], lineNumber: args[3], sourceId: args[4] };
     const text = String(detail.message == null ? '' : detail.message);
     if (!text) return;
-    if (text.startsWith('[browser-host] the page clicked a file input')) {
-      void handleFileInputRequest(win, contents, text.includes('(directory)'));
+    if (
+      text.startsWith('[browser-host] the page clicked a file input') ||
+      text.startsWith('[browser-host] the page asked for a file:')
+    ) {
+      const isDir = text.includes('(directory)') || text.includes('showDirectoryPicker');
+      void handleFileInputRequest(win, contents, isDir);
     }
     const level = String(detail.level == null ? '' : detail.level);
     const notable =

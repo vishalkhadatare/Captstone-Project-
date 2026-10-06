@@ -5,6 +5,15 @@ import {
   Minimize2,
   X,
   Sparkles,
+  ArrowLeft,
+  ArrowRight,
+  RotateCcw,
+  Home,
+  Upload,
+  FolderUp,
+  FileArchive,
+  Check,
+  Loader2,
 } from 'lucide-react';
 import {
   OPENAI_GOOGLE_SIGN_IN_URL,
@@ -36,7 +45,7 @@ import {
   type SignInDiagnosis,
   type SignInReport,
 } from '../utils/signInDiagnosis';
-import { api, subscribeBrowserStatus } from '../api';
+import { api, subscribeBrowserStatus, sendBrowserCommand } from '../api';
 
 interface OpenAIPrismBrowserModalProps {
   isOpen: boolean;
@@ -583,6 +592,67 @@ export const OpenAIPrismBrowserModal: React.FC<OpenAIPrismBrowserModalProps> = (
     streamedBrowser.command({ type: 'navigate', url: target });
   }, [streamedBrowser, streamedSignIn.backUrl]);
 
+  /** File Import & Upload State */
+  const archiveInputRef = useRef<HTMLInputElement>(null);
+  const folderInputRef = useRef<HTMLInputElement>(null);
+  const [isUploading, setIsUploading] = useState<boolean>(false);
+  const [uploadNotice, setUploadNotice] = useState<string | null>(null);
+  const [isDragOver, setIsDragOver] = useState<boolean>(false);
+
+  const handleFilesSelected = useCallback(async (fileList: FileList | null) => {
+    if (!fileList || fileList.length === 0) return;
+    const files = Array.from(fileList);
+    setIsUploading(true);
+    setUploadNotice(`Uploading ${files.length} file(s) into project...`);
+    try {
+      const payloadFiles = await Promise.all(
+        files.map(async (file) => {
+          const buffer = await file.arrayBuffer();
+          let binary = '';
+          const bytes = new Uint8Array(buffer);
+          const len = bytes.byteLength;
+          for (let i = 0; i < len; i++) {
+            binary += String.fromCharCode(bytes[i]);
+          }
+          const base64 = btoa(binary);
+          const relativePath = (file as any).webkitRelativePath || file.name;
+          return {
+            name: file.name,
+            relativePath,
+            type: file.type || 'application/octet-stream',
+            base64,
+            lastModified: file.lastModified || Date.now(),
+          };
+        })
+      );
+      await sendBrowserCommand({
+        type: 'upload-files',
+        files: payloadFiles,
+      });
+      setUploadNotice(`✓ Successfully imported ${files.length} file(s) into project`);
+      setTimeout(() => setUploadNotice(null), 5000);
+    } catch (err: any) {
+      console.error('Failed to upload files to browser:', err);
+      setUploadNotice(`Upload failed: ${err.message || 'unknown error'}`);
+      setTimeout(() => setUploadNotice(null), 5000);
+    } finally {
+      setIsUploading(false);
+    }
+  }, []);
+
+  /** Listen for page requesting file/directory chooser from offscreen host */
+  const lastNoticeHandledRef = useRef<string | null>(null);
+  useEffect(() => {
+    const notice = streamedBrowser.status?.notice;
+    if (!notice || notice === lastNoticeHandledRef.current) return;
+    lastNoticeHandledRef.current = notice;
+    if (notice === 'REQUEST_FILE_PICKER') {
+      archiveInputRef.current?.click();
+    } else if (notice === 'REQUEST_DIRECTORY_PICKER') {
+      folderInputRef.current?.click();
+    }
+  }, [streamedBrowser.status?.notice]);
+
   /**
    * The panel starts its own real browser.
    *
@@ -612,13 +682,6 @@ export const OpenAIPrismBrowserModal: React.FC<OpenAIPrismBrowserModalProps> = (
 
   /**
    * Rendered into `document.body`, not where this component happens to sit.
-   *
-   * A full-screen panel has to be a child of the body for two reasons that both
-   * bit this panel: `position: fixed` resolves against the nearest ancestor that
-   * creates a containing block (a scrolled workspace put the title bar above the
-   * visible area, and a stack of app chrome could paint over it), and z-index only
-   * orders an element within its own stacking context, so 9999 inside the
-   * workspace was not the top of the page.
    */
   return createPortal(
     <div
@@ -626,41 +689,128 @@ export const OpenAIPrismBrowserModal: React.FC<OpenAIPrismBrowserModalProps> = (
         isMaximized ? 'p-0' : 'p-2 sm:p-4'
       }`}
     >
+      {/* Hidden File Inputs for Local Client Selection */}
+      <input
+        ref={archiveInputRef}
+        type="file"
+        accept=".zip,.tar.gz,.tgz,.tar,.gz,.tex,.pdf"
+        multiple
+        className="hidden"
+        onChange={(e) => {
+          void handleFilesSelected(e.target.files);
+          e.target.value = '';
+        }}
+      />
+      <input
+        ref={folderInputRef}
+        type="file"
+        // @ts-ignore
+        webkitdirectory=""
+        directory=""
+        multiple
+        className="hidden"
+        onChange={(e) => {
+          void handleFilesSelected(e.target.files);
+          e.target.value = '';
+        }}
+      />
+
       <div
         className={`bg-slate-900 border border-slate-700/80 rounded-2xl shadow-2xl flex flex-col overflow-hidden transition-all duration-300 ${
           isMaximized ? 'w-full h-full rounded-none' : 'w-full max-w-6xl h-[90vh] max-h-[940px]'
         }`}
       >
         {/* Browser Top Window Bar */}
-        <div className="bg-slate-950 border-b border-slate-800 px-4 py-3 flex items-center justify-between gap-3 shrink-0">
+        <div className="bg-slate-950 border-b border-slate-800 px-3 sm:px-4 py-2.5 flex items-center justify-between gap-3 shrink-0">
           <div className="flex items-center gap-3 shrink-0">
             <div className="flex items-center gap-1.5">
               <span className="w-3 h-3 rounded-full bg-red-500/80 inline-block hover:opacity-80 cursor-pointer" onClick={onClose} title="Close" />
               <span className="w-3 h-3 rounded-full bg-amber-500/80 inline-block hover:opacity-80 cursor-pointer" onClick={() => setIsMaximized(!isMaximized)} title="Maximize" />
               <span className="w-3 h-3 rounded-full bg-emerald-500/80 inline-block" />
             </div>
-            {/*
-             * Just the name.
-             *
-             * It said "OpenAI Prism & LaTeX Browser" with an "In-Project Sandbox"
-             * badge and a paragraph teaching Ctrl+T - all of it describing a
-             * browser the user no longer sees, because the chrome is hidden. What
-             * is left says which page this is.
-             */}
             <div className="flex items-center gap-2 text-white font-bold text-xs sm:text-sm pl-2 border-l border-slate-800">
               <ZeroLeakLogo variant="icon" imgHeightClass="h-5 w-auto" />
-              <span>ZeroLeak AI</span>
+              <span className="hidden sm:inline">ZeroLeak AI — LaTeX & Paper Editor</span>
+              <span className="sm:hidden">ZeroLeak AI</span>
             </div>
           </div>
 
-          <div className="flex-1" />
+          {/* Browser Navigation & Direct Import Actions */}
+          <div className="flex items-center gap-1.5 sm:gap-2">
+            {/* Navigation buttons */}
+            <div className="flex items-center bg-slate-900 border border-slate-800 rounded-lg p-0.5">
+              <button
+                type="button"
+                onClick={() => streamedBrowser.command({ type: 'back' })}
+                title="Back"
+                className="p-1.5 text-slate-400 hover:text-white hover:bg-slate-800 rounded-md transition-colors cursor-pointer"
+              >
+                <ArrowLeft className="w-3.5 h-3.5" />
+              </button>
+              <button
+                type="button"
+                onClick={() => streamedBrowser.command({ type: 'forward' })}
+                title="Forward"
+                className="p-1.5 text-slate-400 hover:text-white hover:bg-slate-800 rounded-md transition-colors cursor-pointer"
+              >
+                <ArrowRight className="w-3.5 h-3.5" />
+              </button>
+              <button
+                type="button"
+                onClick={() => streamedBrowser.command({ type: 'reload' })}
+                title="Reload Page"
+                className="p-1.5 text-slate-400 hover:text-white hover:bg-slate-800 rounded-md transition-colors cursor-pointer"
+              >
+                <RotateCcw className="w-3.5 h-3.5" />
+              </button>
+              <button
+                type="button"
+                onClick={() => streamedBrowser.command({ type: 'navigate', url: 'https://prism.openai.com/' })}
+                title="Projects Home"
+                className="p-1.5 text-slate-400 hover:text-white hover:bg-slate-800 rounded-md transition-colors cursor-pointer"
+              >
+                <Home className="w-3.5 h-3.5" />
+              </button>
+            </div>
+
+            {/* Direct Import Archive / Folder Buttons */}
+            <button
+              type="button"
+              onClick={() => archiveInputRef.current?.click()}
+              disabled={isUploading}
+              title="Import Project Archive (.zip, .tar.gz, .tex)"
+              className="px-2.5 py-1.5 rounded-lg bg-emerald-600/20 hover:bg-emerald-600/30 text-emerald-300 border border-emerald-500/30 text-[11px] font-semibold flex items-center gap-1.5 transition-all cursor-pointer shadow-xs disabled:opacity-50"
+            >
+              {isUploading ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <FileArchive className="w-3.5 h-3.5 text-emerald-400" />}
+              <span className="hidden md:inline">Import Archive (.zip)</span>
+              <span className="md:hidden">.zip</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => folderInputRef.current?.click()}
+              disabled={isUploading}
+              title="Import Entire Folder"
+              className="px-2.5 py-1.5 rounded-lg bg-blue-600/20 hover:bg-blue-600/30 text-blue-300 border border-blue-500/30 text-[11px] font-semibold flex items-center gap-1.5 transition-all cursor-pointer shadow-xs disabled:opacity-50"
+            >
+              <FolderUp className="w-3.5 h-3.5 text-blue-400" />
+              <span className="hidden md:inline">Import Folder</span>
+              <span className="md:hidden">Folder</span>
+            </button>
+          </div>
 
           <div className="flex items-center gap-1.5 shrink-0">
+            {/* Status indicator */}
+            <div className="hidden lg:flex items-center gap-1.5 px-2 py-1 rounded-md bg-slate-900 border border-slate-800 text-[11px] text-slate-400">
+              <span className={`w-2 h-2 rounded-full ${streamedBrowser.ready ? 'bg-emerald-500 animate-pulse' : 'bg-amber-500'}`} />
+              <span>{streamedBrowser.ready ? 'Live Browser' : 'Connecting...'}</span>
+            </div>
+
             <button
               type="button"
               onClick={() => setIsMaximized(!isMaximized)}
               title={isMaximized ? 'Restore' : 'Maximize'}
-              className="p-2 rounded-xl text-slate-300 hover:text-white hover:bg-slate-800 transition-all cursor-pointer"
+              className="p-1.5 sm:p-2 rounded-xl text-slate-300 hover:text-white hover:bg-slate-800 transition-all cursor-pointer"
             >
               {isMaximized ? <Minimize2 className="w-3.5 h-3.5" /> : <Maximize2 className="w-3.5 h-3.5" />}
             </button>
@@ -669,15 +819,50 @@ export const OpenAIPrismBrowserModal: React.FC<OpenAIPrismBrowserModalProps> = (
               type="button"
               onClick={onClose}
               title="Close Browser"
-              className="p-2 rounded-xl text-slate-300 hover:text-rose-400 hover:bg-rose-950/40 transition-all cursor-pointer"
+              className="p-1.5 sm:p-2 rounded-xl text-slate-300 hover:text-rose-400 hover:bg-rose-950/40 transition-all cursor-pointer"
             >
               <X className="w-4 h-4" />
             </button>
           </div>
         </div>
 
-        {/* Web Viewport Area */}
-        <div className="flex-1 w-full bg-slate-950 overflow-hidden flex flex-col">
+        {/* Web Viewport Area with Drag & Drop */}
+        <div
+          className="flex-1 w-full bg-slate-950 overflow-hidden flex flex-col relative"
+          onDragOver={(e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            setIsDragOver(true);
+          }}
+          onDragLeave={(e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            setIsDragOver(false);
+          }}
+          onDrop={(e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            setIsDragOver(false);
+            if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
+              void handleFilesSelected(e.dataTransfer.files);
+            }
+          }}
+        >
+          {isDragOver && (
+            <div className="absolute inset-0 z-30 bg-emerald-950/85 backdrop-blur-xs border-2 border-dashed border-emerald-400 flex flex-col items-center justify-center text-white pointer-events-none p-6 text-center animate-in fade-in">
+              <Upload className="w-12 h-12 text-emerald-400 animate-bounce mb-3" />
+              <h3 className="text-lg font-bold">Drop Project Archive (.zip, .tar.gz) or Folder here</h3>
+              <p className="text-sm text-emerald-200 mt-1">Files will be imported directly into your ZeroLeak AI project</p>
+            </div>
+          )}
+
+          {uploadNotice && (
+            <div className="absolute top-3 left-1/2 -translate-x-1/2 z-40 bg-emerald-900/90 text-emerald-100 border border-emerald-600 px-4 py-2 rounded-xl text-xs font-semibold shadow-xl flex items-center gap-2 animate-in fade-in slide-in-from-top-2">
+              <Check className="w-4 h-4 text-emerald-300" />
+              <span>{uploadNotice}</span>
+            </div>
+          )}
+
           <div className="relative flex-1 w-full overflow-hidden flex flex-col">
             <ChromeLikeBrowser
               desktopShell={desktopShell}
