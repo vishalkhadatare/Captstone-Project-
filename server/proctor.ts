@@ -375,6 +375,10 @@ export interface AuthorityProctorSession {
   last_heartbeat_at: string;
   created_at: string;
   updated_at: string;
+  review_status?: string;
+  auditor_remarks?: string;
+  reviewed_by?: string;
+  reviewed_at?: string;
 }
 
 export function startAuthorityEnclaveSession(
@@ -698,6 +702,7 @@ export function saveCameraEvidence(
     event_type?: string;
     presence_status?: string;
     warning_number?: number;
+    reason?: string;
     submitted_by?: string;
     recipient?: string;
   }
@@ -1004,7 +1009,7 @@ export function issueAuthorityWarning(
   db: Database,
   sessionId: string,
   reason: string,
-  details?: Record<string, any>
+  details?: Record<string, any> | string
 ): {
   warning_count: number;
   max_warnings: number;
@@ -1058,9 +1063,10 @@ export function issueAuthorityWarning(
   );
 
   let evidenceId: string | undefined = undefined;
+  const detailsObj: Record<string, any> = typeof details === 'string' ? { violation: details } : (details || {});
 
   // If violation snapshot was captured, associate with this warning
-  if (details?.snapshot) {
+  if (detailsObj.snapshot) {
     try {
       const snapEv = saveCameraEvidence(db, {
         session_id: sessionId,
@@ -1068,9 +1074,9 @@ export function issueAuthorityWarning(
         user_id: session.user_id,
         user_name: session.user_name,
         user_role: session.user_role,
-        image_data_url: details.snapshot,
+        image_data_url: detailsObj.snapshot,
         event_type: `WARNING_${newCount}_SNAPSHOT`,
-        presence_status: details.presence_status || 'UNCERTAIN',
+        presence_status: detailsObj.presence_status || 'UNCERTAIN',
         warning_number: newCount,
         recipient: 'CBI Chief Vigilance & Security Auditor',
       });
@@ -1093,9 +1099,9 @@ export function issueAuthorityWarning(
       max_warnings: 3,
       reason,
       evidence_id: evidenceId || null,
-      ...details,
+      ...detailsObj,
     },
-    snapshot_thumbnail: details?.snapshot || null,
+    snapshot_thumbnail: detailsObj.snapshot || null,
   });
 
   // If reached 3 warnings, generate audit escalation event
@@ -1114,7 +1120,7 @@ export function issueAuthorityWarning(
         warning_count: 3,
         reason: `Threshold of 3 warnings reached: ${reason}`,
       },
-      snapshot_thumbnail: details?.snapshot || null,
+      snapshot_thumbnail: detailsObj.snapshot || null,
     });
   }
 

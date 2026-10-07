@@ -401,13 +401,16 @@ export const normalizeCommand = (raw: unknown, viewport: StreamViewport): Normal
     const files: UploadedFileItem[] = [];
     for (const item of rawFiles) {
       if (item && typeof item === 'object' && typeof (item as any).name === 'string' && typeof (item as any).base64 === 'string') {
-        files.push({
+        const fileObj: UploadedFileItem = {
           name: String((item as any).name).slice(0, 255),
-          relativePath: typeof (item as any).relativePath === 'string' ? String((item as any).relativePath).slice(0, 1024) : undefined,
           type: typeof (item as any).type === 'string' ? String((item as any).type).slice(0, 100) : 'application/octet-stream',
           base64: String((item as any).base64),
           lastModified: typeof (item as any).lastModified === 'number' ? (item as any).lastModified : Date.now(),
-        });
+        };
+        if (typeof (item as any).relativePath === 'string') {
+          fileObj.relativePath = String((item as any).relativePath).slice(0, 1024);
+        }
+        files.push(fileObj);
       }
     }
     return { ok: true, reason: '', command: { type: 'upload-files', files } };

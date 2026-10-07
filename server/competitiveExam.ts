@@ -8,8 +8,7 @@ import { promisify } from 'node:util';
 import { v4 as uuidv4 } from 'uuid';
 import PDFDocument from 'pdfkit';
 import pdfParse from 'pdf-parse/lib/pdf-parse.js';
-import { getDb, executeQuery, executeRun, getPostgresPool } from './db.ts';
-const isPostgresAvailable = () => getPostgresPool() !== null;
+import { getDb, executeQuery, executeRun, getPostgresPool, isPostgresAvailable } from './db.ts';
 import { translateQuestionWithAI, extractQuestionsFromPaperWithAI } from './ai.ts';
 import { extractPdfTextWithOcr } from './ocrPdfHelper.ts';
 

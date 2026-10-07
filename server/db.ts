@@ -10,6 +10,10 @@ const DB_FILE_PATH = path.join(process.cwd(), 'zeroleak_data.sqlite');
 let pgPool: Pool | null = null;
 let pgInitialized = false;
 
+export function isPostgresAvailable(): boolean {
+  return pgInitialized;
+}
+
 export function getPostgresPool(): Pool | null {
   if (!pgPool) {
     const host = process.env.DB_HOST || 'localhost';
@@ -1618,6 +1622,7 @@ export function writeThroughToPostgres(sql: string, params: any[] = []): void {
       if (!pgInitialized) {
         await initPostgres();
       }
+      if (!pgInitialized) return;
       const pgSql = convertSqliteToPostgres(sql);
       const pgParams = params.map((p) => {
         if (p === undefined) return null;
