@@ -246,6 +246,9 @@ export interface ExamBlueprint {
   status: BlueprintStatus;
   version: string;
   sections: BlueprintSection[];
+  translationRequired?: boolean;
+  originalLanguage?: string;
+  translationLanguage?: string;
   createdAt: string;
   updatedAt: string;
 }
@@ -280,6 +283,10 @@ export interface Question {
   created_by: string;
   created_at: string;
   updated_at: string;
+  source_pdf_name?: string;
+  question_paper_id?: string;
+  source_page?: number;
+  question_number?: string;
 }
 
 export interface QuestionTranslation {

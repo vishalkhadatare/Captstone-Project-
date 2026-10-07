@@ -81,7 +81,7 @@ export function App() {
 
   const syncTabFromLocation = () => {
     const hash = window.location.hash.replace(/^#\/?/, '').replace(/^#/, '');
-    if (hash === 'question-workflow' || hash === 'blueprint-pattern') {
+    if (hash === 'question-workflow' || hash === 'competitive-examination' || hash === 'blueprint-pattern') {
       setActiveSubTab('question_workflow');
       return;
     }

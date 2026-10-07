@@ -18,6 +18,29 @@ interface ExtractedQuestionItem {
   source_page?: number;
   source_question_number?: string;
   verification_status: string;
+  hasVisual?: boolean;
+  requiresVisual?: boolean;
+  visualElements?: Array<{
+    id: string;
+    type: string;
+    extractionMethod?: string;
+    sourcePdf?: string;
+    sourcePage?: number;
+    questionNumber?: string;
+    dataUrl?: string;
+    publicUrl?: string;
+    caption?: string;
+    position?: string;
+  }>;
+  tableData?: {
+    headers?: string[];
+    rows?: string[][];
+    caption?: string;
+  } | null;
+  equations?: string[];
+  captions?: string[];
+  sharedVisualGroupId?: string | null;
+  visualValidationStatus?: string;
 }
 
 interface QuestionPoolProps {
@@ -92,7 +115,7 @@ export const CompetitiveQuestionPool: React.FC<QuestionPoolProps> = ({
             <span>Step 4: Real Extracted Question Pools & Verification</span>
           </h2>
           <p className="text-xs text-slate-500 mt-1">
-            Question-level provenance tracking. Each question is extracted from your uploaded source PDFs and assigned to its verified subject pool.
+            Question-level provenance tracking. Each question and its associated diagrams, tables, figures, symbols, and equations are extracted from your uploaded source PDFs and bound as one atomic question block.
           </p>
         </div>
 
@@ -198,7 +221,7 @@ export const CompetitiveQuestionPool: React.FC<QuestionPoolProps> = ({
         </div>
       </div>
 
-      {/* Question Cards (Requirement 10 & 14: Source Provenance) */}
+      {/* Question Cards (Requirement 10 & 14: Source Provenance + Bound Visuals) */}
       {loading ? (
         <div className="p-12 text-center text-xs text-slate-500 space-y-2">
           <RefreshCw className="w-6 h-6 animate-spin mx-auto text-slate-600" />
@@ -216,58 +239,153 @@ export const CompetitiveQuestionPool: React.FC<QuestionPoolProps> = ({
         </div>
       ) : (
         <div className="space-y-4">
-          {filteredQuestions.map((q, idx) => (
-            <div
-              key={q.id || idx}
-              className="p-5 rounded-2xl bg-white border border-slate-200 shadow-xs space-y-3"
-            >
-              <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-100 pb-2.5 text-xs">
-                <div className="flex items-center gap-2">
-                  <span className="px-2.5 py-0.5 rounded-md font-mono font-bold bg-slate-100 text-slate-800 border border-slate-200 text-[11px]">
-                    {q.question_number ? `Q.${q.question_number}` : `Question #${idx + 1}`}
-                  </span>
-                  <span className="px-2 py-0.5 rounded-md font-bold bg-slate-100 text-slate-700 text-[10px]">
-                    {q.subject}
-                  </span>
-                  <span className="px-2 py-0.5 rounded-md text-[10px] font-bold bg-blue-50 text-blue-700 border border-blue-200">
-                    {q.question_type}
-                  </span>
-                </div>
+          {filteredQuestions.map((q, idx) => {
+            const visuals = Array.isArray(q.visualElements) ? q.visualElements : [];
+            const hasTable = Boolean(q.tableData && (q.tableData.headers?.length || q.tableData.rows?.length));
+            const hasEquations = Array.isArray(q.equations) && q.equations.length > 0;
 
-                {/* Source Traceability Badge (Requirement 14 & 30) */}
-                <div className="flex items-center gap-2 text-[11px] font-mono text-slate-500">
-                  <span className="px-2 py-0.5 rounded bg-slate-50 border border-slate-200">
-                    Source: <strong className="text-slate-700">{q.source_pdf || 'Uploaded PDF'}</strong> {q.source_page ? `• Page ${q.source_page}` : ''}
-                  </span>
-                  <span className="text-emerald-700 font-bold">
-                    +{q.marks || 4}M {q.negative_marks ? `/-${q.negative_marks}M` : ''}
-                  </span>
-                </div>
-              </div>
-
-              {/* Question Text */}
-              <div className="text-xs text-slate-900 font-medium leading-relaxed whitespace-pre-wrap">
-                {q.question_text}
-              </div>
-
-              {/* MCQ Options */}
-              {q.options && q.options.length > 0 && (
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 pt-2">
-                  {q.options.map((opt, oIdx) => (
-                    <div
-                      key={oIdx}
-                      className="p-2.5 rounded-lg bg-slate-50 border border-slate-200 text-xs flex items-start gap-2"
-                    >
-                      <span className="w-5 h-5 rounded-full bg-slate-200 font-bold font-mono text-[10px] flex items-center justify-center shrink-0 text-slate-800">
-                        {opt.label}
+            return (
+              <div
+                key={q.id || idx}
+                className="p-5 rounded-2xl bg-white border border-slate-200 shadow-xs space-y-3"
+              >
+                <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-100 pb-2.5 text-xs">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className="px-2.5 py-0.5 rounded-md font-mono font-bold bg-slate-100 text-slate-800 border border-slate-200 text-[11px]">
+                      {q.question_number ? `Q.${q.question_number}` : `Question #${idx + 1}`}
+                    </span>
+                    <span className="px-2 py-0.5 rounded-md font-bold bg-slate-100 text-slate-700 text-[10px]">
+                      {q.subject}
+                    </span>
+                    <span className="px-2 py-0.5 rounded-md text-[10px] font-bold bg-blue-50 text-blue-700 border border-blue-200">
+                      {q.question_type}
+                    </span>
+                    {visuals.length > 0 && (
+                      <span className="px-2 py-0.5 rounded-md text-[10px] font-bold bg-emerald-50 text-emerald-800 border border-emerald-200">
+                        {visuals.length} Bound Visual{visuals.length > 1 ? 's' : ''} ({visuals.map(v => v.type).join(', ')})
                       </span>
-                      <span className="text-slate-800">{opt.text}</span>
-                    </div>
-                  ))}
+                    )}
+                    {hasTable && (
+                      <span className="px-2 py-0.5 rounded-md text-[10px] font-bold bg-indigo-50 text-indigo-800 border border-indigo-200">
+                        Table Preserved
+                      </span>
+                    )}
+                    {hasEquations && (
+                      <span className="px-2 py-0.5 rounded-md text-[10px] font-bold bg-purple-50 text-purple-800 border border-purple-200">
+                        {q.equations!.length} Equation{q.equations!.length > 1 ? 's' : ''}
+                      </span>
+                    )}
+                    {q.sharedVisualGroupId && (
+                      <span className="px-2 py-0.5 rounded-md text-[10px] font-mono font-bold bg-amber-50 text-amber-800 border border-amber-200">
+                        Shared Visual Group
+                      </span>
+                    )}
+                  </div>
+
+                  {/* Source Traceability Badge (Requirement 14 & 30) */}
+                  <div className="flex items-center gap-2 text-[11px] font-mono text-slate-500">
+                    <span className="px-2 py-0.5 rounded bg-slate-50 border border-slate-200">
+                      Source: <strong className="text-slate-700">{q.source_pdf || 'Uploaded PDF'}</strong>{' '}
+                      {q.source_page ? `• Page ${q.source_page}` : ''}
+                      {q.source_question_number ? ` • Orig Q#${q.source_question_number}` : ''}
+                    </span>
+                    <span className="text-emerald-700 font-bold">
+                      +{q.marks || 4}M {q.negative_marks ? `/-${q.negative_marks}M` : ''}
+                    </span>
+                  </div>
                 </div>
-              )}
-            </div>
-          ))}
+
+                {/* Question Text */}
+                <div className="text-xs text-slate-900 font-medium leading-relaxed whitespace-pre-wrap">
+                  {q.question_text}
+                </div>
+
+                {/* Bound Visual Elements (Diagrams, Figures, Images, Tables, Graphs, Equations) */}
+                {visuals.length > 0 && (
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-1">
+                    {visuals.map((vis, vIdx) => {
+                      const imgSrc = vis.dataUrl || vis.publicUrl;
+                      return (
+                        <div
+                          key={vis.id || vIdx}
+                          className="p-2.5 rounded-xl bg-slate-50 border border-slate-200 flex flex-col items-center justify-center space-y-1.5"
+                        >
+                          {imgSrc ? (
+                            <img
+                              src={imgSrc}
+                              alt={vis.caption || `Question ${q.question_number || idx + 1} ${vis.type}`}
+                              className="max-h-44 w-auto max-w-full object-contain bg-white border border-slate-200 rounded p-1"
+                              loading="lazy"
+                            />
+                          ) : (
+                            <div className="text-[11px] text-slate-600 italic py-3">
+                              [Preserved {vis.type} • {vis.sourcePdf || q.source_pdf} p.{vis.sourcePage || q.source_page || 1}]
+                            </div>
+                          )}
+                          <div className="w-full flex items-center justify-between text-[10px] font-mono text-slate-500">
+                            <span className="uppercase font-bold text-slate-700">{vis.type}</span>
+                            <span>{vis.extractionMethod || 'embedded'}</span>
+                          </div>
+                          {vis.caption && (
+                            <p className="text-[11px] italic text-slate-700 text-center">{vis.caption}</p>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+
+                {/* Preserved Structured Table */}
+                {hasTable && q.tableData && (
+                  <div className="overflow-x-auto rounded-lg border border-slate-200">
+                    <table className="w-full text-left border-collapse text-[11px]">
+                      {q.tableData.headers && q.tableData.headers.length > 0 && (
+                        <thead className="bg-slate-100 text-slate-800 font-bold">
+                          <tr>
+                            {q.tableData.headers.map((h, hIdx) => (
+                              <th key={hIdx} className="border border-slate-200 px-2.5 py-1">
+                                {h}
+                              </th>
+                            ))}
+                          </tr>
+                        </thead>
+                      )}
+                      {q.tableData.rows && q.tableData.rows.length > 0 && (
+                        <tbody>
+                          {q.tableData.rows.map((r, rIdx) => (
+                            <tr key={rIdx} className="even:bg-slate-50">
+                              {r.map((c, cIdx) => (
+                                <td key={cIdx} className="border border-slate-200 px-2.5 py-1 text-slate-700">
+                                  {c}
+                                </td>
+                              ))}
+                            </tr>
+                          ))}
+                        </tbody>
+                      )}
+                    </table>
+                  </div>
+                )}
+
+                {/* MCQ Options */}
+                {q.options && q.options.length > 0 && (
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 pt-2">
+                    {q.options.map((opt, oIdx) => (
+                      <div
+                        key={oIdx}
+                        className="p-2.5 rounded-lg bg-slate-50 border border-slate-200 text-xs flex items-start gap-2"
+                      >
+                        <span className="w-5 h-5 rounded-full bg-slate-200 font-bold font-mono text-[10px] flex items-center justify-center shrink-0 text-slate-800">
+                          {opt.label}
+                        </span>
+                        <span className="text-slate-800">{opt.text}</span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            );
+          })}
         </div>
       )}
 

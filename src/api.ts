@@ -1525,14 +1525,52 @@ export const api = {
           body: JSON.stringify({ exam_id: examId, blueprint }),
         }
       ),
-    generateFinalPaper: (examId: string, blueprint: any) =>
+    generateFinalPaper: (
+      examId: string,
+      blueprint: any,
+      options?: {
+        enable_translation?: boolean;
+        translation_language?: string;
+        exam_details?: any;
+        reuse_if_exists?: boolean;
+      }
+    ) =>
       request<{ success: boolean; message: string; paper: any }>('/api/competitive/generate-final-paper', {
         method: 'POST',
-        body: JSON.stringify({ exam_id: examId, blueprint }),
+        body: JSON.stringify({
+          exam_id: examId,
+          blueprint,
+          enable_translation: options?.enable_translation,
+          translation_language: options?.translation_language,
+          exam_details: options?.exam_details,
+          reuse_if_exists: options?.reuse_if_exists,
+        }),
       }),
     getGeneratedPaper: (paperId: string) =>
       request<{ success: boolean; paper: any }>(
         `/api/competitive/generated-papers/${encodeURIComponent(paperId)}`
+      ),
+    getPapersByExam: (examId: string) =>
+      request<{ success: boolean; papers: any[]; latestPaper: any | null }>(
+        `/api/competitive/papers/by-exam/${encodeURIComponent(examId)}`
+      ),
+    getTranslatorAssignedPapers: () =>
+      request<{ success: boolean; papers: any[] }>(
+        '/api/competitive/translator/assigned-papers'
+      ),
+    returnTranslationsToManager: (paperId: string) =>
+      request<{ success: boolean; message: string; paper: any }>(
+        `/api/competitive/papers/${encodeURIComponent(paperId)}/return-translations`,
+        {
+          method: 'POST',
+        }
+      ),
+    generateFinalBilingualPaper: (paperId: string) =>
+      request<{ success: boolean; message: string; paper: any }>(
+        `/api/competitive/papers/${encodeURIComponent(paperId)}/generate-final-bilingual`,
+        {
+          method: 'POST',
+        }
       ),
     deletePoolFile: (payload: {
       exam_id: string;
@@ -1545,6 +1583,127 @@ export const api = {
         method: 'POST',
         body: JSON.stringify(payload),
       }),
+    getOperators: () =>
+      request<{
+        success: boolean;
+        operators: Array<{
+          id: string;
+          fullName: string;
+          email: string;
+          centreId: string;
+          centreLabel: string;
+        }>;
+        serverTimeIso: string;
+      }>('/api/competitive/operators'),
+    finalizeAndEncryptPaper: (
+      paperId: string,
+      payload: {
+        exam_date: string;
+        encryption_time: string;
+        decryption_time: string;
+        encryption_time_iso?: string;
+        decryption_time_iso?: string;
+        timezone: string;
+        timezone_offset?: string;
+        assigned_operator_id?: string;
+        assigned_centre_code?: string;
+      }
+    ) =>
+      request<{ success: boolean; message: string; paper: any; serverTimeIso: string }>(
+        `/api/competitive/papers/${encodeURIComponent(paperId)}/finalize-encrypt`,
+        {
+          method: 'POST',
+          body: JSON.stringify(payload),
+        }
+      ),
+    resetFinalization: (paperId: string, reason?: string) =>
+      request<{ success: boolean; message: string; paper: any }>(
+        `/api/competitive/papers/${encodeURIComponent(paperId)}/reset-finalization`,
+        {
+          method: 'POST',
+          body: JSON.stringify({ reason }),
+        }
+      ),
+    getOperatorAssignedPapers: () =>
+      request<{
+        success: boolean;
+        papers: any[];
+        serverTimeIso: string;
+        serverTimestampMs: number;
+      }>('/api/competitive/operator/assigned-papers'),
+    decryptAndUnlockPaper: (paperId: string) =>
+      request<{
+        success: boolean;
+        message: string;
+        paper: any;
+        auditTxHash: string;
+        serverTimeIso: string;
+      }>(`/api/competitive/papers/${encodeURIComponent(paperId)}/decrypt-unlock`, {
+        method: 'POST',
+      }),
+    printPaper: (paperId: string, copiesCount: number = 1) =>
+      request<{
+        success: boolean;
+        message: string;
+        paper: any;
+        printRecord: {
+          copyId: string;
+          txHash: string;
+          printedAt: string;
+          printedBy: string;
+          role: string;
+        };
+        serverTimeIso: string;
+      }>(`/api/competitive/papers/${encodeURIComponent(paperId)}/print`, {
+        method: 'POST',
+        body: JSON.stringify({ copies_count: copiesCount }),
+      }),
+    downloadPaper: (paperId: string) =>
+      request<{
+        success: boolean;
+        message: string;
+        paper: any;
+        auditTxHash: string;
+        serverTimeIso: string;
+      }>(`/api/competitive/papers/${encodeURIComponent(paperId)}/download`, {
+        method: 'POST',
+      }),
+    getPaperAuditLogs: (paperId: string) =>
+      request<{
+        success: boolean;
+        logs: any[];
+        serverTimeIso: string;
+      }>(`/api/competitive/papers/${encodeURIComponent(paperId)}/audit-logs`),
+    validatePaperVisuals: (paperId: string) =>
+      request<{
+        success: boolean;
+        paperId: string;
+        visualValidation: any;
+      }>(`/api/competitive/papers/${encodeURIComponent(paperId)}/validate-visuals`, {
+        method: 'POST',
+      }),
+    downloadPaperPdf: async (
+      paperId: string,
+      viewMode?: 'original' | 'bilingual' | 'translated'
+    ): Promise<Blob> => {
+      const token = getStoredToken();
+      const qs = viewMode ? `?viewMode=${encodeURIComponent(viewMode)}` : '';
+      const res = await fetch(`/api/competitive/papers/${encodeURIComponent(paperId)}/pdf${qs}`, {
+        method: 'GET',
+        headers: token ? { Authorization: `Bearer ${token}` } : {},
+      });
+      if (!res.ok) {
+        let errMsg = `Failed to download Competitive Exam PDF (${res.status})`;
+        try {
+          const data = await res.json();
+          if (data?.error) errMsg = data.error;
+        } catch {
+          // ignore
+        }
+        throw new Error(errMsg);
+      }
+      return res.blob();
+    },
   },
 };
 

@@ -73,6 +73,9 @@ export const TranslatorWorkspace: React.FC<TranslatorWorkspaceProps> = ({
 }) => {
   const [questions, setQuestions] = useState<Question[]>([]);
   const [translations, setTranslations] = useState<QuestionTranslation[]>([]);
+  const [assignedCompetitivePapers, setAssignedCompetitivePapers] = useState<any[]>([]);
+  const [selectedPaperIdFilter, setSelectedPaperIdFilter] = useState<string>('ALL');
+  const [returningPaperId, setReturningPaperId] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [statusMessage, setStatusMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
 
@@ -83,7 +86,7 @@ export const TranslatorWorkspace: React.FC<TranslatorWorkspaceProps> = ({
 
   // Translation Workbench State
   const [selectedQuestion, setSelectedQuestion] = useState<Question | null>(null);
-  const [targetLanguage, setTargetLanguage] = useState<string>('Hindi');
+  const [targetLanguage, setTargetLanguage] = useState<string>('Marathi');
   const [translationMode, setTranslationMode] = useState<'AI_ASSISTED' | 'MANUAL_OVERRIDE'>('AI_ASSISTED');
   const [translatedContent, setTranslatedContent] = useState('');
   const [translatedOptions, setTranslatedOptions] = useState<string[]>([]);
@@ -129,15 +132,32 @@ export const TranslatorWorkspace: React.FC<TranslatorWorkspaceProps> = ({
   const loadData = async () => {
     setLoading(true);
     try {
-      const [qRes, tRes] = await Promise.all([
+      const [qRes, tRes, compRes] = await Promise.all([
         api.getPendingTranslations(),
         api.getTranslations(),
+        api.competitive.getTranslatorAssignedPapers().catch(() => ({ success: false, papers: [] })),
       ]);
-      setQuestions(qRes.questions || []);
-      setTranslations(tRes.translations || []);
+      const loadedQuestions = qRes.questions || [];
+      const loadedTranslations = tRes.translations || [];
+      const loadedPapers = compRes.papers || [];
 
-      if (qRes.questions && qRes.questions.length > 0 && !selectedQuestion) {
-        handleSelectQuestion(qRes.questions[0], targetLanguage, tRes.translations || []);
+      setQuestions(loadedQuestions);
+      setTranslations(loadedTranslations);
+      setAssignedCompetitivePapers(loadedPapers);
+
+      if (loadedQuestions.length > 0 && !selectedQuestion) {
+        const firstQ = loadedQuestions[0] as any;
+        const initialLang =
+          firstQ.assigned_language ||
+          loadedPapers[0]?.translationLanguage ||
+          targetLanguage ||
+          'Marathi';
+        setTargetLanguage(initialLang);
+        handleSelectQuestion(firstQ, initialLang, loadedTranslations);
+      } else if (selectedQuestion) {
+        const refreshedSelected =
+          loadedQuestions.find((q: Question) => q.id === selectedQuestion.id) || selectedQuestion;
+        handleSelectQuestion(refreshedSelected, targetLanguage, loadedTranslations);
       }
     } catch (err: any) {
       console.error('Translator load error:', err);
@@ -146,15 +166,88 @@ export const TranslatorWorkspace: React.FC<TranslatorWorkspaceProps> = ({
     }
   };
 
+  const runAiTranslation = async (q: Question, lang: string) => {
+    setAiTranslating(true);
+    setStatusMessage(null);
+
+    let originalOpts: string[] | null = null;
+    if (q.options_json) {
+      try {
+        const parsed = JSON.parse(q.options_json);
+        originalOpts = Array.isArray(parsed)
+          ? parsed.map((o: any) => (typeof o === 'string' ? o : o?.text || o?.content || String(o)))
+          : null;
+      } catch {
+        originalOpts = null;
+      }
+    }
+
+    try {
+      const res = await api.aiTranslate({
+        content: q.content_text,
+        options: originalOpts,
+        targetLanguage: lang,
+        subject: q.subject,
+      });
+
+      if (res.result) {
+        const isTranslated =
+          Boolean(res.result.translatedContent) &&
+          res.result.translatedContent.trim() !== '' &&
+          res.result.translatedContent.trim() !== q.content_text.trim() &&
+          (res.result.aiConfidence ?? 0) > 0;
+
+        if (isTranslated) {
+          setTranslatedContent(res.result.translatedContent);
+          setAiGeneratedSnapshot(res.result.translatedContent);
+          if (res.result.translatedOptions) {
+            setTranslatedOptions(res.result.translatedOptions);
+          }
+          setTranslatorNotes(res.result.linguisticNotes || `AI translation verified for ${lang}`);
+          setTranslationMode('AI_ASSISTED');
+          setStatusMessage({
+            type: 'success',
+            text: `AI Linguistic Engine generated accurate ${lang} translation in ${aiElapsedSeconds || 1}s.`,
+          });
+        } else {
+          setTranslatorNotes(res.result.linguisticNotes || `Could not translate into ${lang}.`);
+          setStatusMessage({
+            type: 'error',
+            text: res.result.linguisticNotes || `Could not translate question into ${lang}. Please retry or enter translation manually.`,
+          });
+        }
+      }
+    } catch (err: any) {
+      setStatusMessage({ type: 'error', text: err.message || 'AI Translation failed' });
+    } finally {
+      setAiTranslating(false);
+    }
+  };
+
   const handleSelectQuestion = (
     q: Question,
-    lang: string = targetLanguage,
+    lang?: string,
     currentTrans: QuestionTranslation[] = translations
   ) => {
+    const assignedLang = (q as any).assigned_language;
+    const effectiveLang = assignedLang || lang || targetLanguage || 'Marathi';
+    if (effectiveLang !== targetLanguage) {
+      setTargetLanguage(effectiveLang);
+    }
     setSelectedQuestion(q);
-    const existing = currentTrans.find(t => t.question_id === q.id && t.language === lang);
+    const existing = currentTrans.find(
+      t => t.question_id === q.id && t.language?.toLowerCase() === effectiveLang.toLowerCase()
+    );
 
-    if (existing) {
+    const hasValidExistingTranslation =
+      existing &&
+      existing.status !== 'REJECTED' &&
+      existing.translated_content &&
+      existing.translated_content.trim() !== '' &&
+      existing.translated_content.trim() !== q.content_text.trim() &&
+      !existing.translator_notes?.includes('No translation engine was reachable');
+
+    if (hasValidExistingTranslation) {
       setTranslatedContent(existing.translated_content);
       if (existing.translated_options_json) {
         try {
@@ -164,7 +257,12 @@ export const TranslatorWorkspace: React.FC<TranslatorWorkspaceProps> = ({
         }
       } else if (q.options_json) {
         try {
-          setTranslatedOptions(JSON.parse(q.options_json));
+          const parsed = JSON.parse(q.options_json);
+          setTranslatedOptions(
+            Array.isArray(parsed)
+              ? parsed.map((opt: any) => (typeof opt === 'string' ? opt : opt?.text || ''))
+              : []
+          );
         } catch {
           setTranslatedOptions([]);
         }
@@ -172,7 +270,11 @@ export const TranslatorWorkspace: React.FC<TranslatorWorkspaceProps> = ({
         setTranslatedOptions([]);
       }
       setTranslatorNotes(existing.translator_notes || '');
-      setOverrideReason(existing.translator_notes?.includes('Manual Override Reason:') ? existing.translator_notes.split('Manual Override Reason:')[1]?.trim() : '');
+      setOverrideReason(
+        existing.translator_notes?.includes('Manual Override Reason:')
+          ? existing.translator_notes.split('Manual Override Reason:')[1]?.trim()
+          : ''
+      );
       setTranslationMode('MANUAL_OVERRIDE');
       setAiGeneratedSnapshot(null);
     } else {
@@ -180,7 +282,7 @@ export const TranslatorWorkspace: React.FC<TranslatorWorkspaceProps> = ({
       if (q.options_json) {
         try {
           const parsed = JSON.parse(q.options_json);
-          setTranslatedOptions(parsed.map(() => ''));
+          setTranslatedOptions(Array.isArray(parsed) ? parsed.map(() => '') : []);
         } catch {
           setTranslatedOptions([]);
         }
@@ -192,6 +294,9 @@ export const TranslatorWorkspace: React.FC<TranslatorWorkspaceProps> = ({
       setSelectedReasonChip('');
       setAiGeneratedSnapshot(null);
       setTranslationMode('AI_ASSISTED');
+
+      // Automatically trigger AI translation for newly selected untranslated question
+      runAiTranslation(q, effectiveLang);
     }
   };
 
@@ -204,54 +309,19 @@ export const TranslatorWorkspace: React.FC<TranslatorWorkspaceProps> = ({
 
   const handleAiTranslate = async () => {
     if (!selectedQuestion) return;
-    setAiTranslating(true);
-    setStatusMessage(null);
-
-    let originalOpts: string[] | null = null;
-    if (selectedQuestion.options_json) {
-      try {
-        originalOpts = JSON.parse(selectedQuestion.options_json);
-      } catch {
-        originalOpts = null;
-      }
-    }
-
-    try {
-      const res = await api.aiTranslate({
-        content: selectedQuestion.content_text,
-        options: originalOpts,
-        targetLanguage,
-        subject: selectedQuestion.subject,
-      });
-
-      if (res.result) {
-        setTranslatedContent(res.result.translatedContent);
-        setAiGeneratedSnapshot(res.result.translatedContent);
-        if (res.result.translatedOptions) {
-          setTranslatedOptions(res.result.translatedOptions);
-        }
-        setTranslatorNotes(res.result.linguisticNotes || `AI translation verified for ${targetLanguage}`);
-        setTranslationMode('AI_ASSISTED');
-        setStatusMessage({
-          type: 'success',
-          text: `AI Linguistic Engine generated accurate ${targetLanguage} translation in ${aiElapsedSeconds || 1}s.`,
-        });
-      }
-    } catch (err: any) {
-      setStatusMessage({ type: 'error', text: err.message || 'AI Translation failed' });
-    } finally {
-      setAiTranslating(false);
-    }
+    await runAiTranslation(selectedQuestion, targetLanguage);
   };
 
   const handleSelectReasonChip = (chip: string) => {
     setSelectedReasonChip(chip);
     if (!overrideReason.includes(chip)) {
-      setOverrideReason(prev => prev ? `${chip}; ${prev}` : chip);
+      setOverrideReason(prev => (prev ? `${chip}; ${prev}` : chip));
     }
   };
 
-  const isManualOverride = translationMode === 'MANUAL_OVERRIDE' || (aiGeneratedSnapshot !== null && translatedContent !== aiGeneratedSnapshot);
+  const isManualOverride =
+    translationMode === 'MANUAL_OVERRIDE' ||
+    (aiGeneratedSnapshot !== null && translatedContent !== aiGeneratedSnapshot);
 
   const handleSaveTranslation = async (status: 'DRAFT' | 'UNDER_REVIEW' | 'APPROVED') => {
     if (!selectedQuestion || !translatedContent.trim()) {
@@ -259,44 +329,89 @@ export const TranslatorWorkspace: React.FC<TranslatorWorkspaceProps> = ({
       return;
     }
 
-    // If manual override is chosen or content was edited from AI snapshot, require explanation
-    if (isManualOverride && !overrideReason.trim() && !selectedReasonChip) {
-      setStatusMessage({
-        type: 'error',
-        text: 'Please specify the reason for providing your own translation / what needed improvement in the AI output.',
-      });
-      return;
-    }
-
     setSaving(true);
     setStatusMessage(null);
 
+    const effectiveReason =
+      overrideReason.trim() || selectedReasonChip || 'Verified regional translation by Translator';
     const compiledNotes = isManualOverride
-      ? `Manual Override (${selectedReasonChip || 'Custom'}): ${overrideReason.trim()} ${translatorNotes.trim() ? `| Notes: ${translatorNotes.trim()}` : ''}`
-      : (translatorNotes.trim() || `AI Linguistic Assistant verified for ${targetLanguage}`);
+      ? `Manual Override (${selectedReasonChip || 'Translator Verified'}): ${effectiveReason} ${
+          translatorNotes.trim() ? `| Notes: ${translatorNotes.trim()}` : ''
+        }`
+      : translatorNotes.trim() || `AI Linguistic Assistant verified for ${targetLanguage}`;
 
     try {
-      await api.saveTranslation({
+      const saveRes: any = await api.saveTranslation({
         question_id: selectedQuestion.id,
         language: targetLanguage,
         translated_content: translatedContent.trim(),
         translated_options: translatedOptions.length > 0 ? translatedOptions : undefined,
         status,
         translator_notes: compiledNotes,
+        assignment_id: (selectedQuestion as any).assignment_id,
       });
 
-      setStatusMessage({
-        type: 'success',
-        text: `Translation for ${targetLanguage} successfully saved (${status}).`,
-      });
+      const [updatedTrans, compRes] = await Promise.all([
+        api.getTranslations(),
+        api.competitive.getTranslatorAssignedPapers().catch(() => ({ success: false, papers: [] })),
+      ]);
+      const freshTranslations = updatedTrans.translations || [];
+      const freshPapers = compRes.papers || [];
+      setTranslations(freshTranslations);
+      setAssignedCompetitivePapers(freshPapers);
 
-      const updatedTrans = await api.getTranslations();
-      setTranslations(updatedTrans.translations || []);
+      const autoReturnedPaper = freshPapers.find(
+        (p: any) =>
+          p.translationStatus === 'RETURNED' &&
+          (p.originalQuestions || p.questions || []).some(
+            (pq: any) => (pq.originalQuestionId || pq.id) === selectedQuestion.id
+          )
+      );
+
+      if (status === 'APPROVED' && autoReturnedPaper) {
+        setStatusMessage({
+          type: 'success',
+          text: `✓ All ${autoReturnedPaper.totalQuestions} ${targetLanguage} translations for "${autoReturnedPaper.title}" are now APPROVED and have been automatically sent back to the Exam Manager (${autoReturnedPaper.createdByName || 'Exam Manager'})!`,
+        });
+      } else {
+        setStatusMessage({
+          type: 'success',
+          text:
+            status === 'APPROVED'
+              ? `✓ ${targetLanguage} translation approved & saved (${selectedQuestion.id}).`
+              : `Translation for ${targetLanguage} saved as In-Translation draft (${status}).`,
+        });
+      }
+
       onRefresh();
     } catch (err: any) {
       setStatusMessage({ type: 'error', text: err.message || 'Failed to save translation' });
     } finally {
       setSaving(false);
+    }
+  };
+
+  const handleReturnCompetitivePaperToManager = async (paperId: string) => {
+    setReturningPaperId(paperId);
+    setStatusMessage(null);
+    try {
+      const resp = await api.competitive.returnTranslationsToManager(paperId);
+      if (resp && resp.success) {
+        setStatusMessage({
+          type: 'success',
+          text: resp.message || 'Completed translations sent back to the Exam Manager.',
+        });
+        const compRes = await api.competitive.getTranslatorAssignedPapers();
+        setAssignedCompetitivePapers(compRes.papers || []);
+        onRefresh();
+      }
+    } catch (err: any) {
+      setStatusMessage({
+        type: 'error',
+        text: err.message || 'Failed to return translations to Exam Manager.',
+      });
+    } finally {
+      setReturningPaperId(null);
     }
   };
 
@@ -316,7 +431,16 @@ export const TranslatorWorkspace: React.FC<TranslatorWorkspaceProps> = ({
         });
       }
       let originalOptions: string[] | null = null;
-      if (selectedQuestion.options_json) originalOptions = JSON.parse(selectedQuestion.options_json);
+      if (selectedQuestion.options_json) {
+        try {
+          const parsed = JSON.parse(selectedQuestion.options_json);
+          originalOptions = Array.isArray(parsed)
+            ? parsed.map((o: any) => (typeof o === 'string' ? o : o?.text || o?.content || String(o)))
+            : null;
+        } catch {
+          originalOptions = null;
+        }
+      }
       const result = await api.aiTranslate({
         content: selectedQuestion.content_text,
         options: originalOptions,
@@ -329,7 +453,10 @@ export const TranslatorWorkspace: React.FC<TranslatorWorkspaceProps> = ({
       setTranslationMode('AI_ASSISTED');
       setOverrideReason('');
       setSelectedReasonChip('');
-      setStatusMessage({ type: 'success', text: 'Rejected translation recorded. A fresh translation was generated from the original question.' });
+      setStatusMessage({
+        type: 'success',
+        text: 'Rejected translation recorded. A fresh translation was generated from the original question.',
+      });
       const updatedTranslations = await api.getTranslations();
       setTranslations(updatedTranslations.translations || []);
     } catch (err: any) {
@@ -346,39 +473,69 @@ export const TranslatorWorkspace: React.FC<TranslatorWorkspaceProps> = ({
         notes: 'Chief Linguistic Translator formal sign-off',
       });
       setStatusMessage({ type: 'success', text: 'Translation approved & verified.' });
-      const updatedTrans = await api.getTranslations();
+      const [updatedTrans, compRes] = await Promise.all([
+        api.getTranslations(),
+        api.competitive.getTranslatorAssignedPapers().catch(() => ({ success: false, papers: [] })),
+      ]);
       setTranslations(updatedTrans.translations || []);
+      setAssignedCompetitivePapers(compRes.papers || []);
     } catch (err: any) {
       setStatusMessage({ type: 'error', text: err.message });
     }
   };
 
   const approvedCount = translations.filter(t => t.status === 'APPROVED').length;
-  const underReviewCount = translations.filter(t => t.status === 'UNDER_REVIEW' || t.status === 'DRAFT').length;
+  const underReviewCount = questions.filter(q => {
+    const qLang = (q as any).assigned_language || targetLanguage;
+    const hasApprovedInTarget = translations.some(
+      t => t.question_id === q.id && t.language?.toLowerCase() === qLang.toLowerCase() && t.status === 'APPROVED'
+    );
+    const hasPendingTrans = translations.some(
+      t => t.question_id === q.id && (t.status === 'UNDER_REVIEW' || t.status === 'DRAFT')
+    );
+    return !hasApprovedInTarget || hasPendingTrans;
+  }).length;
+
+  // Set of question IDs belonging to the selected Competitive Paper filter
+  const activeFilteredPaper = assignedCompetitivePapers.find(p => p.id === selectedPaperIdFilter);
+  const activePaperQuestionIds = new Set<string>(
+    activeFilteredPaper
+      ? (activeFilteredPaper.originalQuestions || activeFilteredPaper.questions || []).map(
+          (pq: any) => pq.originalQuestionId || pq.id
+        )
+      : []
+  );
 
   const filteredQuestions = questions.filter(q => {
+    // 0. Competitive Paper Filter
+    if (selectedPaperIdFilter !== 'ALL' && activeFilteredPaper) {
+      if (!activePaperQuestionIds.has(q.id)) return false;
+    }
+
     // 1. Text Search Filter
     if (searchQuery.trim()) {
       const query = searchQuery.toLowerCase();
-      const matches = (
+      const matches =
         q.content_text?.toLowerCase().includes(query) ||
         q.topic?.toLowerCase().includes(query) ||
         q.subject?.toLowerCase().includes(query) ||
-        q.id?.toLowerCase().includes(query)
-      );
+        q.id?.toLowerCase().includes(query);
       if (!matches) return false;
     }
 
     // 2. Metric Filter
     if (metricFilter === 'APPROVED') {
-      // Questions that have at least one approved translation
       return translations.some(t => t.question_id === q.id && t.status === 'APPROVED');
     }
 
     if (metricFilter === 'PENDING_REVIEW') {
-      // Questions that either have draft/under-review translation or are not yet translated in targetLanguage
-      const hasApprovedInTarget = translations.some(t => t.question_id === q.id && t.language === targetLanguage && t.status === 'APPROVED');
-      const hasPendingTrans = translations.some(t => t.question_id === q.id && (t.status === 'UNDER_REVIEW' || t.status === 'DRAFT'));
+      const qLang = (q as any).assigned_language || targetLanguage;
+      const hasApprovedInTarget = translations.some(
+        t => t.question_id === q.id && t.language?.toLowerCase() === qLang.toLowerCase() && t.status === 'APPROVED'
+      );
+      const hasPendingTrans = translations.some(
+        t => t.question_id === q.id && (t.status === 'UNDER_REVIEW' || t.status === 'DRAFT')
+      );
       return !hasApprovedInTarget || hasPendingTrans;
     }
 
@@ -606,6 +763,195 @@ export const TranslatorWorkspace: React.FC<TranslatorWorkspaceProps> = ({
             )}
           </div>
 
+          {/* Assigned Competitive Examination Papers Waiting for Translation (Steps 4, 5, 6, 10) */}
+          {assignedCompetitivePapers.length > 0 && (
+            <div className="p-5 rounded-xl bg-white border border-purple-200 shadow-xs space-y-4">
+              <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-100 pb-3">
+                <div className="flex items-center gap-2.5">
+                  <div className="p-2 rounded-lg bg-purple-100 text-purple-900">
+                    <Layers className="w-4 h-4" />
+                  </div>
+                  <div>
+                    <div className="flex items-center gap-2">
+                      <h3 className="text-sm font-bold text-slate-900">
+                        Assigned Competitive Examination Papers Waiting for Translation
+                      </h3>
+                      <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-purple-100 text-purple-900">
+                        {assignedCompetitivePapers.length} Competitive {assignedCompetitivePapers.length === 1 ? 'Paper' : 'Papers'}
+                      </span>
+                    </div>
+                    <p className="text-xs text-slate-500">
+                      Translate and approve every question in an assigned Competitive Exam paper to send completed translations back to the originating Exam Manager.
+                    </p>
+                  </div>
+                </div>
+
+                {selectedPaperIdFilter !== 'ALL' && (
+                  <button
+                    type="button"
+                    onClick={() => setSelectedPaperIdFilter('ALL')}
+                    className="px-3 py-1.5 rounded-lg border border-slate-300 text-slate-700 hover:bg-slate-50 text-xs font-bold cursor-pointer"
+                  >
+                    Show All Assigned Questions
+                  </button>
+                )}
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                {assignedCompetitivePapers.map((paper: any) => {
+                  const prog = paper.translationProgress || {
+                    totalQuestions: paper.totalQuestions || 0,
+                    translatedCount: 0,
+                    approvedCount: 0,
+                    pendingCount: paper.totalQuestions || 0,
+                    allApproved: false,
+                  };
+                  const lang = paper.translationLanguage || 'Marathi';
+                  const isFiltered = selectedPaperIdFilter === paper.id;
+                  const statusUpper = String(paper.translationStatus || 'ASSIGNED').toUpperCase();
+
+                  return (
+                    <div
+                      key={paper.id}
+                      className={`p-4 rounded-xl border transition-all space-y-3 text-xs ${
+                        isFiltered
+                          ? 'bg-purple-50/70 border-purple-400 ring-1 ring-purple-300'
+                          : 'bg-slate-50/70 border-slate-200'
+                      }`}
+                    >
+                      <div className="flex items-start justify-between gap-2">
+                        <div>
+                          <div className="flex flex-wrap items-center gap-1.5">
+                            <span className="px-2 py-0.5 rounded bg-purple-900 text-white font-bold text-[10px]">
+                              {lang} Translation
+                            </span>
+                            <span className="px-2 py-0.5 rounded bg-slate-200 text-slate-800 font-mono font-bold text-[10px]">
+                              {paper.examType || 'Competitive Exam'}
+                            </span>
+                          </div>
+                          <h4 className="text-sm font-bold text-slate-900 mt-1">{paper.title}</h4>
+                          <p className="text-[11px] text-slate-500">
+                            Assigned by Exam Manager: <strong>{paper.createdByName || 'Exam Manager'}</strong>
+                          </p>
+                        </div>
+
+                        <span
+                          className={`px-2.5 py-1 rounded-full text-[10px] font-mono font-bold border shrink-0 ${
+                            statusUpper === 'RETURNED' || statusUpper === 'FINAL_GENERATED'
+                              ? 'bg-emerald-100 text-emerald-900 border-emerald-300'
+                              : statusUpper === 'APPROVED'
+                                ? 'bg-emerald-50 text-emerald-800 border-emerald-200'
+                                : statusUpper === 'IN_TRANSLATION'
+                                  ? 'bg-amber-100 text-amber-900 border-amber-300'
+                                  : 'bg-purple-100 text-purple-900 border-purple-200'
+                          }`}
+                        >
+                          {statusUpper}
+                        </span>
+                      </div>
+
+                      {/* Progress Bar */}
+                      <div className="space-y-1">
+                        <div className="flex items-center justify-between text-[11px]">
+                          <span className="font-semibold text-slate-700">
+                            Approval Progress: {prog.approvedCount} / {prog.totalQuestions} Approved
+                          </span>
+                          <span className="text-slate-500">
+                            {prog.pendingCount} Remaining
+                          </span>
+                        </div>
+                        <div className="w-full h-2 rounded-full bg-slate-200 overflow-hidden">
+                          <div
+                            className="h-full bg-emerald-600 transition-all duration-300"
+                            style={{
+                              width: `${
+                                prog.totalQuestions > 0
+                                  ? Math.round((prog.approvedCount / prog.totalQuestions) * 100)
+                                  : 0
+                              }%`,
+                            }}
+                          />
+                        </div>
+                      </div>
+
+                      {/* Paper Actions */}
+                      <div className="flex flex-wrap items-center justify-between gap-2 pt-1">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            const nextFilter = isFiltered ? 'ALL' : paper.id;
+                            setSelectedPaperIdFilter(nextFilter);
+                            setTargetLanguage(lang);
+                            if (nextFilter !== 'ALL') {
+                              const paperQIds = new Set(
+                                (paper.originalQuestions || paper.questions || []).map(
+                                  (pq: any) => pq.originalQuestionId || pq.id
+                                )
+                              );
+                              const paperQs = questions.filter(q => paperQIds.has(q.id));
+                              const firstPending =
+                                paperQs.find(
+                                  q =>
+                                    !translations.some(
+                                      t =>
+                                        t.question_id === q.id &&
+                                        t.language?.toLowerCase() === lang.toLowerCase() &&
+                                        t.status === 'APPROVED'
+                                    )
+                                ) || paperQs[0];
+                              if (firstPending) {
+                                handleSelectQuestion(firstPending, lang, translations);
+                              }
+                            }
+                          }}
+                          className={`px-3 py-1.5 rounded-lg text-[11px] font-bold flex items-center gap-1.5 cursor-pointer transition-colors ${
+                            isFiltered
+                              ? 'bg-purple-900 text-white'
+                              : 'bg-white border border-slate-300 text-slate-800 hover:bg-slate-100'
+                          }`}
+                        >
+                          <FileText className="w-3.5 h-3.5" />
+                          <span>
+                            {isFiltered
+                              ? `Filtering This Paper (${prog.totalQuestions} Qs)`
+                              : `Translate Paper Questions (${prog.totalQuestions})`}
+                          </span>
+                        </button>
+
+                        {prog.allApproved ? (
+                          statusUpper === 'RETURNED' || statusUpper === 'FINAL_GENERATED' ? (
+                            <span className="px-3 py-1.5 rounded-lg bg-emerald-50 border border-emerald-200 text-emerald-800 font-bold text-[11px] inline-flex items-center gap-1">
+                              <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
+                              <span>Returned to {paper.createdByName || 'Exam Manager'}</span>
+                            </span>
+                          ) : (
+                            <button
+                              type="button"
+                              onClick={() => handleReturnCompetitivePaperToManager(paper.id)}
+                              disabled={returningPaperId === paper.id}
+                              className="px-3 py-1.5 rounded-lg bg-emerald-700 hover:bg-emerald-800 text-white font-bold text-[11px] flex items-center gap-1.5 cursor-pointer shadow-2xs"
+                            >
+                              <ArrowRight className="w-3.5 h-3.5" />
+                              <span>
+                                {returningPaperId === paper.id
+                                  ? 'Sending...'
+                                  : `Send Approved ${lang} Paper to Exam Manager`}
+                              </span>
+                            </button>
+                          )
+                        ) : (
+                          <span className="text-[11px] text-amber-800 font-medium">
+                            Approve all {prog.totalQuestions} questions to return paper
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+
           {/* Unified Two-Column Workbench */}
           <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
             {/* Left Column: Questions Queue */}
@@ -622,10 +968,13 @@ export const TranslatorWorkspace: React.FC<TranslatorWorkspaceProps> = ({
                   )}
                 </div>
                 <div className="flex items-center gap-1.5">
-                  {metricFilter !== 'ALL' && (
+                  {(metricFilter !== 'ALL' || selectedPaperIdFilter !== 'ALL') && (
                     <button
                       type="button"
-                      onClick={() => setMetricFilter('ALL')}
+                      onClick={() => {
+                        setMetricFilter('ALL');
+                        setSelectedPaperIdFilter('ALL');
+                      }}
                       className="text-[10px] text-purple-700 hover:text-purple-900 font-semibold cursor-pointer underline"
                     >
                       Clear Filter
@@ -657,7 +1006,19 @@ export const TranslatorWorkspace: React.FC<TranslatorWorkspaceProps> = ({
                 ) : (
                   filteredQuestions.map(q => {
                     const isSelected = selectedQuestion?.id === q.id;
-                    const hasTrans = translations.some(t => t.question_id === q.id && t.language === targetLanguage && t.status === 'APPROVED');
+                    const qLang = (q as any).assigned_language || targetLanguage;
+                    const hasTrans = translations.some(
+                      t =>
+                        t.question_id === q.id &&
+                        t.language?.toLowerCase() === qLang.toLowerCase() &&
+                        t.status === 'APPROVED'
+                    );
+                    const hasDraft = translations.some(
+                      t =>
+                        t.question_id === q.id &&
+                        t.language?.toLowerCase() === qLang.toLowerCase() &&
+                        t.status !== 'APPROVED'
+                    );
                     // Languages already delivered for this question. One assigned
                     // paper is translated into every requested language, so the
                     // queue has to show coverage per question, not just the one
@@ -668,7 +1029,7 @@ export const TranslatorWorkspace: React.FC<TranslatorWorkspaceProps> = ({
                     return (
                       <div
                         key={q.id}
-                        onClick={() => handleSelectQuestion(q, targetLanguage, translations)}
+                        onClick={() => handleSelectQuestion(q, qLang, translations)}
                         className={`p-3 rounded-lg border text-xs cursor-pointer transition-all ${
                           isSelected
                             ? 'bg-purple-50/90 border-purple-500 ring-1 ring-purple-300 shadow-xs'
@@ -704,10 +1065,12 @@ export const TranslatorWorkspace: React.FC<TranslatorWorkspaceProps> = ({
                           {hasTrans ? (
                             <span className="text-emerald-700 font-bold flex items-center gap-0.5">
                               <Check className="w-3 h-3" />
-                              <span>{targetLanguage} Ready</span>
+                              <span>{qLang} Approved</span>
                             </span>
+                          ) : hasDraft ? (
+                            <span className="text-blue-700 font-semibold">In Translation ({qLang})</span>
                           ) : (
-                            <span className="text-amber-700 font-medium">Pending {targetLanguage}</span>
+                            <span className="text-amber-700 font-medium">Pending {qLang}</span>
                           )}
                         </div>
                       </div>
@@ -934,10 +1297,10 @@ export const TranslatorWorkspace: React.FC<TranslatorWorkspaceProps> = ({
                         <BadgeAlert className="w-4 h-4 text-amber-700 shrink-0" />
                         <div>
                           <h4 className="text-xs font-bold text-amber-950">
-                            Manual Translation Override • AI Assessment & Reasoning Required
+                            Manual Translation Override • AI Assessment & Reasoning (Optional)
                           </h4>
                           <p className="text-[11px] text-amber-800">
-                            To maintain institutional translation quality, please state what was wrong or needed improvement in the AI Linguistic Assistant's output:
+                            To maintain institutional translation quality, you may note any terminology or phrasing adjustments made to the AI output:
                           </p>
                         </div>
                       </div>
@@ -971,7 +1334,7 @@ export const TranslatorWorkspace: React.FC<TranslatorWorkspaceProps> = ({
                       {/* Detailed Explanation Textarea */}
                       <div>
                         <label className="text-[10.5px] font-bold text-amber-900 block mb-1">
-                          Explain Linguistic Improvement / Reason for Manual Translation: <span className="text-rose-600">*</span>
+                          Explain Linguistic Improvement / Reason for Manual Translation:
                         </label>
                         <textarea
                           rows={2}
@@ -991,7 +1354,7 @@ export const TranslatorWorkspace: React.FC<TranslatorWorkspaceProps> = ({
                       <span>Translator sign-off stamps cryptographic audit record</span>
                     </div>
 
-                    <div className="flex items-center gap-2">
+                    <div className="flex flex-wrap items-center gap-2">
                       <button
                         type="button"
                         onClick={handleRejectAndRetranslate}
@@ -1003,12 +1366,20 @@ export const TranslatorWorkspace: React.FC<TranslatorWorkspaceProps> = ({
                       </button>
                       <button
                         type="button"
+                        onClick={() => handleSaveTranslation('UNDER_REVIEW')}
+                        disabled={saving}
+                        className="px-3.5 py-2 bg-slate-100 hover:bg-slate-200 text-slate-800 font-bold rounded-lg text-xs transition-colors cursor-pointer border border-slate-300"
+                      >
+                        Save In-Translation Draft
+                      </button>
+                      <button
+                        type="button"
                         onClick={() => handleSaveTranslation('APPROVED')}
                         disabled={saving}
                         className="px-5 py-2 bg-emerald-800 hover:bg-emerald-700 text-white font-bold rounded-lg text-xs flex items-center gap-1.5 shadow-xs transition-colors cursor-pointer"
                       >
                         <CheckCircle2 className="w-4 h-4" />
-                        <span>Approve & Finalize Translation</span>
+                        <span>Approve & Submit Translation</span>
                       </button>
                     </div>
                   </div>
