@@ -1,5 +1,7 @@
 @import "tailwindcss";
 
+@custom-variant dark (&:where(.dark, .dark *));
+
 :root {
   color-scheme: light;
   --header-height: 4rem;
@@ -50,9 +52,14 @@ html {
 body {
   margin: 0;
   min-width: 320px;
-  background: #FAFCFA;
+  background: #ffffff;
   color: #0F172A;
   font-feature-settings: "cv02", "cv03", "cv04", "cv11";
+}
+
+html.dark body {
+  background: #0a1713;
+  color: #f2f8f3;
 }
 
 .blueprint-form .field-stack {
@@ -580,6 +587,67 @@ html.dark .cyber-mesh-bg div[class*="bg-emerald-950"] span {
   border-color: #059669;
   box-shadow: 0 0 0 3px rgba(16, 185, 129, 0.15);
   outline: none;
+}
+
+/* Authority forms use light panels in both role workspaces. Keep control text
+   readable even when a parent theme or inherited utility color is light. */
+.authority-management-form input,
+.authority-management-form select,
+.authority-management-form textarea {
+  color: #0F172A;
+  border-color: #CBD5E1;
+}
+
+.authority-management-form input::placeholder,
+.authority-management-form textarea::placeholder {
+  color: #64748B;
+  opacity: 1;
+}
+
+.authority-management-form select option {
+  color: #0F172A;
+  background: #FFFFFF;
+}
+
+.authority-management-form input:disabled,
+.authority-management-form select:disabled,
+.authority-management-form textarea:disabled,
+.authority-management-form input[readonly],
+.authority-management-form textarea[readonly] {
+  color: #334155;
+  opacity: 1;
+}
+
+.authority-management-form input:focus,
+.authority-management-form select:focus,
+.authority-management-form textarea:focus {
+  border-color: #047857;
+  box-shadow: 0 0 0 2px rgba(5, 150, 105, 0.18);
+  outline: none;
+}
+
+html.dark .authority-management-form input,
+html.dark .authority-management-form select,
+html.dark .authority-management-form textarea {
+  color: #F8FAFC;
+}
+
+html.dark .authority-management-form input::placeholder,
+html.dark .authority-management-form textarea::placeholder {
+  color: #CBD5E1;
+}
+
+html.dark .authority-management-form select option {
+  color: #F8FAFC;
+  background: #0F172A;
+}
+
+html.dark .authority-management-form input:disabled,
+html.dark .authority-management-form select:disabled,
+html.dark .authority-management-form textarea:disabled,
+html.dark .authority-management-form input[readonly],
+html.dark .authority-management-form textarea[readonly] {
+  color: #E2E8F0;
 }
 
 .btn-gradient-emerald {
