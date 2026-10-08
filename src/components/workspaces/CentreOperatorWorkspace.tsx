@@ -20,12 +20,13 @@ import {
   X,
   ShieldAlert,
 } from 'lucide-react';
-import { User, Examination, PrintCopy, DynamicWatermarkData, TrustedDevice } from '../../types';
+import { User, Examination, PrintCopy, DynamicWatermarkData, TrustedDevice, PrintAnywhereJob } from '../../types';
 import { api, getDeviceFingerprint, getOrCreateBrowserDeviceIdentity } from '../../api';
 import { NavSubTab } from '../Sidebar';
 import { SecureViewerModal } from '../SecureViewerModal';
 import { PrintRelayPanel } from '../PrintRelayPanel';
 import { PrintSecurityGate } from '../PrintSecurityGate';
+import { PrinterSelectModal } from '../PrinterSelectModal';
 import { CompetitivePrintExaminationPaper } from '../competitive/CompetitivePrintExaminationPaper';
 
 interface CentreOperatorWorkspaceProps {
@@ -103,6 +104,46 @@ export const CentreOperatorWorkspace: React.FC<CentreOperatorWorkspaceProps> = (
   const printContainerRef = useRef<HTMLDivElement | null>(null);
   const deviceFp = getDeviceFingerprint();
 
+  // Print Anywhere State (Multi-Printer Network Dispatch)
+  const [printAnywhereJobs, setPrintAnywhereJobs] = useState<PrintAnywhereJob[]>([]);
+  const [printAnywhereModalOpen, setPrintAnywhereModalOpen] = useState(false);
+  const [printAnywhereExam, setPrintAnywhereExam] = useState<{
+    id: string;
+    name: string;
+    examType: 'UNIVERSITY' | 'COMPETITIVE';
+    unlockTimeDisplay: string;
+    paperId?: string;
+    isUnlocked: boolean;
+  } | null>(null);
+
+  const loadPrintAnywhereJobs = useCallback(async () => {
+    try {
+      const res = await api.getPrintAnywhereJobs();
+      if (res && Array.isArray(res.jobs)) {
+        setPrintAnywhereJobs(res.jobs);
+      }
+    } catch {
+      // silent
+    }
+  }, []);
+
+  const getLatestPrintAnywhereJob = (examId: string, paperId?: string) => {
+    return printAnywhereJobs.find(j => j.examId === examId || (paperId && j.paperId === paperId));
+  };
+
+  const getUniversityLockState = (exam: Examination) => {
+    const unlockDateTime = new Date(`${exam.exam_date}T${exam.unlock_time}:00`);
+    const isLocked = isNaN(unlockDateTime.getTime()) ? false : liveServerNowMs < unlockDateTime.getTime();
+    const unlockDisplay = `${exam.unlock_time} on ${exam.exam_date}`;
+    return {
+      isLocked,
+      unlockDisplay,
+      statusText: isLocked
+        ? `Paper Locked – Printing will be available at ${exam.unlock_time}`
+        : 'Paper Unlocked – Ready for Printing',
+    };
+  };
+
   const loadCompetitivePapers = useCallback(async (silent = false) => {
     try {
       const compRes = await api.competitive.getOperatorAssignedPapers();
@@ -135,6 +176,7 @@ export const CentreOperatorWorkspace: React.FC<CentreOperatorWorkspaceProps> = (
         api.getPrintHistory().catch(() => ({ printHistory: [] })),
         api.getDevices().catch(() => ({ devices: [] })),
         loadCompetitivePapers(true),
+        loadPrintAnywhereJobs(),
       ]);
 
       setReleasedExams(relRes.examinations || []);
@@ -147,7 +189,7 @@ export const CentreOperatorWorkspace: React.FC<CentreOperatorWorkspaceProps> = (
     } finally {
       setLoading(false);
     }
-  }, [loadCompetitivePapers]);
+  }, [loadCompetitivePapers, loadPrintAnywhereJobs]);
 
   useEffect(() => {
     loadData();
@@ -220,12 +262,8 @@ export const CentreOperatorWorkspace: React.FC<CentreOperatorWorkspaceProps> = (
       unlockDisplay,
       encDisplay,
       statusBannerText: isLockedByServerClock
-        ? `Locked – Available at ${unlockDisplay}`
-        : paper.encryptionStatus === 'PRINTED'
-          ? `Unlocked & Printed – Available since ${unlockDisplay}`
-          : paper.encryptionStatus === 'DECRYPTED'
-            ? `Decrypted & Print Enabled (Unlocked at ${unlockDisplay})`
-            : `Unlocked – Ready to Decrypt & Print (${unlockDisplay})`,
+        ? `Paper Locked – Printing will be available at ${unlockDisplay}`
+        : 'Paper Unlocked – Ready for Printing',
     };
   };
 
@@ -890,6 +928,41 @@ export const CentreOperatorWorkspace: React.FC<CentreOperatorWorkspaceProps> = (
                       </span>
                     </button>
 
+                    {/* Print Anywhere Button */}
+                    <button
+                      onClick={() => {
+                        setPrintAnywhereExam({
+                          id: paper.exam_id || paper.id,
+                          name: paper.title,
+                          examType: 'COMPETITIVE',
+                          unlockTimeDisplay: lockState.unlockDisplay,
+                          paperId: paper.id,
+                          isUnlocked: !lockState.isLocked,
+                        });
+                        setPrintAnywhereModalOpen(true);
+                      }}
+                      disabled={lockState.isLocked}
+                      title={
+                        lockState.isLocked
+                          ? `Paper Locked – Printing will be available at ${lockState.unlockDisplay}`
+                          : 'Select centre printer and print anywhere'
+                      }
+                      className={`px-4 py-2 rounded-lg font-bold text-xs flex items-center gap-1.5 transition-all ${
+                        lockState.isLocked
+                          ? 'bg-slate-200 text-slate-500 cursor-not-allowed border border-slate-300'
+                          : 'bg-indigo-700 hover:bg-indigo-600 text-white shadow-xs'
+                      }`}
+                    >
+                      {lockState.isLocked ? (
+                        <Lock className="w-3.5 h-3.5" />
+                      ) : (
+                        <Printer className="w-3.5 h-3.5" />
+                      )}
+                      <span>
+                        {lockState.isLocked ? 'Print Locked' : 'Print Anywhere'}
+                      </span>
+                    </button>
+
                     {/* Download Paper Button */}
                     <button
                       onClick={() => handleDownloadCompetitivePaper(paper)}
@@ -929,6 +1002,27 @@ export const CentreOperatorWorkspace: React.FC<CentreOperatorWorkspaceProps> = (
                     </button>
                   </div>
                 </div>
+
+                {/* Print Anywhere Status Banner for this Paper */}
+                {(() => {
+                  const compJob = getLatestPrintAnywhereJob(paper.exam_id || paper.id, paper.id);
+                  if (!compJob) return null;
+                  return (
+                    <div className="p-3 rounded-lg bg-indigo-50/80 border border-indigo-200 text-xs flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                      <div className="space-y-0.5">
+                        <div className="text-[11px] font-bold text-indigo-950">
+                          <strong>Exam:</strong> Competitive – {paper.title} &nbsp;|&nbsp; <strong>Printer:</strong> {compJob.printerName}
+                        </div>
+                        <div className="text-[10px] text-slate-600 font-mono">
+                          <strong>Status:</strong> <span className="font-bold text-emerald-700">{compJob.status}</span> &nbsp;|&nbsp; <strong>Printed At:</strong> {compJob.completedAt ? new Date(compJob.completedAt).toLocaleTimeString() : new Date(compJob.requestedAt).toLocaleTimeString()}
+                        </div>
+                      </div>
+                      <span className="px-2.5 py-1 rounded-full bg-emerald-100 text-emerald-800 border border-emerald-300 text-[10px] font-bold self-start sm:self-center">
+                        {compJob.status} ({compJob.copiesCount} copy/copies)
+                      </span>
+                    </div>
+                  );
+                })()}
 
                 {/* Inline Audit Trail Table for Selected Paper */}
                 {selectedAuditPaperId === paper.id && (
@@ -1144,27 +1238,98 @@ export const CentreOperatorWorkspace: React.FC<CentreOperatorWorkspaceProps> = (
               <p className="text-xs text-slate-400 p-4 text-center">No examinations assigned to this centre.</p>
             ) : (
               <div className="space-y-2">
-                {releasedExams.map(ex => (
-                  <div
-                    key={ex.id}
-                    className="p-4 rounded-lg bg-slate-50 border border-slate-200 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs"
-                  >
-                    <div>
-                      <div className="font-bold text-slate-900">{ex.name}</div>
-                      <div className="text-[10px] text-slate-500 font-mono mt-0.5">
-                        Schedule Date: {ex.exam_date} {ex.exam_time} • Unlock Minute: {ex.unlock_time}
-                      </div>
-                    </div>
-
-                    <button
-                      onClick={() => handleOpenSecureViewer(ex)}
-                      className="px-4 py-2 bg-emerald-900 hover:bg-emerald-800 text-white rounded-lg font-bold text-xs shadow-xs flex items-center gap-1.5"
+                {releasedExams.map(ex => {
+                  const uniLock = getUniversityLockState(ex);
+                  const latestJob = getLatestPrintAnywhereJob(ex.id);
+                  return (
+                    <div
+                      key={ex.id}
+                      className="p-4 rounded-lg bg-slate-50 border border-slate-200 flex flex-col gap-3 text-xs"
                     >
-                      <Eye className="w-3.5 h-3.5" />
-                      <span>Open Secure Paper Viewer</span>
-                    </button>
-                  </div>
-                ))}
+                      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                        <div>
+                          <div className="flex items-center gap-2">
+                            <span className="font-bold text-slate-900">{ex.name}</span>
+                            <span className="px-2 py-0.5 rounded bg-slate-200 text-slate-800 font-mono text-[10px] font-bold">
+                              UNIVERSITY
+                            </span>
+                          </div>
+                          <div className="text-[10px] text-slate-500 font-mono mt-0.5">
+                            Schedule Date: {ex.exam_date} {ex.exam_time} • Unlock Minute: {ex.unlock_time}
+                          </div>
+                        </div>
+
+                        <div className="flex items-center gap-2">
+                          {uniLock.isLocked ? (
+                            <span className="px-2.5 py-1 rounded-full bg-rose-100 text-rose-900 border border-rose-300 text-[10px] font-bold flex items-center gap-1 shadow-2xs">
+                              <Lock className="w-3 h-3 text-rose-700" />
+                              <span>Paper Locked – Printing will be available at {ex.unlock_time}</span>
+                            </span>
+                          ) : (
+                            <span className="px-2.5 py-1 rounded-full bg-emerald-100 text-emerald-900 border border-emerald-300 text-[10px] font-bold flex items-center gap-1 shadow-2xs">
+                              <Unlock className="w-3 h-3 text-emerald-700" />
+                              <span>Paper Unlocked – Ready for Printing</span>
+                            </span>
+                          )}
+                        </div>
+                      </div>
+
+                      <div className="flex flex-wrap items-center justify-between gap-2 border-t border-slate-200/80 pt-2">
+                        <div className="text-[11px] text-slate-500">
+                          {uniLock.isLocked
+                            ? 'Printing is disabled until the official unlock time.'
+                            : 'Unlocked – Paper authorized for secure viewer and print anywhere dispatch.'}
+                        </div>
+
+                        <div className="flex items-center gap-2">
+                          <button
+                            onClick={() => handleOpenSecureViewer(ex)}
+                            className="px-3.5 py-2 bg-emerald-900 hover:bg-emerald-800 text-white rounded-lg font-bold text-xs shadow-xs flex items-center gap-1.5"
+                          >
+                            <Eye className="w-3.5 h-3.5" />
+                            <span>Open Secure Paper Viewer</span>
+                          </button>
+
+                          <button
+                            onClick={() => {
+                              setPrintAnywhereExam({
+                                id: ex.id,
+                                name: ex.name,
+                                examType: 'UNIVERSITY',
+                                unlockTimeDisplay: uniLock.unlockDisplay,
+                                isUnlocked: !uniLock.isLocked,
+                              });
+                              setPrintAnywhereModalOpen(true);
+                            }}
+                            disabled={uniLock.isLocked}
+                            title={
+                              uniLock.isLocked
+                                ? `Paper Locked – Printing will be available at ${ex.unlock_time}`
+                                : 'Select centre printer and print anywhere'
+                            }
+                            className={`px-3.5 py-2 rounded-lg font-bold text-xs flex items-center gap-1.5 transition-all ${
+                              uniLock.isLocked
+                                ? 'bg-slate-200 text-slate-500 cursor-not-allowed border border-slate-300'
+                                : 'bg-indigo-700 hover:bg-indigo-600 text-white shadow-xs'
+                            }`}
+                          >
+                            {uniLock.isLocked ? <Lock className="w-3.5 h-3.5" /> : <Printer className="w-3.5 h-3.5" />}
+                            <span>{uniLock.isLocked ? 'Print Locked' : 'Print Anywhere'}</span>
+                          </button>
+                        </div>
+                      </div>
+
+                      {latestJob && (
+                        <div className="p-2.5 rounded-lg bg-indigo-50/80 border border-indigo-200 text-[11px] text-indigo-950 flex flex-wrap items-center justify-between gap-2 font-mono">
+                          <div>
+                            <strong>Exam:</strong> University – {ex.name} &nbsp;|&nbsp; <strong>Printer:</strong> {latestJob.printerName} &nbsp;|&nbsp; <strong>Status:</strong> <span className="text-emerald-700 font-bold">{latestJob.status}</span> &nbsp;|&nbsp; <strong>Printed At:</strong> {latestJob.completedAt ? new Date(latestJob.completedAt).toLocaleTimeString() : new Date(latestJob.requestedAt).toLocaleTimeString()}
+                          </div>
+                          <span className="text-indigo-700 font-bold">{latestJob.copiesCount} copy(ies)</span>
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
               </div>
             )}
           </div>
@@ -1185,29 +1350,98 @@ export const CentreOperatorWorkspace: React.FC<CentreOperatorWorkspaceProps> = (
             </p>
 
             <div className="space-y-3">
-              {releasedExams.map(ex => (
-                <div
-                  key={ex.id}
-                  className="p-4 rounded-lg bg-slate-50 border border-slate-200 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs"
-                >
-                  <div>
-                    <div className="font-bold text-slate-900">{ex.name}</div>
-                    <div className="text-[10px] text-slate-500 font-mono mt-0.5">
-                      Unlock Minute: <span className="font-bold text-emerald-900">{ex.unlock_time}</span> • Status: {ex.status}
-                    </div>
-                  </div>
+              {releasedExams.map(ex => {
+                const uniLock = getUniversityLockState(ex);
+                const latestJob = getLatestPrintAnywhereJob(ex.id);
+                return (
+                  <div
+                    key={ex.id}
+                    className="p-4 rounded-lg bg-slate-50 border border-slate-200 flex flex-col gap-3 text-xs"
+                  >
+                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                      <div>
+                        <div className="flex items-center gap-2">
+                          <span className="font-bold text-slate-900">{ex.name}</span>
+                          <span className="px-2 py-0.5 rounded bg-slate-200 text-slate-800 font-mono text-[10px] font-bold">
+                            UNIVERSITY
+                          </span>
+                        </div>
+                        <div className="text-[10px] text-slate-500 font-mono mt-0.5">
+                          Unlock Minute: <span className="font-bold text-emerald-900">{ex.unlock_time}</span> ({ex.exam_date}) • Status: {ex.status}
+                        </div>
+                      </div>
 
-                  <div className="flex gap-2">
-                    <button
-                      onClick={() => handleOpenSecureViewer(ex)}
-                      className="px-4 py-2 bg-emerald-900 hover:bg-emerald-800 text-white rounded-lg font-bold text-xs shadow-xs flex items-center gap-1.5"
-                    >
-                      <Eye className="w-3.5 h-3.5" />
-                      <span>Launch Secure Enclave Viewer</span>
-                    </button>
+                      <div className="flex items-center gap-2">
+                        {uniLock.isLocked ? (
+                          <span className="px-2.5 py-1 rounded-full bg-rose-100 text-rose-900 border border-rose-300 text-[10px] font-bold flex items-center gap-1 shadow-2xs">
+                            <Lock className="w-3 h-3 text-rose-700" />
+                            <span>Paper Locked – Printing will be available at {ex.unlock_time}</span>
+                          </span>
+                        ) : (
+                          <span className="px-2.5 py-1 rounded-full bg-emerald-100 text-emerald-900 border border-emerald-300 text-[10px] font-bold flex items-center gap-1 shadow-2xs">
+                            <Unlock className="w-3 h-3 text-emerald-700" />
+                            <span>Paper Unlocked – Ready for Printing</span>
+                          </span>
+                        )}
+                      </div>
+                    </div>
+
+                    <div className="flex flex-wrap items-center justify-between gap-2 border-t border-slate-200/80 pt-2">
+                      <div className="text-[11px] text-slate-500">
+                        {uniLock.isLocked
+                          ? 'Cryptographic time-lock active. Printing is blocked until scheduled minute.'
+                          : 'Server clock release verified. Ready for enclave viewing or multi-printer dispatch.'}
+                      </div>
+
+                      <div className="flex items-center gap-2">
+                        <button
+                          onClick={() => handleOpenSecureViewer(ex)}
+                          className="px-3.5 py-2 bg-emerald-900 hover:bg-emerald-800 text-white rounded-lg font-bold text-xs shadow-xs flex items-center gap-1.5"
+                        >
+                          <Eye className="w-3.5 h-3.5" />
+                          <span>Launch Secure Enclave Viewer</span>
+                        </button>
+
+                        <button
+                          onClick={() => {
+                            setPrintAnywhereExam({
+                              id: ex.id,
+                              name: ex.name,
+                              examType: 'UNIVERSITY',
+                              unlockTimeDisplay: uniLock.unlockDisplay,
+                              isUnlocked: !uniLock.isLocked,
+                            });
+                            setPrintAnywhereModalOpen(true);
+                          }}
+                          disabled={uniLock.isLocked}
+                          title={
+                            uniLock.isLocked
+                              ? `Paper Locked – Printing will be available at ${ex.unlock_time}`
+                              : 'Select centre printer and print anywhere'
+                          }
+                          className={`px-3.5 py-2 rounded-lg font-bold text-xs flex items-center gap-1.5 transition-all ${
+                            uniLock.isLocked
+                              ? 'bg-slate-200 text-slate-500 cursor-not-allowed border border-slate-300'
+                              : 'bg-indigo-700 hover:bg-indigo-600 text-white shadow-xs'
+                          }`}
+                        >
+                          {uniLock.isLocked ? <Lock className="w-3.5 h-3.5" /> : <Printer className="w-3.5 h-3.5" />}
+                          <span>{uniLock.isLocked ? 'Print Locked' : 'Print Anywhere'}</span>
+                        </button>
+                      </div>
+                    </div>
+
+                    {latestJob && (
+                      <div className="p-2.5 rounded-lg bg-indigo-50/80 border border-indigo-200 text-[11px] text-indigo-950 flex flex-wrap items-center justify-between gap-2 font-mono">
+                        <div>
+                          <strong>Exam:</strong> University – {ex.name} &nbsp;|&nbsp; <strong>Printer:</strong> {latestJob.printerName} &nbsp;|&nbsp; <strong>Status:</strong> <span className="text-emerald-700 font-bold">{latestJob.status}</span> &nbsp;|&nbsp; <strong>Printed At:</strong> {latestJob.completedAt ? new Date(latestJob.completedAt).toLocaleTimeString() : new Date(latestJob.requestedAt).toLocaleTimeString()}
+                        </div>
+                        <span className="text-indigo-700 font-bold">{latestJob.copiesCount} copy(ies)</span>
+                      </div>
+                    )}
                   </div>
-                </div>
-              ))}
+                );
+              })}
             </div>
           </div>
         </div>
@@ -1266,6 +1500,27 @@ export const CentreOperatorWorkspace: React.FC<CentreOperatorWorkspaceProps> = (
                 >
                   <Lock className="w-4 h-4" />
                   <span>Authorize &amp; Print Batch</span>
+                </button>
+
+                <button
+                  onClick={() => {
+                    const selExam = releasedExams.find(exam => exam.id === selectedExamId);
+                    if (!selExam) return;
+                    const uniLock = getUniversityLockState(selExam);
+                    setPrintAnywhereExam({
+                      id: selExam.id,
+                      name: selExam.name,
+                      examType: 'UNIVERSITY',
+                      unlockTimeDisplay: uniLock.unlockDisplay,
+                      isUnlocked: !uniLock.isLocked,
+                    });
+                    setPrintAnywhereModalOpen(true);
+                  }}
+                  disabled={!selectedExamId}
+                  className="px-5 py-2 bg-indigo-700 hover:bg-indigo-600 disabled:opacity-40 text-white rounded-lg font-bold text-xs shadow-xs flex items-center gap-1.5"
+                >
+                  <Printer className="w-4 h-4" />
+                  <span>Print Anywhere</span>
                 </button>
               </div>
             </div>
@@ -1425,6 +1680,25 @@ export const CentreOperatorWorkspace: React.FC<CentreOperatorWorkspaceProps> = (
             setStatusMessage({ type: 'success', text: message });
             loadData();
             onRefresh();
+          }}
+        />
+      )}
+
+      {/* Print Anywhere Modal */}
+      {printAnywhereModalOpen && printAnywhereExam && (
+        <PrinterSelectModal
+          isOpen={printAnywhereModalOpen}
+          onClose={() => setPrintAnywhereModalOpen(false)}
+          exam={printAnywhereExam}
+          centreId={currentUser?.centre_id}
+          operatorName={currentUser?.name}
+          onPrintSuccess={job => {
+            loadPrintAnywhereJobs();
+            setStatusMessage({
+              type: 'success',
+              text: `Paper "${job.examName}" dispatched and printed successfully on ${job.printerName} (${job.copiesCount} copy/copies).`,
+            });
+            loadData();
           }}
         />
       )}

@@ -1224,9 +1224,64 @@ export interface UniversityFinalPaperResponse {
   };
 }
 
+export type PrinterStatus = 'ONLINE' | 'OFFLINE';
 
+export type PrintJobStatus =
+  | 'PRINT_REQUESTED'
+  | 'PRINTING'
+  | 'PRINTED_SUCCESSFULLY'
+  | 'PRINT_FAILED'
+  | 'PRINTER_OFFLINE'
+  | 'PRINTER_NOT_AVAILABLE';
 
+export interface PrinterItem {
+  id: string;
+  name: string;
+  location: string;
+  type: string;
+  status: PrinterStatus;
+  isDefault?: boolean;
+  centreId?: string;
+}
 
+export interface PrintAnywhereJob {
+  id: string;
+  examId: string;
+  examName: string;
+  examType: 'UNIVERSITY' | 'COMPETITIVE';
+  paperId: string;
+  centreId: string;
+  centreName: string;
+  operatorId: string;
+  operatorName: string;
+  printerId: string;
+  printerName: string;
+  printerLocation: string;
+  status: PrintJobStatus;
+  unlockTime: string;
+  requestedAt: string;
+  completedAt?: string | null;
+  failureReason?: string | null;
+  copiesCount: number;
+  txHash?: string | null;
+  createdAt: string;
+}
 
+export interface PrintAnywhereRequest {
+  exam_type: 'UNIVERSITY' | 'COMPETITIVE';
+  exam_id: string;
+  paper_id?: string;
+  printer_id: string;
+  copies_count?: number;
+}
 
+export interface PrintAnywhereResponse {
+  message: string;
+  job: PrintAnywhereJob;
+  examName: string;
+  printerName: string;
+  status: string;
+  printedAt: string;
+  txHash: string;
+}
 

@@ -25,6 +25,7 @@ import {
 import { User, Organization, OrganizationDocument, TrustedDevice, SecurityEvent } from '../../types';
 import { api, getDeviceFingerprint, performFullLogin } from '../../api';
 import { NavSubTab } from '../Sidebar';
+import { PrintAnywhereMonitorSection } from '../PrintAnywhereMonitorSection';
 
 interface OrgOwnerWorkspaceProps {
   currentUser: User | null;
@@ -579,6 +580,9 @@ export const OrgOwnerWorkspace: React.FC<OrgOwnerWorkspaceProps> = ({
               </div>
             </div>
           </div>
+
+          {/* Institutional Print Anywhere Status Monitoring */}
+          <PrintAnywhereMonitorSection variant="OWNER" />
         </div>
       )}
 

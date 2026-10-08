@@ -841,6 +841,30 @@ function initializeSchema(db: Database) {
       tx_hash TEXT NOT NULL
     );
 
+    -- Print Anywhere Jobs (Secure Multi-Printer Dispatch Ledger)
+    CREATE TABLE IF NOT EXISTS print_anywhere_jobs (
+      id TEXT PRIMARY KEY,
+      exam_id TEXT NOT NULL,
+      exam_name TEXT NOT NULL,
+      exam_type TEXT NOT NULL,
+      paper_id TEXT NOT NULL,
+      centre_id TEXT NOT NULL,
+      centre_name TEXT,
+      operator_id TEXT NOT NULL,
+      operator_name TEXT NOT NULL,
+      printer_id TEXT NOT NULL,
+      printer_name TEXT NOT NULL,
+      printer_location TEXT,
+      status TEXT NOT NULL,
+      unlock_time TEXT,
+      requested_at TEXT NOT NULL,
+      completed_at TEXT,
+      failure_reason TEXT,
+      copies_count INTEGER DEFAULT 1,
+      tx_hash TEXT,
+      created_at TEXT NOT NULL
+    );
+
     -- Audit Events (Immutable Security Log)
     CREATE TABLE IF NOT EXISTS audit_events (
       id TEXT PRIMARY KEY,

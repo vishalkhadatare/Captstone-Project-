@@ -41,6 +41,10 @@ import {
   DraftPaper,
   UniversityDraftQuestion,
   IngestDraftPapersResponse,
+  PrinterItem,
+  PrintAnywhereJob,
+  PrintAnywhereRequest,
+  PrintAnywhereResponse,
 } from './types';
 
 export const DEVICE_APPROVAL_EVENT = 'zeroleak:device-approval-needed';
@@ -1112,6 +1116,30 @@ export const api = {
       body: JSON.stringify({ exam_id, paper_version_id, copies_count, security_token, security_code }),
     }),
   getPrintHistory: () => request<{ printHistory: PrintCopy[] }>('/api/delivery/print-history'),
+
+  // Print Anywhere (Secure Multi-Printer Enclave Dispatch)
+  getPrinters: () => request<{ printers: PrinterItem[] }>('/api/printers'),
+  getPrintAnywhereJobs: (params?: { exam_id?: string; centre_id?: string; exam_type?: string; limit?: number }) => {
+    const query = new URLSearchParams();
+    if (params?.exam_id) query.set('exam_id', params.exam_id);
+    if (params?.centre_id) query.set('centre_id', params.centre_id);
+    if (params?.exam_type) query.set('exam_type', params.exam_type);
+    if (params?.limit) query.set('limit', String(params.limit));
+    const qs = query.toString();
+    return request<{ jobs: PrintAnywhereJob[] }>(`/api/delivery/print-anywhere/jobs${qs ? `?${qs}` : ''}`);
+  },
+  getPrintAnywhereStatus: (examId: string) =>
+    request<{ job: PrintAnywhereJob | null }>(`/api/delivery/print-anywhere/status/${encodeURIComponent(examId)}`),
+  notifyPaperUnlocked: (exam_id: string, exam_type: 'UNIVERSITY' | 'COMPETITIVE') =>
+    request<{ success: boolean; message: string }>('/api/delivery/print-anywhere/notify-unlocked', {
+      method: 'POST',
+      body: JSON.stringify({ exam_id, exam_type }),
+    }),
+  executePrintAnywhere: (payload: PrintAnywhereRequest) =>
+    request<PrintAnywhereResponse>('/api/delivery/print-anywhere', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    }),
 
   // Wi-Fi Secure Print Relay: print from any device on the centre's network
   getPrintRelays: () =>

@@ -183,7 +183,22 @@ import { handleGenerateFinalUniversityPaper, handleGetUniversityAuditLogs, handl
 import {
   initializeCompetitiveSchema,
   registerCompetitiveExamRoutes,
+  evaluatePaperEncryptionState,
+  decryptCompetitivePaperData,
+  logCompetitivePaperAudit,
 } from './server/competitiveExam.ts';
+import {
+  DEFAULT_CENTRE_PRINTERS,
+  getAvailablePrinters,
+  getPrinterById,
+  createPrintAnywhereJob,
+  updatePrintAnywhereJob,
+  getPrintAnywhereJobs,
+  getLatestPrintAnywhereJobForExam,
+  initPrintAnywhereSchema,
+  type PrinterDevice,
+  type PrintAnywhereJobRecord,
+} from './server/printerService.ts';
 
 const configuredJwtSecret = process.env.JWT_SECRET;
 if (process.env.NODE_ENV === 'production' && (!configuredJwtSecret || configuredJwtSecret.length < 32)) {
@@ -10503,6 +10518,462 @@ async function startServer() {
       return res.json({ printHistory: history });
     } catch (e: any) {
       return res.status(500).json({ error: e.message });
+    }
+  });
+
+  // =========================================================================
+  // 7A-2. PRINT ANYWHERE FEATURE (SECURE MULTI-PRINTER ENCLAVE DISPATCH)
+  // Supports both University Examination & Competitive Examination.
+  // Gated by server-side unlock time, authentication, decryption verification,
+  // online printer validation, serialized copy logging, audit ledger, and notifications.
+  // =========================================================================
+
+  // Get Available Centre Printers
+  app.get('/api/printers', authenticateToken, async (req: Request, res: Response) => {
+    try {
+      const printers = getAvailablePrinters(req.user?.centre_id);
+      return res.json({ printers });
+    } catch (e: any) {
+      return res.status(500).json({ error: e.message || 'Failed to list centre printers.' });
+    }
+  });
+
+  // Get Print Anywhere Jobs (Monitoring for Centre Operator, Controller, Owner)
+  app.get('/api/delivery/print-anywhere/jobs', authenticateToken, async (req: Request, res: Response) => {
+    try {
+      const db = await getDb();
+      const examId = req.query.exam_id ? String(req.query.exam_id) : undefined;
+      const centreId = req.query.centre_id ? String(req.query.centre_id) : undefined;
+      const examType = req.query.exam_type ? String(req.query.exam_type) : undefined;
+      const limit = req.query.limit ? Number(req.query.limit) : 100;
+
+      const jobs = getPrintAnywhereJobs(db, {
+        examId,
+        centreId,
+        examType,
+        limit,
+      });
+
+      return res.json({ jobs });
+    } catch (e: any) {
+      return res.status(500).json({ error: e.message || 'Failed to load print anywhere jobs.' });
+    }
+  });
+
+  // Get Latest Print Anywhere Job Status for a Specific Exam/Paper
+  app.get('/api/delivery/print-anywhere/status/:examId', authenticateToken, async (req: Request, res: Response) => {
+    try {
+      const db = await getDb();
+      const job = getLatestPrintAnywhereJobForExam(db, req.params.examId);
+      return res.json({ job });
+    } catch (e: any) {
+      return res.status(500).json({ error: e.message || 'Failed to retrieve print status.' });
+    }
+  });
+
+  // Notify Authorized Controller when Exam Paper is Unlocked and Ready for Printing
+  app.post('/api/delivery/print-anywhere/notify-unlocked', authenticateToken, requireApprovedDevice, requireRole(['CENTRE_OPERATOR', 'EXAM_MANAGER']), async (req: Request, res: Response) => {
+    try {
+      const db = await getDb();
+      const { exam_id, exam_type } = req.body || {};
+      const isCompetitive = exam_type?.toUpperCase() === 'COMPETITIVE';
+      let examName = 'Examination Paper';
+
+      if (isCompetitive) {
+        const comp = executeQuery(db, 'SELECT title FROM competitive_generated_papers WHERE id = ? OR exam_id = ?', [exam_id, exam_id])[0];
+        if (comp?.title) examName = comp.title;
+      } else {
+        const exam = executeQuery(db, 'SELECT name FROM examinations WHERE id = ?', [exam_id])[0];
+        if (exam?.name) examName = exam.name;
+      }
+
+      await createNotification({
+        role: 'EXAM_MANAGER',
+        org_id: req.user!.org_id,
+        title: 'Paper Unlocked – Ready for Printing',
+        message: `${isCompetitive ? 'Competitive' : 'University'} exam paper "${examName}" is unlocked and ready for printing.`,
+        category: 'PAPER_RELEASE',
+      });
+
+      return res.json({ success: true, message: 'Unlock notification transmitted.' });
+    } catch (e: any) {
+      return res.status(500).json({ error: e.message });
+    }
+  });
+
+  // Execute Print Anywhere Job
+  app.post('/api/delivery/print-anywhere', authenticateToken, requireApprovedDevice, requireRole(['CENTRE_OPERATOR', 'EXAM_MANAGER']), async (req: Request, res: Response) => {
+    try {
+      const db = await getDb();
+      const {
+        exam_type,
+        exam_id,
+        paper_id,
+        printer_id,
+        copies_count,
+      } = req.body || {};
+
+      const count = Math.max(1, Math.min(50, Number(copies_count) || 1));
+      const centreId = req.user!.centre_id || 'CTR-101';
+      const centreName = req.user!.centre_id ? `Centre ${req.user!.centre_id}` : 'Main Centre Enclave';
+
+      if (!exam_id) {
+        return res.status(400).json({ error: 'Exam ID is required for Print Anywhere.' });
+      }
+      if (!printer_id) {
+        return res.status(400).json({ error: 'Printer selection is required.' });
+      }
+
+      // 1. Verify Printer Status
+      const printer = getPrinterById(printer_id, centreId);
+      if (!printer) {
+        return res.status(400).json({
+          error: 'Printer Not Available: The chosen printer was not found at this centre.',
+          status: 'PRINTER_NOT_AVAILABLE',
+        });
+      }
+      if (printer.status !== 'ONLINE') {
+        return res.status(400).json({
+          error: `Printer Offline: "${printer.name}" is currently offline. Please select an active online printer.`,
+          status: 'PRINTER_OFFLINE',
+        });
+      }
+
+      const isCompetitive = exam_type?.toUpperCase() === 'COMPETITIVE';
+      let examName = '';
+      let resolvedPaperId = paper_id || exam_id;
+      let unlockTimeDisplay = '';
+
+      if (isCompetitive) {
+        const compRows = executeQuery(
+          db,
+          'SELECT * FROM competitive_generated_papers WHERE id = ? OR exam_id = ?',
+          [resolvedPaperId, exam_id]
+        );
+        if (!compRows || compRows.length === 0) {
+          return res.status(404).json({ error: 'Competitive examination paper not found.' });
+        }
+        const compRow = compRows[0];
+        examName = compRow.title || 'Competitive Examination';
+        resolvedPaperId = compRow.id;
+
+        const encState = evaluatePaperEncryptionState(db, compRow);
+        unlockTimeDisplay = encState.decryptionTimeDisplay;
+
+        if (!encState.isFinalized) {
+          return res.status(400).json({ error: 'Competitive examination paper is not finalized for printing yet.' });
+        }
+
+        // STRICT TIME-LOCK CHECK
+        const unlockMs = compRow.decryption_time_iso ? new Date(compRow.decryption_time_iso).getTime() : NaN;
+        if (isNaN(unlockMs) || encState.serverTimestampMs < unlockMs) {
+          logCompetitivePaperAudit(db, {
+            paperId: compRow.id,
+            examId: compRow.exam_id,
+            orgId: compRow.org_id,
+            actionType: 'PRE_UNLOCK_PRINT_BLOCKED',
+            userId: req.user?.id,
+            userName: req.user?.full_name || 'Centre Operator',
+            userEmail: req.user?.email,
+            userRole: req.user?.role || 'CENTRE_OPERATOR',
+            ipAddress: req.ip,
+            timezone: compRow.schedule_timezone || 'Asia/Kolkata (IST, UTC+05:30)',
+            status: 'BLOCKED',
+            details: {
+              message: `Print Anywhere blocked pre-unlock before ${encState.decryptionTimeDisplay}.`,
+              printer: printer.name,
+              unlockTime: encState.decryptionTimeDisplay,
+            },
+          });
+
+          return res.status(403).json({
+            error: `Paper Locked – Printing will be available at ${encState.decryptionTimeDisplay}`,
+            locked: true,
+            status: 'PAPER_LOCKED',
+            unlockTime: encState.decryptionTimeDisplay,
+          });
+        }
+
+        // Paper Decryption Verification
+        if (compRow.encrypted_payload_json) {
+          try {
+            const encRecord = JSON.parse(compRow.encrypted_payload_json);
+            decryptCompetitivePaperData(encRecord);
+          } catch (decErr: any) {
+            return res.status(500).json({ error: `Decryption verification failed: ${decErr.message}` });
+          }
+        }
+      } else {
+        // University Examination
+        const uniExams = executeQuery(
+          db,
+          'SELECT * FROM examinations WHERE id = ? AND org_id = ?',
+          [exam_id, req.user!.org_id]
+        );
+        if (!uniExams || uniExams.length === 0) {
+          return res.status(404).json({ error: 'University examination not found.' });
+        }
+        const uniExam = uniExams[0];
+        examName = uniExam.name;
+        unlockTimeDisplay = uniExam.unlock_time || '10:00 AM';
+
+        const now = new Date();
+        const unlockDateTime = new Date(`${uniExam.exam_date}T${uniExam.unlock_time}:00`);
+        const isUnlocked = isNaN(unlockDateTime.getTime()) ? true : now >= unlockDateTime;
+
+        if (!isUnlocked && req.user!.role === 'CENTRE_OPERATOR') {
+          await logSecurityEvent({
+            event_type: 'PRE_UNLOCK_PRINT_ANYWHERE_ATTEMPT',
+            severity: 'CRITICAL',
+            user_id: req.user!.id,
+            org_id: req.user!.org_id,
+            ip_address: req.ip,
+            details: {
+              exam_id,
+              scheduledUnlock: uniExam.unlock_time,
+              attemptTime: now.toISOString(),
+              printer: printer.name,
+            },
+          });
+
+          return res.status(403).json({
+            error: `Paper Locked – Printing will be available at ${uniExam.unlock_time} on ${uniExam.exam_date}`,
+            locked: true,
+            status: 'PAPER_LOCKED',
+            unlockTime: uniExam.unlock_time,
+          });
+        }
+
+        // Validate paper version & decryption
+        const versions = executeQuery(
+          db,
+          'SELECT * FROM paper_versions WHERE exam_id = ? AND is_current = 1',
+          [uniExam.id]
+        );
+        if (versions.length === 0) {
+          return res.status(404).json({ error: 'No generated examination paper found for this exam.' });
+        }
+        const paperVersion = versions[0];
+        resolvedPaperId = paperVersion.id;
+
+        if (paperVersion.status === 'INVALIDATED' || paperVersion.status === 'COMPROMISED') {
+          return res.status(403).json({ error: 'This paper version has been permanently INVALIDATED.' });
+        }
+
+        const encryptedData = executeQuery(
+          db,
+          'SELECT * FROM encrypted_papers WHERE paper_version_id = ?',
+          [paperVersion.id]
+        )[0];
+        if (!encryptedData) {
+          return res.status(404).json({ error: 'Encrypted paper payload not found.' });
+        }
+
+        try {
+          decryptExamPaper({
+            cipherText: encryptedData.aes_cipher_text,
+            iv: encryptedData.iv_hex,
+            authTag: encryptedData.auth_tag_hex,
+            encryptedKeyRSA: encryptedData.encrypted_aes_key_rsa,
+            keyFingerprint: encryptedData.key_fingerprint,
+            checksumSHA256: encryptedData.checksum_sha256,
+            timestamp: encryptedData.encrypted_at,
+          });
+        } catch (decErr: any) {
+          return res.status(500).json({ error: `Decryption verification failed: ${decErr.message}` });
+        }
+
+        // Validate quota
+        const centreRow = executeQuery(
+          db,
+          'SELECT * FROM examination_centres WHERE exam_id = ? AND (id = ? OR centre_code = ? OR operator_user_id = ?)',
+          [uniExam.id, centreId, centreId, req.user!.id]
+        )[0];
+        const managerAuthorized = Number(uniExam.max_copies || 500);
+        const centreAuthorized = centreRow ? Number(centreRow.max_copies || 100) : 100;
+        const finalAllowedCopies = Math.min(managerAuthorized, centreAuthorized);
+        const totalPrinted = Number(
+          executeQuery(db, 'SELECT COUNT(*) as cnt FROM print_copies WHERE exam_id = ?', [exam_id])[0]?.cnt || 0
+        );
+        if (totalPrinted + count > finalAllowedCopies) {
+          return res.status(403).json({
+            error: `Print quota exceeded. Allowed: ${finalAllowedCopies}, Printed: ${totalPrinted}, Requested: ${count}.`,
+          });
+        }
+      }
+
+      // 2. Create Initial Print Job Record (PRINT_REQUESTED)
+      const job = createPrintAnywhereJob(db, {
+        examId: exam_id,
+        examName,
+        examType: isCompetitive ? 'COMPETITIVE' : 'UNIVERSITY',
+        paperId: resolvedPaperId,
+        centreId,
+        centreName,
+        operatorId: req.user!.id,
+        operatorName: req.user!.full_name || 'Centre Operator',
+        printerId: printer.id,
+        printerName: printer.name,
+        printerLocation: printer.location,
+        status: 'PRINT_REQUESTED',
+        unlockTime: unlockTimeDisplay,
+        copiesCount: count,
+      });
+
+      // Emit Notification: Print Started
+      await createNotification({
+        role: 'EXAM_MANAGER',
+        org_id: req.user!.org_id,
+        title: 'Print Anywhere Started',
+        message: `${examName} (${isCompetitive ? 'Competitive' : 'University'}) printing has started on "${printer.name}" at ${centreName}.`,
+        category: 'EXAMINATION',
+      });
+      await createNotification({
+        role: 'ORG_OWNER',
+        org_id: req.user!.org_id,
+        title: 'Print Anywhere Started',
+        message: `${examName} (${isCompetitive ? 'Competitive' : 'University'}) printing has started on "${printer.name}" at ${centreName}.`,
+        category: 'EXAMINATION',
+      });
+
+      // 3. Dispatch & Record Printed Copies
+      const nowIso = new Date().toISOString();
+      let txHash = '';
+
+      if (isCompetitive) {
+        const compRows = executeQuery(
+          db,
+          'SELECT * FROM competitive_generated_papers WHERE id = ?',
+          [resolvedPaperId]
+        );
+        const compRow = compRows[0];
+        const newPrintCount = Number(compRow.print_count || 0) + count;
+
+        executeRun(
+          db,
+          `UPDATE competitive_generated_papers
+           SET encryption_status = 'PRINTED',
+               printed_at = ?,
+               printed_by = ?,
+               printed_by_name = ?,
+               print_count = ?
+           WHERE id = ?`,
+          [nowIso, req.user!.id, req.user!.full_name, newPrintCount, resolvedPaperId]
+        );
+
+        const copyId = `COMP-PRN-${String(newPrintCount).padStart(4, '0')}`;
+        const auditEntry = logCompetitivePaperAudit(db, {
+          paperId: resolvedPaperId,
+          examId: compRow.exam_id,
+          orgId: compRow.org_id,
+          actionType: 'PAPER_PRINTED',
+          userId: req.user?.id,
+          userName: req.user?.full_name || 'Centre Operator',
+          userEmail: req.user?.email,
+          userRole: req.user?.role || 'CENTRE_OPERATOR',
+          ipAddress: req.ip,
+          timezone: compRow.schedule_timezone || 'Asia/Kolkata (IST, UTC+05:30)',
+          status: 'SUCCESS',
+          details: {
+            message: `Print Anywhere executed on ${printer.name} (${count} copy/copies, Serial: ${copyId}).`,
+            printerId: printer.id,
+            printerName: printer.name,
+            printerLocation: printer.location,
+            copyId,
+            copiesPrinted: count,
+            serverTimeIso: nowIso,
+          },
+        });
+        txHash = auditEntry.txHash;
+
+        try {
+          executeRun(
+            db,
+            `INSERT INTO print_copies (id, copy_id, exam_id, paper_version_id, centre_id, operator_user_id, device_id, printed_at, status, tx_hash)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'PRINTED', ?)`,
+            [uuidv4(), copyId, compRow.exam_id, resolvedPaperId, centreId, req.user!.id, printer.name, nowIso, txHash]
+          );
+        } catch {}
+      } else {
+        const totalPrinted = Number(
+          executeQuery(db, 'SELECT COUNT(*) as cnt FROM print_copies WHERE exam_id = ?', [exam_id])[0]?.cnt || 0
+        );
+        const generatedCopies = await insertPrintCopies({
+          examId: exam_id,
+          paperVersionId: resolvedPaperId,
+          centreId,
+          operatorUserId: req.user!.id,
+          deviceId: printer.name,
+          count,
+          startIndex: totalPrinted,
+        });
+        txHash = generatedCopies[0]?.txHash || generateTxHash(exam_id + nowIso);
+      }
+
+      // 4. Update Job: PRINTED_SUCCESSFULLY
+      const updatedJob = updatePrintAnywhereJob(db, job.id, {
+        status: 'PRINTED_SUCCESSFULLY',
+        completedAt: nowIso,
+        txHash,
+      });
+
+      // 5. Immutable Audit Log
+      await logAuditEvent({
+        event_type: 'PRINT_ANYWHERE_SUCCESS',
+        user_id: req.user!.id,
+        user_email: req.user!.email,
+        role: req.user!.role,
+        org_id: req.user!.org_id,
+        exam_id,
+        device_id: printer.id,
+        ip_address: req.ip,
+        status: 'SUCCESS',
+        details: {
+          examId: exam_id,
+          examName,
+          examType: isCompetitive ? 'COMPETITIVE' : 'UNIVERSITY',
+          paperId: resolvedPaperId,
+          printerId: printer.id,
+          printerName: printer.name,
+          printerLocation: printer.location,
+          copiesCount: count,
+          unlockTime: unlockTimeDisplay,
+          printedAt: nowIso,
+          txHash,
+        },
+      });
+
+      // 6. Emit Completion Notifications
+      await createNotification({
+        role: 'EXAM_MANAGER',
+        org_id: req.user!.org_id,
+        title: 'Exam Paper Printed Successfully',
+        message: `${examName} was printed successfully on "${printer.name}" at ${centreName}.`,
+        category: 'EXAMINATION',
+      });
+      await createNotification({
+        role: 'ORG_OWNER',
+        org_id: req.user!.org_id,
+        title: 'Exam Paper Printed Successfully',
+        message: `${examName} (${isCompetitive ? 'Competitive' : 'University'}) was printed successfully on "${printer.name}" at ${centreName}.`,
+        category: 'EXAMINATION',
+      });
+
+      return res.json({
+        message: `Paper successfully printed on ${printer.name}.`,
+        job: updatedJob,
+        examName,
+        printerName: printer.name,
+        status: 'PRINTED_SUCCESSFULLY',
+        printedAt: nowIso,
+        txHash,
+      });
+    } catch (err: any) {
+      console.error('Print Anywhere execution failure:', err);
+      return res.status(500).json({
+        error: err.message || 'Internal error executing Print Anywhere job.',
+        status: 'PRINT_FAILED',
+      });
     }
   });
 

@@ -61,6 +61,7 @@ import { QuestionPaperPdfModal } from './QuestionPaperPdfModal';
 import { UniversityFormatGenerator } from './UniversityFormatGenerator';
 import { PaperGenerationModule } from '../PaperGenerationModule';
 import { CompetitiveExaminationUnifiedWorkflow } from '../competitive/CompetitiveExaminationUnifiedWorkflow';
+import { PrintAnywhereMonitorSection } from '../PrintAnywhereMonitorSection';
 import {
   DashboardHeader,
   SecurityStatusBar,
@@ -1043,6 +1044,9 @@ export const ExamManagerWorkspace: React.FC<ExamManagerWorkspaceProps> = ({
             isGenerating={generating}
             isOrgVerified={org?.status === 'VERIFIED'}
           />
+
+          {/* 5B. Live Print Anywhere & Enclave Dispatch Monitoring */}
+          <PrintAnywhereMonitorSection variant="CONTROLLER" />
 
           {/* 6. Security Activity (Dark Navy) */}
           <SecurityActivity />
