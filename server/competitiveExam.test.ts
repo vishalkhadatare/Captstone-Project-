@@ -13,7 +13,9 @@ import {
   selectCompetitiveQuestionsWithVisualBinding,
   validateCompetitivePaperVisuals,
   generateCompetitiveExamPdfBuffer,
+  handleDeleteCompetitiveExam,
 } from './competitiveExam.ts';
+import { getDb, executeQuery, executeRun } from './db.ts';
 
 test('1. parseQuestionsFromRawText extracts real questions with MCQ options and marks', () => {
   const samplePdfText = `
@@ -756,6 +758,52 @@ test('10. Pre-PDF validation catches missing visuals and generateCompetitiveExam
   assert.ok(pdfBuffer.length > 1000, 'Generated PDF buffer must be non-empty');
   assert.equal(pdfBuffer.subarray(0, 5).toString('ascii'), '%PDF-', 'Generated buffer must have %PDF- header');
 });
+
+test('11. handleDeleteCompetitiveExam cascades deletion across all competitive and examination tables', async () => {
+  const db = await getDb();
+  const testExamId = 'test-delete-exam-' + Date.now();
+  const orgId = 'ORG-TEST-DEL';
+
+  // Seed test records across tables
+  executeRun(db, 'INSERT INTO competitive_exams (id, org_id, name, exam_type, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)', [
+    testExamId, orgId, 'Test To Delete', 'Competitive Examination', new Date().toISOString(), new Date().toISOString(),
+  ]);
+  executeRun(db, `INSERT INTO examinations (id, org_id, name, subject, category, exam_type, exam_date, exam_time, unlock_time, created_by, created_at, updated_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, [
+    testExamId, orgId, 'Test To Delete', 'Physics', 'Competitive Examination', 'MCQ', '2026-10-10', '10:00 AM', '09:45 AM', 'admin', new Date().toISOString(), new Date().toISOString(),
+  ]);
+  executeRun(db, 'INSERT INTO competitive_questions (id, org_id, exam_id, subject, question_text, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)', [
+    'cq-' + testExamId, orgId, testExamId, 'Physics', 'Sample question?', new Date().toISOString(), new Date().toISOString(),
+  ]);
+
+  // Verify inserted
+  assert.equal(executeQuery(db, 'SELECT id FROM competitive_exams WHERE id = ?', [testExamId]).length, 1);
+  assert.equal(executeQuery(db, 'SELECT id FROM examinations WHERE id = ?', [testExamId]).length, 1);
+  assert.equal(executeQuery(db, 'SELECT id FROM competitive_questions WHERE exam_id = ?', [testExamId]).length, 1);
+
+  // Invoke delete handler
+  let jsonResult: any = null;
+  let statusCode = 200;
+  const mockReq: any = {
+    params: { id: testExamId },
+    user: { id: 'admin', org_id: orgId, role: 'EXAM_MANAGER' },
+  };
+  const mockRes: any = {
+    status(code: number) { statusCode = code; return this; },
+    json(data: any) { jsonResult = data; return this; },
+  };
+
+  await handleDeleteCompetitiveExam(mockReq, mockRes);
+  assert.equal(statusCode, 200);
+  assert.equal(jsonResult.success, true);
+  assert.equal(jsonResult.deletedExamId, testExamId);
+
+  // Verify cascaded deletion
+  assert.equal(executeQuery(db, 'SELECT id FROM competitive_exams WHERE id = ?', [testExamId]).length, 0);
+  assert.equal(executeQuery(db, 'SELECT id FROM examinations WHERE id = ?', [testExamId]).length, 0);
+  assert.equal(executeQuery(db, 'SELECT id FROM competitive_questions WHERE exam_id = ?', [testExamId]).length, 0);
+});
+
 
 
 

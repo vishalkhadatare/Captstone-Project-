@@ -8,7 +8,7 @@ import { promisify } from 'node:util';
 import { v4 as uuidv4 } from 'uuid';
 import PDFDocument from 'pdfkit';
 import pdfParse from 'pdf-parse/lib/pdf-parse.js';
-import { getDb, executeQuery, executeRun, getPostgresPool, isPostgresAvailable } from './db.ts';
+import { getDb, executeQuery, executeRun, getPostgresPool, isPostgresAvailable, saveDb } from './db.ts';
 import { translateQuestionWithAI, extractQuestionsFromPaperWithAI } from './ai.ts';
 import { extractPdfTextWithOcr } from './ocrPdfHelper.ts';
 import { consumeViewOnceSession } from './viewOnceService.ts';
@@ -2850,6 +2850,79 @@ export async function handleSaveCompetitiveExam(req: Request, res: Response) {
   } catch (err: any) {
     console.error('handleSaveCompetitiveExam error:', err);
     return res.status(500).json({ error: err.message || 'Failed to save examination.' });
+  }
+}
+
+// 2B. DELETE /api/competitive/exams/:id (Safely Delete Old / Test Competitive Exam)
+export async function handleDeleteCompetitiveExam(req: Request, res: Response) {
+  try {
+    const db = await getDb();
+    const orgId = req.user?.org_id || 'ORG-DEV-001';
+    const examId = req.params.id;
+
+    if (!examId) {
+      return res.status(400).json({ error: 'Exam ID is required.' });
+    }
+
+    // Verify it exists in competitive_exams for this org
+    const existing = executeQuery(
+      db,
+      'SELECT id, name FROM competitive_exams WHERE id = ? AND org_id = ?',
+      [examId, orgId]
+    );
+
+    if (!existing || existing.length === 0) {
+      return res.status(404).json({ error: 'Competitive Examination not found or already deleted.' });
+    }
+
+    // Clean dependent records
+    executeRun(db, 'DELETE FROM competitive_questions WHERE exam_id = ?', [examId]);
+    executeRun(db, 'DELETE FROM competitive_question_pool_files WHERE exam_id = ?', [examId]);
+    executeRun(db, 'DELETE FROM competitive_question_pools WHERE exam_id = ?', [examId]);
+    executeRun(db, 'DELETE FROM competitive_generated_papers WHERE exam_id = ?', [examId]);
+    executeRun(db, 'DELETE FROM view_once_preview_sessions WHERE exam_id = ?', [examId]);
+    executeRun(db, 'DELETE FROM print_anywhere_jobs WHERE exam_id = ?', [examId]);
+    executeRun(db, 'DELETE FROM examination_configurations WHERE exam_id = ?', [examId]);
+    executeRun(db, 'DELETE FROM examination_centres WHERE exam_id = ?', [examId]);
+    executeRun(db, 'DELETE FROM paper_versions WHERE exam_id = ?', [examId]);
+    executeRun(db, 'DELETE FROM encrypted_papers WHERE exam_id = ?', [examId]);
+    executeRun(db, 'DELETE FROM generated_papers WHERE exam_id = ?', [examId]);
+
+    // Delete from primary tables
+    executeRun(db, 'DELETE FROM competitive_exams WHERE id = ? AND org_id = ?', [examId, orgId]);
+    executeRun(db, 'DELETE FROM examinations WHERE id = ? AND org_id = ?', [examId, orgId]);
+
+    // Clean visual crops on disk
+    try {
+      const visualDir = path.join(process.cwd(), 'public', 'competitive_visuals', examId);
+      if (fs.existsSync(visualDir)) {
+        fs.rmSync(visualDir, { recursive: true, force: true });
+      }
+    } catch {}
+
+    // Synchronize to PostgreSQL if available
+    const pg = getPostgresPool();
+    if (pg && isPostgresAvailable()) {
+      try {
+        await pg.query('DELETE FROM competitive_questions WHERE exam_id = $1 AND org_id = $2', [examId, orgId]);
+        await pg.query('DELETE FROM competitive_question_pool_files WHERE exam_id = $1 AND org_id = $2', [examId, orgId]);
+        await pg.query('DELETE FROM competitive_question_pools WHERE exam_id = $1 AND org_id = $2', [examId, orgId]);
+        await pg.query('DELETE FROM competitive_generated_papers WHERE exam_id = $1 AND org_id = $2', [examId, orgId]);
+        await pg.query('DELETE FROM competitive_exams WHERE id = $1 AND org_id = $2', [examId, orgId]);
+        await pg.query('DELETE FROM examinations WHERE id = $1 AND org_id = $2', [examId, orgId]);
+      } catch {}
+    }
+
+    saveDb();
+
+    return res.json({
+      success: true,
+      message: `Examination "${existing[0].name}" (${examId}) deleted successfully.`,
+      deletedExamId: examId,
+    });
+  } catch (err: any) {
+    console.error('handleDeleteCompetitiveExam error:', err);
+    return res.status(500).json({ error: err.message || 'Failed to delete competitive exam.' });
   }
 }
 
@@ -6960,6 +7033,7 @@ export function registerCompetitiveExamRoutes(
   app.get('/api/competitive/papers/:paperId/pdf', authenticateToken, handleDownloadCompetitivePaperPdf);
   app.get('/api/competitive/exams', authenticateToken, handleGetCompetitiveExams);
   app.post('/api/competitive/exams', authenticateToken, requireRole(['EXAM_MANAGER', 'ORG_OWNER']), handleSaveCompetitiveExam);
+  app.delete('/api/competitive/exams/:id', authenticateToken, requireRole(['EXAM_MANAGER', 'ORG_OWNER']), handleDeleteCompetitiveExam);
   app.post('/api/competitive/upload-subject-pdf', authenticateToken, requireRole(['EXAM_MANAGER', 'ORG_OWNER']), handleUploadSubjectPdf);
   app.get('/api/competitive/pool-files/:examId/:subjectId', authenticateToken, handleGetSubjectPoolFiles);
   app.get('/api/competitive/question-pools/:examId', authenticateToken, handleGetQuestionPools);

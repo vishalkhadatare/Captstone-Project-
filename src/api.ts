@@ -1550,6 +1550,10 @@ export const api = {
         method: 'POST',
         body: JSON.stringify(payload),
       }),
+    deleteExam: (id: string) =>
+      request<{ success: boolean; message: string; deletedExamId?: string }>(`/api/competitive/exams/${encodeURIComponent(id)}`, {
+        method: 'DELETE',
+      }),
     uploadSubjectPdf: (payload: {
       exam_id: string;
       subject_id?: string;

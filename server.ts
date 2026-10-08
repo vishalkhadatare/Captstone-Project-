@@ -11870,7 +11870,7 @@ async function startServer() {
         operatorUserId: operator.id,
         deviceId: `RELAY:${release.device.fingerprint}`,
         count: 1,
-        startIndex: context.totalPrinted,
+        startIndex: Number(context.totalPrinted ?? 0),
       });
 
       await logAuditEvent({

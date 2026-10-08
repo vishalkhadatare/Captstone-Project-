@@ -5,6 +5,7 @@ import {
   Save,
   CheckCircle2,
   FolderOpen,
+  Trash2,
 } from 'lucide-react';
 import { CompetitiveBlueprintForm, SubjectRule, ExamDetails } from './CompetitiveBlueprintForm';
 import { api } from '../../api';
@@ -120,8 +121,11 @@ export const CompetitiveExaminationUnifiedWorkflow: React.FC<WorkflowProps> = ({
           const storedMatch = storedId ? resp.exams.find((x: any) => x.id === storedId) : null;
           if (storedMatch && !unsavedNewExamIdsRef.current.has(storedId)) {
             applyExamRecordToState(storedMatch);
+          } else if (resp.exams.length > 0) {
+            // Clean fallback: targetId/storedId was deleted, select first available valid exam
+            applyExamRecordToState(resp.exams[0]);
           } else {
-            // Treat current targetId as a clean new exam rather than overwriting with resp.exams[0]
+            // Treat current targetId as a clean new exam
             unsavedNewExamIdsRef.current.add(targetId);
           }
         }
@@ -287,6 +291,40 @@ export const CompetitiveExaminationUnifiedWorkflow: React.FC<WorkflowProps> = ({
     setTimeout(() => setSaveBannerMessage(null), 4000);
   };
 
+  const [isDeletingExam, setIsDeletingExam] = useState(false);
+
+  const handleDeleteActiveExam = async () => {
+    if (!activeExamId || !isCurrentExamSaved) return;
+    const examName = examDetails.name || activeExamId;
+    const confirmed = window.confirm(
+      `Are you sure you want to delete "${examName}" (${activeExamId})? This will permanently remove this examination and its questions/papers.`
+    );
+    if (!confirmed) return;
+
+    setIsDeletingExam(true);
+    try {
+      const resp = await api.competitive.deleteExam(activeExamId);
+      if (resp && resp.success) {
+        setSaveBannerMessage(`Examination "${examName}" deleted successfully.`);
+        setTimeout(() => setSaveBannerMessage(null), 4000);
+        const remaining = existingExams.filter(x => x.id !== activeExamId);
+        if (remaining.length > 0) {
+          await loadExams(remaining[0].id);
+        } else {
+          handleCreateNewExam();
+          await loadExams();
+        }
+      } else {
+        alert(resp?.message || 'Failed to delete examination.');
+      }
+    } catch (err: any) {
+      console.error('Error deleting examination:', err);
+      alert(err.message || 'Failed to delete examination.');
+    } finally {
+      setIsDeletingExam(false);
+    }
+  };
+
   const isCurrentExamSaved = existingExams.some(ex => ex.id === activeExamId);
 
   return (
@@ -359,6 +397,19 @@ export const CompetitiveExaminationUnifiedWorkflow: React.FC<WorkflowProps> = ({
             >
               <Save className="w-3.5 h-3.5" />
               <span>{isSavingExam ? 'Saving...' : isCurrentExamSaved ? 'Update Exam' : 'Save New Exam'}</span>
+            </button>
+          )}
+
+          {isCurrentExamSaved && (
+            <button
+              type="button"
+              disabled={isDeletingExam}
+              onClick={handleDeleteActiveExam}
+              className="px-3.5 py-2 rounded-xl border border-rose-200 bg-rose-50 hover:bg-rose-100 disabled:opacity-50 text-rose-700 font-bold text-xs flex items-center gap-1.5 transition-colors cursor-pointer"
+              title="Delete this examination and its test data"
+            >
+              <Trash2 className="w-3.5 h-3.5 text-rose-600" />
+              <span>{isDeletingExam ? 'Deleting...' : 'Delete Exam'}</span>
             </button>
           )}
 
