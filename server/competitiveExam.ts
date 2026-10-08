@@ -11,6 +11,7 @@ import pdfParse from 'pdf-parse/lib/pdf-parse.js';
 import { getDb, executeQuery, executeRun, getPostgresPool, isPostgresAvailable } from './db.ts';
 import { translateQuestionWithAI, extractQuestionsFromPaperWithAI } from './ai.ts';
 import { extractPdfTextWithOcr } from './ocrPdfHelper.ts';
+import { consumeViewOnceSession } from './viewOnceService.ts';
 
 const execFileAsync = promisify(execFile);
 
@@ -4207,6 +4208,9 @@ export function hydrateCompetitivePaperRow(
     printedBy: activeRow.printed_by || null,
     printedByName: activeRow.printed_by_name || null,
     printCount: Number(activeRow.print_count || 0),
+    previewStatus: activeRow.preview_status || 'NOT_VIEWED',
+    previewConsumedAt: activeRow.preview_consumed_at || null,
+    previewConsumedBy: activeRow.preview_consumed_by || null,
     auditLogs,
   };
 }
@@ -5631,6 +5635,18 @@ export async function handleFinalizeAndEncryptCompetitivePaper(req: Request, res
       ]
     );
 
+    // Permanently consume View-Once preview session on finalization
+    try {
+      consumeViewOnceSession(db, {
+        examType: 'COMPETITIVE',
+        paperId,
+        userId: managerId,
+        userRole: req.user?.role || 'EXAM_MANAGER',
+        reason: 'CONFIRMED_FINALIZE',
+        ipAddress: req.ip,
+      });
+    } catch {}
+
     // Record Audit Log: PAPER_FINALIZED
     logCompetitivePaperAudit(db, {
       paperId: row.id,
@@ -6887,10 +6903,13 @@ export async function handleDownloadCompetitivePaperPdf(req: Request, res: Respo
     const viewerRole = req.user?.role || 'EXAM_MANAGER';
 
     // Enforce time-lock for Centre Operators before unlock time
+    if (!encState.isFinalized) {
+      return res.status(403).json({
+        error: 'PDF Download is strictly disabled during View-Once verification. Please complete verification and finalize the paper first.',
+      });
+    }
+
     if (viewerRole === 'CENTRE_OPERATOR') {
-      if (!encState.isFinalized) {
-        return res.status(400).json({ error: 'This Competitive Exam paper has not been finalized yet.' });
-      }
       const unlockMs = row.decryption_time_iso ? new Date(row.decryption_time_iso).getTime() : NaN;
       if (isNaN(unlockMs) || encState.serverTimestampMs < unlockMs) {
         return res.status(403).json({

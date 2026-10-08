@@ -52,7 +52,10 @@ models/
 NaviDC-OCR/outputs/
 *.safetensors
 *.bin
+*.pt
 .cache/
+public/competitive_visuals/*
+!public/competitive_visuals/.gitkeep
 
 # Generated questions and test suites
 test_results/

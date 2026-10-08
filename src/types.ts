@@ -1285,3 +1285,59 @@ export interface PrintAnywhereResponse {
   txHash: string;
 }
 
+// ============================================================================
+// VIEW-ONCE PREVIEW TYPES (ONE-TIME VERIFICATION SECURITY)
+// ============================================================================
+export type ViewOnceStatus = 'NOT_VIEWED' | 'VIEWING' | 'CONSUMED';
+
+export interface ViewOnceStatusResponse {
+  previewStatus: ViewOnceStatus;
+  canView: boolean;
+  paperId: string;
+  examId: string;
+  examType: 'COMPETITIVE' | 'UNIVERSITY';
+  activeSessionToken?: string;
+  remainingSeconds?: number;
+  consumedAt?: string | null;
+  consumedBy?: string | null;
+  consumedReason?: string | null;
+  startedAt?: string | null;
+  expiresAt?: string | null;
+}
+
+export interface StartViewOnceRequest {
+  examType: 'COMPETITIVE' | 'UNIVERSITY';
+  examId: string;
+  paperId: string;
+  browserInfo?: any;
+  durationSeconds?: number;
+  requestSessionToken?: string;
+}
+
+export interface StartViewOnceResponse {
+  success: boolean;
+  status: ViewOnceStatus;
+  sessionToken?: string;
+  startedAt?: string;
+  expiresAt?: string;
+  durationSeconds?: number;
+  paper?: any;
+  error?: string;
+}
+
+export interface ConsumeViewOnceRequest {
+  examType: 'COMPETITIVE' | 'UNIVERSITY';
+  paperId: string;
+  sessionToken?: string;
+  reason: 'USER_CLOSED' | 'CONFIRMED_FINALIZE' | 'CANCELLED' | 'EXPIRED' | 'SECURITY_DEFOCUS' | string;
+}
+
+export interface ConsumeViewOnceResponse {
+  success: boolean;
+  status: ViewOnceStatus;
+  consumedAt: string;
+  reason: string;
+  error?: string;
+}
+
+

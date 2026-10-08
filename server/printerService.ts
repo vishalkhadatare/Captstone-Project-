@@ -348,3 +348,4 @@ function mapJobRow(r: any): PrintAnywhereJobRecord {
     createdAt: r.created_at,
   };
 }
+

@@ -45,6 +45,11 @@ import {
   PrintAnywhereJob,
   PrintAnywhereRequest,
   PrintAnywhereResponse,
+  ViewOnceStatusResponse,
+  StartViewOnceRequest,
+  StartViewOnceResponse,
+  ConsumeViewOnceRequest,
+  ConsumeViewOnceResponse,
 } from './types';
 
 export const DEVICE_APPROVAL_EVENT = 'zeroleak:device-approval-needed';
@@ -1137,6 +1142,32 @@ export const api = {
     }),
   executePrintAnywhere: (payload: PrintAnywhereRequest) =>
     request<PrintAnywhereResponse>('/api/delivery/print-anywhere', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    }),
+
+  // Secure View-Once Paper Preview (One-Time Verification)
+  getViewOnceStatus: (examType: 'COMPETITIVE' | 'UNIVERSITY', paperId: string) =>
+    request<ViewOnceStatusResponse>(`/api/delivery/view-once/status/${encodeURIComponent(examType)}/${encodeURIComponent(paperId)}`),
+  startViewOnce: (payload: StartViewOnceRequest) =>
+    request<StartViewOnceResponse>('/api/delivery/view-once/start', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    }),
+  consumeViewOnce: (payload: ConsumeViewOnceRequest) =>
+    request<ConsumeViewOnceResponse>('/api/delivery/view-once/consume', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    }),
+  recordViewOnceSecurityEvent: (payload: {
+    examType: 'COMPETITIVE' | 'UNIVERSITY';
+    examId: string;
+    paperId: string;
+    sessionToken: string;
+    eventType: string;
+    details?: any;
+  }) =>
+    request<{ success: boolean }>('/api/delivery/view-once/security-event', {
       method: 'POST',
       body: JSON.stringify(payload),
     }),

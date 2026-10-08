@@ -186,6 +186,7 @@ import {
   evaluatePaperEncryptionState,
   decryptCompetitivePaperData,
   logCompetitivePaperAudit,
+  hydrateCompetitivePaperRow,
 } from './server/competitiveExam.ts';
 import {
   DEFAULT_CENTRE_PRINTERS,
@@ -199,6 +200,13 @@ import {
   type PrinterDevice,
   type PrintAnywhereJobRecord,
 } from './server/printerService.ts';
+import {
+  initViewOnceSchema,
+  getViewOnceStatus,
+  startViewOnceSession,
+  consumeViewOnceSession,
+  recordViewOnceSecurityEvent,
+} from './server/viewOnceService.ts';
 
 const configuredJwtSecret = process.env.JWT_SECRET;
 if (process.env.NODE_ENV === 'production' && (!configuredJwtSecret || configuredJwtSecret.length < 32)) {
@@ -10978,6 +10986,232 @@ async function startServer() {
   });
 
   // =========================================================================
+  // 7C. SECURE VIEW-ONCE PREVIEW (ONE-TIME VERIFICATION ENGINE)
+  // =========================================================================
+
+  // 1. Get View-Once Status
+  app.get('/api/delivery/view-once/status/:examType/:paperId', authenticateToken, async (req: Request, res: Response) => {
+    try {
+      const db = await getDb();
+      const examType = (req.params.examType?.toUpperCase() === 'COMPETITIVE' ? 'COMPETITIVE' : 'UNIVERSITY') as 'COMPETITIVE' | 'UNIVERSITY';
+      const paperId = req.params.paperId;
+      const status = getViewOnceStatus(db, examType, paperId);
+      return res.json(status);
+    } catch (err: any) {
+      console.error('Error fetching View-Once status:', err);
+      return res.status(500).json({ error: err.message || 'Failed to fetch View-Once status.' });
+    }
+  });
+
+  // 2. Start Secure View-Once Session
+  app.post('/api/delivery/view-once/start', authenticateToken, requireRole(['EXAM_MANAGER', 'ORG_OWNER']), async (req: Request, res: Response) => {
+    try {
+      const db = await getDb();
+      const {
+        examType,
+        examId,
+        paperId,
+        browserInfo,
+        durationSeconds,
+        requestSessionToken,
+      } = req.body || {};
+
+      if (!paperId || !examId) {
+        return res.status(400).json({ error: 'paperId and examId are required to start View-Once session.' });
+      }
+
+      const category = (examType?.toUpperCase() === 'COMPETITIVE' ? 'COMPETITIVE' : 'UNIVERSITY') as 'COMPETITIVE' | 'UNIVERSITY';
+
+      const sessionResult = startViewOnceSession(db, {
+        examType: category,
+        examId,
+        paperId,
+        userId: req.user!.id,
+        userRole: req.user!.role,
+        browserInfo,
+        ipAddress: req.ip,
+        durationSeconds: Number(durationSeconds) || 900,
+        requestSessionToken,
+      });
+
+      if (!sessionResult.success) {
+        await logAuditEvent({
+          event_type: 'VIEW_ONCE_PREVIEW_BLOCKED',
+          user_id: req.user!.id,
+          user_email: req.user!.email,
+          role: req.user!.role,
+          org_id: req.user!.org_id,
+          exam_id: examId,
+          ip_address: req.ip,
+          status: 'BLOCKED',
+          details: {
+            paperId,
+            examType: category,
+            reason: sessionResult.error,
+          },
+        });
+
+        return res.status(sessionResult.statusCode || 403).json({
+          error: sessionResult.error,
+          previewStatus: sessionResult.status,
+        });
+      }
+
+      // Safe hydration of paper payload ONLY upon verified session creation
+      let paperPayload: any = null;
+      if (category === 'COMPETITIVE') {
+        const compRows = executeQuery(db, 'SELECT * FROM competitive_generated_papers WHERE id = ?', [paperId]);
+        if (compRows && compRows[0]) {
+          paperPayload = hydrateCompetitivePaperRow(db, compRows[0], undefined, {
+            viewerRole: req.user!.role,
+            includeDecryptedForOperator: true,
+          });
+        }
+      } else {
+        const uniRows = executeQuery(db, 'SELECT * FROM university_generated_papers WHERE id = ? OR exam_id = ? ORDER BY created_at DESC', [paperId, examId]);
+        if (uniRows && uniRows[0]) {
+          paperPayload = uniRows[0];
+        }
+      }
+
+      // Log successful start in immutable audit log
+      await logAuditEvent({
+        event_type: 'VIEW_ONCE_PREVIEW_STARTED',
+        user_id: req.user!.id,
+        user_email: req.user!.email,
+        role: req.user!.role,
+        org_id: req.user!.org_id,
+        exam_id: examId,
+        ip_address: req.ip,
+        status: 'SUCCESS',
+        details: {
+          paperId,
+          examType: category,
+          sessionToken: sessionResult.sessionToken,
+          expiresAt: sessionResult.expiresAt,
+          durationSeconds: sessionResult.durationSeconds,
+          browserInfo,
+        },
+      });
+
+      return res.json({
+        ...sessionResult,
+        paper: paperPayload,
+      });
+    } catch (err: any) {
+      console.error('Error starting View-Once session:', err);
+      return res.status(500).json({ error: err.message || 'Failed to start View-Once session.' });
+    }
+  });
+
+  // 3. Consume Secure View-Once Session
+  app.post('/api/delivery/view-once/consume', authenticateToken, requireRole(['EXAM_MANAGER', 'ORG_OWNER']), async (req: Request, res: Response) => {
+    try {
+      const db = await getDb();
+      const {
+        examType,
+        paperId,
+        sessionToken,
+        reason,
+      } = req.body || {};
+
+      if (!paperId) {
+        return res.status(400).json({ error: 'paperId is required to consume View-Once session.' });
+      }
+
+      const category = (examType?.toUpperCase() === 'COMPETITIVE' ? 'COMPETITIVE' : 'UNIVERSITY') as 'COMPETITIVE' | 'UNIVERSITY';
+
+      const consumeResult = consumeViewOnceSession(db, {
+        examType: category,
+        paperId,
+        sessionToken,
+        userId: req.user!.id,
+        userRole: req.user!.role,
+        reason: reason || 'USER_CLOSED',
+        ipAddress: req.ip,
+      });
+
+      await logAuditEvent({
+        event_type: 'VIEW_ONCE_PREVIEW_CONSUMED',
+        user_id: req.user!.id,
+        user_email: req.user!.email,
+        role: req.user!.role,
+        org_id: req.user!.org_id,
+        ip_address: req.ip,
+        status: 'SUCCESS',
+        details: {
+          paperId,
+          examType: category,
+          sessionToken,
+          reason: consumeResult.reason,
+          consumedAt: consumeResult.consumedAt,
+        },
+      });
+
+      return res.json(consumeResult);
+    } catch (err: any) {
+      console.error('Error consuming View-Once session:', err);
+      return res.status(500).json({ error: err.message || 'Failed to consume View-Once session.' });
+    }
+  });
+
+  // 4. Record View-Once Security Event
+  app.post('/api/delivery/view-once/security-event', authenticateToken, async (req: Request, res: Response) => {
+    try {
+      const db = await getDb();
+      const {
+        examType,
+        examId,
+        paperId,
+        sessionToken,
+        eventType,
+        details,
+      } = req.body || {};
+
+      if (!sessionToken || !paperId) {
+        return res.status(400).json({ error: 'sessionToken and paperId are required.' });
+      }
+
+      const category = (examType?.toUpperCase() === 'COMPETITIVE' ? 'COMPETITIVE' : 'UNIVERSITY') as 'COMPETITIVE' | 'UNIVERSITY';
+
+      const eventResult = recordViewOnceSecurityEvent(db, {
+        sessionToken,
+        paperId,
+        examId: examId || '',
+        examType: category,
+        userId: req.user!.id,
+        userRole: req.user!.role,
+        eventType: eventType || 'SECURITY_INTERCEPTION',
+        details,
+        ipAddress: req.ip,
+      });
+
+      await logAuditEvent({
+        event_type: 'SCREENSHOT_OR_CAPTURE_DETECTED',
+        user_id: req.user!.id,
+        user_email: req.user!.email,
+        role: req.user!.role,
+        org_id: req.user!.org_id,
+        exam_id: examId || '',
+        ip_address: req.ip,
+        status: 'WARNING',
+        details: {
+          paperId,
+          examType: category,
+          sessionToken,
+          eventType,
+          violationDetails: details,
+        },
+      });
+
+      return res.json(eventResult);
+    } catch (err: any) {
+      console.error('Error recording security event:', err);
+      return res.status(500).json({ error: err.message || 'Failed to record security event.' });
+    }
+  });
+
+  // =========================================================================
   // 7B. WI-FI SECURE PRINT RELAY
   //
   // Controlled printing used to be trapped on the operator's own workstation:
@@ -13812,6 +14046,8 @@ async function startServer() {
       console.log('[ZeroLeak Startup] 4/6 Cleaning legacy questions...');
       const db = await getDb();
       await initializeCompetitiveSchema(db);
+      initPrintAnywhereSchema(db);
+      initViewOnceSchema(db);
       cleanLegacyDummyQuestions(db);
       saveDb();
       console.log('[ZeroLeak Startup] 5/6 Database initialization complete.');

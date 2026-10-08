@@ -19,9 +19,12 @@ import {
   ShieldCheck,
   Download,
   Printer,
+  Eye,
+  ShieldAlert,
 } from 'lucide-react';
 import { api } from '../../api';
 import { CompetitivePrintExaminationPaper } from './CompetitivePrintExaminationPaper';
+import { ViewOncePaperPreviewModal } from '../ViewOncePaperPreviewModal';
 
 export interface UploadedSubjectPdf {
   id: string;
@@ -221,6 +224,71 @@ export const CompetitiveBlueprintForm: React.FC<BlueprintFormProps> = ({
   const [isGeneratingFinalBilingual, setIsGeneratingFinalBilingual] = useState(false);
   const [isDownloadingPdf, setIsDownloadingPdf] = useState(false);
   const [isPrintingPaper, setIsPrintingPaper] = useState(false);
+
+  // Secure View-Once Preview State
+  const [isViewOnceModalOpen, setIsViewOnceModalOpen] = useState(false);
+  const [viewOnceSessionToken, setViewOnceSessionToken] = useState<string | null>(null);
+  const [viewOnceDurationSeconds, setViewOnceDurationSeconds] = useState<number>(900);
+  const [isLoadingViewOnce, setIsLoadingViewOnce] = useState(false);
+  const [viewOnceError, setViewOnceError] = useState<string | null>(null);
+
+  const handleStartViewOncePreview = async () => {
+    if (!generatedPaper?.id) return;
+    setIsLoadingViewOnce(true);
+    setViewOnceError(null);
+    try {
+      const resp = await api.startViewOnce({
+        examType: 'COMPETITIVE',
+        examId: examDetails.id || examId,
+        paperId: generatedPaper.id,
+        browserInfo: {
+          userAgent: navigator.userAgent,
+          screen: `${window.screen.width}x${window.screen.height}`,
+        },
+      });
+      if (resp.success && resp.sessionToken) {
+        setViewOnceSessionToken(resp.sessionToken);
+        setViewOnceDurationSeconds(resp.durationSeconds || 900);
+        if (resp.paper) {
+          setGeneratedPaper((prev: any) => ({
+            ...prev,
+            ...resp.paper,
+            previewStatus: 'VIEWING',
+          }));
+        }
+        setIsViewOnceModalOpen(true);
+      } else {
+        setViewOnceError(resp.error || 'Failed to start View-Once session.');
+      }
+    } catch (err: any) {
+      setViewOnceError(err.message || 'Error starting View-Once session.');
+    } finally {
+      setIsLoadingViewOnce(false);
+    }
+  };
+
+  const handleViewOnceClose = (reason: 'CONFIRMED_FINALIZE' | 'USER_CLOSED' | 'CANCELLED' | 'EXPIRED') => {
+    setIsViewOnceModalOpen(false);
+    setViewOnceSessionToken(null);
+    setGeneratedPaper((prev: any) => (prev ? { ...prev, previewStatus: 'CONSUMED' } : prev));
+    if (reason === 'CONFIRMED_FINALIZE') {
+      setShowFinalizePanel(true);
+      setFinalizeMsg({
+        type: 'success',
+        text: 'Paper verification confirmed. One-time preview has been safely consumed. Schedule Finalize & Encrypt below.',
+      });
+    } else if (reason === 'EXPIRED') {
+      setFinalizeMsg({
+        type: 'error',
+        text: 'View-Once preview session expired. In accordance with examination security policy, the preview is now locked.',
+      });
+    } else {
+      setFinalizeMsg({
+        type: 'success',
+        text: 'View-Once preview closed and consumed. Paper preview cannot be reopened.',
+      });
+    }
+  };
 
   // Finalize & Encrypt Paper (Centre Delivery & Server Time-Lock) state
   const getTodayLocalYMD = () => {
@@ -1854,6 +1922,29 @@ export const CompetitiveBlueprintForm: React.FC<BlueprintFormProps> = ({
 
               {/* Primary Workflow Actions on the Single Paper Preview */}
               <div className="flex flex-wrap items-center gap-2">
+                {!generatedPaper.isFinalized && (
+                  generatedPaper.previewStatus === 'CONSUMED' ? (
+                    <div
+                      className="px-3.5 py-2 rounded-xl bg-slate-100 border border-slate-300 text-slate-500 text-xs font-bold flex items-center gap-1.5 shadow-2xs"
+                      title="This paper preview has already been viewed and permanently locked."
+                    >
+                      <Lock className="w-3.5 h-3.5 text-slate-400" />
+                      <span>Preview Consumed (Locked)</span>
+                    </div>
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={handleStartViewOncePreview}
+                      disabled={isLoadingViewOnce}
+                      className="px-3.5 py-2 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white text-xs font-bold flex items-center gap-1.5 shadow-sm transition-all cursor-pointer disabled:opacity-50"
+                      title="Open secure one-time preview session for paper verification"
+                    >
+                      <Eye className={`w-3.5 h-3.5 ${isLoadingViewOnce ? 'animate-spin' : ''}`} />
+                      <span>{isLoadingViewOnce ? 'Starting Session...' : 'View Once Preview'}</span>
+                    </button>
+                  )
+                )}
+
                 <button
                   type="button"
                   onClick={() => setShowFinalizePanel(prev => !prev)}
@@ -1874,8 +1965,13 @@ export const CompetitiveBlueprintForm: React.FC<BlueprintFormProps> = ({
                 <button
                   type="button"
                   onClick={handleDownloadPaperPdf}
-                  disabled={isDownloadingPdf}
-                  className="px-3.5 py-2 rounded-xl bg-emerald-700 hover:bg-emerald-800 disabled:opacity-60 text-white text-xs font-bold flex items-center gap-1.5 shadow-2xs transition-colors cursor-pointer"
+                  disabled={!generatedPaper.isFinalized || isDownloadingPdf}
+                  className="px-3.5 py-2 rounded-xl bg-slate-100 hover:bg-slate-200 disabled:opacity-40 text-slate-700 text-xs font-bold flex items-center gap-1.5 shadow-2xs transition-colors cursor-pointer disabled:cursor-not-allowed"
+                  title={
+                    !generatedPaper.isFinalized
+                      ? 'PDF Download is strictly disabled during View-Once verification. Please finalize the paper first.'
+                      : 'Download encrypted examination package'
+                  }
                 >
                   <Download className={`w-3.5 h-3.5 ${isDownloadingPdf ? 'animate-bounce' : ''}`} />
                   <span>{isDownloadingPdf ? 'Downloading PDF...' : 'Download PDF'}</span>
@@ -1884,8 +1980,13 @@ export const CompetitiveBlueprintForm: React.FC<BlueprintFormProps> = ({
                 <button
                   type="button"
                   onClick={handlePrintSinglePaper}
-                  disabled={isPrintingPaper}
-                  className="px-3.5 py-2 rounded-xl border border-slate-300 bg-white hover:bg-slate-50 disabled:opacity-60 text-slate-900 text-xs font-bold flex items-center gap-1.5 shadow-2xs transition-colors cursor-pointer"
+                  disabled={!generatedPaper.isFinalized || isPrintingPaper}
+                  className="px-3.5 py-2 rounded-xl border border-slate-300 bg-white hover:bg-slate-50 disabled:opacity-40 text-slate-900 text-xs font-bold flex items-center gap-1.5 shadow-2xs transition-colors cursor-pointer disabled:cursor-not-allowed"
+                  title={
+                    !generatedPaper.isFinalized
+                      ? 'Printing is disabled during verification. Controlled printing is available only at examination centre via Print Anywhere.'
+                      : 'Print Paper'
+                  }
                 >
                   <Printer className="w-3.5 h-3.5" />
                   <span>{isPrintingPaper ? 'Preparing Print...' : 'Print Paper'}</span>
@@ -2274,10 +2375,109 @@ export const CompetitiveBlueprintForm: React.FC<BlueprintFormProps> = ({
             )}
           </div>
 
-          {/* SINGLE UNIQUE INSTITUTIONAL PAPER PREVIEW INSTANCE */}
-          <div id="competitive-single-paper-document">
-            <CompetitivePrintExaminationPaper paper={generatedPaper} />
-          </div>
+          {/* ========================================================================= */}
+          {/* 5. SECURE VIEW-ONCE VERIFICATION PREVIEW & FINAL ENCRYPTION STATUS        */}
+          {/* ========================================================================= */}
+          {generatedPaper.isFinalized ? (
+            <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm space-y-4">
+              <div className="flex items-center gap-3">
+                <div className="p-2.5 rounded-xl bg-emerald-50 text-emerald-700 border border-emerald-200">
+                  <ShieldCheck className="w-5 h-5" />
+                </div>
+                <div>
+                  <h4 className="text-sm font-bold text-slate-900">
+                    Stage 2 &bull; Cryptographically Finalized &amp; Encrypted Paper
+                  </h4>
+                  <p className="text-xs text-slate-500 mt-0.5">
+                    AES-256-GCM sealed with time-lock schedule. Printing is authorized only at {generatedPaper.assignedCentreCode || 'the assigned Centre'} after {generatedPaper.decryptionTimeDisplay || 'Unlock Time'}.
+                  </p>
+                </div>
+              </div>
+            </div>
+          ) : generatedPaper.previewStatus === 'CONSUMED' ? (
+            <div className="bg-slate-900 border-2 border-slate-700 p-8 rounded-2xl text-center space-y-3.5 text-white shadow-md">
+              <div className="w-12 h-12 rounded-2xl bg-amber-500/20 text-amber-400 border border-amber-500/40 flex items-center justify-center mx-auto">
+                <Lock className="w-6 h-6" />
+              </div>
+              <div className="space-y-1">
+                <span className="px-3 py-0.5 rounded-full text-[10px] font-mono font-bold bg-amber-500/20 text-amber-300 border border-amber-500/40 uppercase">
+                  VERIFICATION COMPLETE &bull; PREVIEW CONSUMED
+                </span>
+                <h4 className="text-base font-bold text-white pt-1">
+                  View-Once Preview Has Been Safely Consumed
+                </h4>
+                <p className="text-xs text-slate-300 max-w-lg mx-auto">
+                  In accordance with ZeroLeak security policy, generated examination papers can only be viewed once for verification. This preview is permanently locked and cannot be reopened.
+                </p>
+              </div>
+              <p className="text-[11px] text-slate-400">
+                Verified: {generatedPaper.previewConsumedAt ? new Date(generatedPaper.previewConsumedAt).toLocaleString() : 'Completed'} &bull; Proceed to <strong>Finalize &amp; Encrypt</strong> to prepare the paper for centre distribution.
+              </p>
+              <div className="pt-2">
+                <button
+                  type="button"
+                  onClick={() => setShowFinalizePanel(true)}
+                  className="px-5 py-2.5 rounded-xl bg-slate-100 hover:bg-white text-slate-900 font-bold text-xs inline-flex items-center gap-2 cursor-pointer shadow-sm transition-all"
+                >
+                  <Lock className="w-4 h-4 text-emerald-600" />
+                  <span>Configure Finalize &amp; Encrypt Schedule</span>
+                </button>
+              </div>
+            </div>
+          ) : (
+            <div className="bg-slate-900 border-2 border-slate-700 p-8 rounded-2xl text-center space-y-4 text-white shadow-md">
+              <div className="w-12 h-12 rounded-2xl bg-emerald-500/20 text-emerald-400 border border-emerald-500/40 flex items-center justify-center mx-auto">
+                <Eye className="w-6 h-6" />
+              </div>
+              <div className="space-y-1.5">
+                <span className="px-3 py-0.5 rounded-full text-[10px] font-mono font-bold bg-amber-500/20 text-amber-300 border border-amber-500/40 uppercase">
+                  STAGE 1 &bull; VIEW-ONCE VERIFICATION MODE
+                </span>
+                <h4 className="text-base font-bold text-white pt-1">
+                  Paper Generated &bull; Ready for One-Time Verification
+                </h4>
+                <p className="text-xs text-amber-200/90 max-w-xl mx-auto font-medium">
+                  &ldquo;This paper preview can be viewed only once for verification. After closing this preview, it cannot be opened again.&rdquo;
+                </p>
+              </div>
+              <p className="text-[11px] text-slate-400 max-w-md mx-auto">
+                Launch the secure verification session to check questions, sections, formatting, diagrams, tables, and marks. Downloading and printing are disabled.
+              </p>
+              <div className="pt-1">
+                <button
+                  type="button"
+                  onClick={handleStartViewOncePreview}
+                  disabled={isLoadingViewOnce}
+                  className="px-6 py-3 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white font-bold text-xs inline-flex items-center gap-2 shadow-lg cursor-pointer transition-all disabled:opacity-50"
+                >
+                  <Eye className={`w-4 h-4 ${isLoadingViewOnce ? 'animate-spin' : ''}`} />
+                  <span>{isLoadingViewOnce ? 'Starting Secure Session...' : 'Launch View-Once Preview'}</span>
+                </button>
+              </div>
+              {viewOnceError && (
+                <p className="text-xs text-rose-400 font-bold">{viewOnceError}</p>
+              )}
+            </div>
+          )}
+
+          {/* Dedicated View-Once Paper Preview Modal Wrapper */}
+          {isViewOnceModalOpen && viewOnceSessionToken && (
+            <ViewOncePaperPreviewModal
+              examType="COMPETITIVE"
+              examId={examDetails.id || examId}
+              paperId={generatedPaper.id}
+              paperTitle={generatedPaper.title || 'Competitive Examination Paper'}
+              sessionToken={viewOnceSessionToken}
+              durationSeconds={viewOnceDurationSeconds}
+              currentUser={null}
+              onClose={handleViewOnceClose}
+              onConfirmFinalize={() => {
+                setShowFinalizePanel(true);
+              }}
+            >
+              <CompetitivePrintExaminationPaper paper={generatedPaper} />
+            </ViewOncePaperPreviewModal>
+          )}
         </div>
       )}
     </div>
